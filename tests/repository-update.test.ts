@@ -147,7 +147,7 @@ test("web and desktop builds embed the same commit-aware identity", () => {
   assert.match(nuxtConfig, /createBuildIdentity/);
   assert.match(nuxtConfig, /VERCEL_GIT_COMMIT_SHA/);
   assert.match(nuxtConfig, /GITHUB_SHA/);
-  assert.match(nuxtConfig, /appBuild: buildIdentity/);
+  assert.match(nuxtConfig, /appBuild:\s*\{\s*\.\.\.buildIdentity/);
   assert.match(desktopNuxtConfig, /createBuildIdentity/);
   assert.match(desktopNuxtConfig, /appBuild: buildIdentity/);
   assert.match(settings, /commit\s+\{\{\s*appBuild\.shortCommit/);

@@ -296,16 +296,23 @@ export function collectOutboundAudioStats(
   };
 }
 
+export interface RtcStatsSource {
+  getStats: () => Promise<unknown>;
+  connectionState?: string;
+  iceConnectionState?: string;
+  iceGatheringState?: string;
+  signalingState?: string;
+}
+
 export async function collectPeerConnectionStats(
-  pc: RTCPeerConnection,
+  pc: RtcStatsSource,
   kind: string,
 ) {
   const report = await pc.getStats();
   const byId = new Map<string, StatsRecord>();
-  report.forEach((rawStat) => {
-    const stat = rawStat as StatsRecord;
+  for (const stat of reportValues(report)) {
     if (typeof stat.id === "string") byId.set(stat.id, stat);
-  });
+  }
   const transport = [...byId.values()].find(
     (stat) => stat.type === "transport" && stat.selectedCandidatePairId,
   );
@@ -390,9 +397,9 @@ export async function collectPeerConnectionStats(
   return {
     kind,
     pcStates: {
-      connectionState: pc.connectionState,
-      iceConnectionState: pc.iceConnectionState,
-      signalingState: pc.signalingState,
+      connectionState: pc.connectionState || "unknown",
+      iceConnectionState: pc.iceConnectionState || "unknown",
+      signalingState: pc.signalingState || "unknown",
     },
     candidatePair: pair
       ? {
@@ -426,19 +433,19 @@ export async function collectPeerConnectionStats(
 }
 
 export async function collectPeerConnectionDiagnosticStats(
-  pc: RTCPeerConnection,
+  pc: RtcStatsSource,
   kind: string,
 ) {
   const report = await pc.getStats();
   return {
     kind,
     pcStates: {
-      connectionState: pc.connectionState,
-      iceConnectionState: pc.iceConnectionState,
-      iceGatheringState: pc.iceGatheringState,
-      signalingState: pc.signalingState,
+      connectionState: pc.connectionState || "unknown",
+      iceConnectionState: pc.iceConnectionState || "unknown",
+      iceGatheringState: pc.iceGatheringState || "unknown",
+      signalingState: pc.signalingState || "unknown",
     },
-    stats: [...report.values()].map((stat) => ({ ...stat })),
+    stats: reportValues(report).map((stat) => ({ ...stat })),
   };
 }
 

@@ -163,7 +163,7 @@ export async function requireRoomPermission(
 export async function seedRoomRoles(
   room: AuthorizationRoom,
   ownerId: string,
-  database: typeof db = db,
+  database: Pick<typeof db, "insert"> = db,
 ) {
   const roleTemplates = DEFAULT_ROLE_TEMPLATES;
   const createdRoles = await database

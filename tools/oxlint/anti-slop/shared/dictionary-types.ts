@@ -26,7 +26,7 @@ type ResolvedType = {
 
 export type UnsafeDictionary = {
   readonly kind: "unsafe-dictionary";
-  readonly unsafeValue: "any" | "empty-object" | "object" | "union" | "unknown";
+  readonly unsafeValue: "any" | "empty-object" | "object" | "union";
 };
 
 export type WideningTargetKind =
@@ -212,7 +212,7 @@ function unsafeDirectValue(
   resolvingAliases: ReadonlySet<string>,
 ): UnsafeDictionary["unsafeValue"] | null {
   const unwrapped = unwrapTransparentType(type);
-  if (unwrapped.type === "TSUnknownKeyword") return "unknown";
+  if (unwrapped.type === "TSUnknownKeyword") return null;
   if (unwrapped.type === "TSAnyKeyword") return "any";
   if (unwrapped.type === "TSObjectKeyword") return "object";
   if (

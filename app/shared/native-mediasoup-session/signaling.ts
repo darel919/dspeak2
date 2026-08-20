@@ -15,6 +15,7 @@ import type {
   NativeCloudflareSessionLike,
   NativeMediasoupSfuSessionSurface,
 } from "../types/native-mediasoup-session.ts";
+import type { SignalingMessage } from "../types/media-signaling.ts";
 
 import { CLOUDFLARE_REQUEST_TIMEOUT_MS } from "./helpers.ts";
 export class NativeMediasoupSignalingMethods {
@@ -54,7 +55,7 @@ export class NativeMediasoupSignalingMethods {
     if (this.cloudflareSession) return this.cloudflareSession;
     this.cloudflareSession = new NativeCloudflareRealtimeSession({
       invoke: this.invoke,
-      send: (message: unknown) => this.signaling?.send?.(message),
+      send: (message: SignalingMessage) => this.signaling?.send?.(message),
       ensureControlReady: async () => {
         await this.signaling?.waitForReady?.();
       },

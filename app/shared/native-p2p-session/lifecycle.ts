@@ -850,7 +850,7 @@ export class NativeP2pSessionLifecycleMethods {
   }
 
   _emitState(this: NativeP2pSessionSurface) {
-    this.onStateChange?.(this as unknown as Record<string, unknown>);
+    this.onStateChange?.(this);
   }
 }
 

@@ -1,27 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ref } from "vue";
 import {
   RemoteMediaRegistry,
   type RemoteMediaRegistryOptions,
 } from "../app/shared/remote-media-registry.ts";
-import type { Ref } from "vue";
 import type { RemoteMediaEntry } from "../app/shared/types/hybrid-media-registry.ts";
-
-type FakeVideoTrack = {
-  id: string;
-  kind: "video";
-  enabled: boolean;
-};
+import { FakeMediaStream, FakeMediaStreamTrack } from "./helpers/fake-media.ts";
 
 function createVideoRegistry(
   options: Partial<RemoteMediaRegistryOptions> = {},
 ) {
-  const videoFeeds = {
-    value: new Map<string, RemoteMediaEntry>(),
-  } as unknown as Ref<Map<string, RemoteMediaEntry>>;
-  const audioFeeds = {
-    value: new Map<string, RemoteMediaEntry>(),
-  } as unknown as Ref<Map<string, RemoteMediaEntry>>;
+  const videoFeeds = ref(new Map<string, RemoteMediaEntry>());
+  const audioFeeds = ref(new Map<string, RemoteMediaEntry>());
   const registry = new RemoteMediaRegistry({
     audioFeeds,
     videoFeeds,
@@ -30,40 +21,29 @@ function createVideoRegistry(
     isDeafened: () => false,
     isBroadcastMode: () => false,
     onSpeaking: () => {},
+    onVideoReceivingChange: () => {},
+    onPlaybackState: () => {},
+    onEffectiveGain: () => {},
     ...options,
-  } as RemoteMediaRegistryOptions);
+  });
   return { registry, videoFeeds };
 }
 
-function stream(track: FakeVideoTrack) {
-  const tracks = [track];
-  return {
-    getTracks: () => [...tracks],
-    removeTrack: (current: FakeVideoTrack) =>
-      tracks.splice(tracks.indexOf(current), 1),
-    addTrack: (current: FakeVideoTrack) => tracks.push(current),
-  } as unknown as MediaStream;
-}
-
 function entry(overrides: Partial<RemoteMediaEntry> = {}): RemoteMediaEntry {
-  const track = (overrides.track as FakeVideoTrack | undefined) || {
-    id: "track-a",
-    kind: "video" as const,
-    enabled: true,
-  };
+  const track = overrides.track || new FakeMediaStreamTrack("video", "track-a");
   return {
     key: "remote:user-1:camera",
     provider: "sfu",
     userId: "user-1",
     peerId: "peer-1",
     source: "camera",
-    track: track as unknown as MediaStreamTrack,
-    stream: overrides.stream || stream(track),
+    track,
+    stream: overrides.stream || new FakeMediaStream([track]),
     consumerId: "consumer-a",
     connectionEpoch: 4,
     sourceGeneration: 12,
     ...overrides,
-  } as RemoteMediaEntry;
+  };
 }
 
 test("registry bind reaches transport-connected for a real remote track", () => {
@@ -132,11 +112,7 @@ test("old stats and frame evidence cannot mutate a replacement receiver", () => 
     .receiverIncarnationId;
   assert.ok(oldToken);
   const replacement = entry({
-    track: {
-      id: "track-b",
-      kind: "video",
-      enabled: true,
-    } as unknown as MediaStreamTrack,
+    track: new FakeMediaStreamTrack("video", "track-b"),
     consumerId: "consumer-b",
   });
   registry.bind(replacement);
@@ -174,8 +150,7 @@ test("old recovery completion cannot mutate a replacement receiver", async () =>
   oldState.stallState.recoveryAttempt = 1;
   const recovery = registry.runReceiverRecovery(oldEntry.key, oldToken);
   registry.bind(entry({ consumerId: "consumer-replacement" }));
-  const finishRecovery = resolveRecovery as unknown as (value: boolean) => void;
-  finishRecovery(false);
+  resolveRecovery(false);
   await recovery;
   assert.equal(
     registry.getConvergenceState(oldEntry.key)?.incarnation.consumerId,
@@ -222,8 +197,7 @@ test("RTP resumption cancels a late recovery attempt", async () => {
     packetsReceived: 30,
     framesDecoded: 3,
   });
-  const finishRecovery = resolveRecovery as unknown as (value: boolean) => void;
-  finishRecovery(false);
+  resolveRecovery(false);
   await recovery;
   assert.equal(registry.getConvergenceState(current.key)?.phase, "renderable");
   assert.equal(
@@ -288,8 +262,7 @@ test("decoder recovery waits for decode progression and ignores packet-only prog
     framesDecoded: 3,
   });
   assert.equal(state.stallState.detected, false);
-  const finishRecovery = resolveRecovery as unknown as (value: boolean) => void;
-  finishRecovery(false);
+  resolveRecovery(false);
   await recovery;
   assert.equal(state.phase, "renderable");
   registry.clear();

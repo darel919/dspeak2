@@ -42,36 +42,6 @@ export class NativeMediasoupDiagnosticsMethods {
     };
   }
 
-  get joinReady() {
-    return (this as unknown as NativeMediasoupSfuSession).connectionState()
-      .ready;
-  }
-
-  get transportReady() {
-    if (this.selectedProvider === "cloudflare-realtime")
-      return Boolean(
-        this.cloudflareSession?.handle && this.cloudflareSession?.sessionId,
-      );
-    return Boolean(this.sendTransport && this.recvTransport);
-  }
-
-  get iceConnectedBoth() {
-    if (this.selectedProvider === "cloudflare-realtime")
-      return this.cloudflareSession?.connectionState?.().ready === true;
-    return (
-      this.transportStates.get("send") === "connected" &&
-      this.transportStates.get("recv") === "connected"
-    );
-  }
-
-  get isProducing() {
-    return this.producers.size > 0 || this.producerVariants.size > 0;
-  }
-
-  get remoteProducersCount() {
-    return this.consumers.size;
-  }
-
   getState(this: NativeMediasoupSfuSession) {
     return this.mediaConnectionState;
   }
@@ -114,7 +84,8 @@ export class NativeMediasoupDiagnosticsMethods {
   async diagnosticStats(this: NativeMediasoupSfuSession) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.diagnosticStats?.() || [];
-    const stats = (await this.stats()) as unknown[];
+    const rawStats = await this.stats();
+    const stats = Array.isArray(rawStats) ? rawStats : [];
     return [
       ...stats,
       {

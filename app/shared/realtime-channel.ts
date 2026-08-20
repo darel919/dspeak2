@@ -1,16 +1,11 @@
 import { getSupabaseClient } from "../utils/supabase-client.ts";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { RealtimeChannelHandlers } from "./types/shared-utilities.ts";
 
-export interface RealtimeChannelLike {
-  on: (
-    type: string,
-    filter: Record<string, unknown>,
-    callback: (payload: Record<string, unknown>) => void,
-  ) => RealtimeChannelLike;
-  subscribe: (callback: (status: string, error?: unknown) => void) => unknown;
-  unsubscribe: () => Promise<unknown> | unknown;
-  send: (payload: Record<string, unknown>) => Promise<unknown>;
-}
+export type RealtimeChannelLike = Pick<
+  RealtimeChannel,
+  "on" | "subscribe" | "unsubscribe" | "send"
+>;
 
 interface RealtimeTopicEntry {
   topic: string;
@@ -66,7 +61,7 @@ export async function openRealtimeChannel<TPayload = unknown>(
       const channel = supabaseClient.channel(topic, {
         config: { private: true },
       });
-      topicEntry.channel = channel as unknown as RealtimeChannelLike;
+      topicEntry.channel = channel;
       topicEntry.closeChannel = () => {
         if (!topicEntry.channel) return;
         const currentChannel = topicEntry.channel;
@@ -103,7 +98,7 @@ export async function openRealtimeChannel<TPayload = unknown>(
             subscriber.onError?.(err, status);
         }
       });
-      return channel as unknown as RealtimeChannelLike;
+      return channel;
     })().catch(() => null);
   }
 

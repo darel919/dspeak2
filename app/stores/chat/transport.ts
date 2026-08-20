@@ -7,13 +7,15 @@ export function createChatTransportActions(context: ChatStoreContext) {
     data: { type?: string; pendingId?: string; status?: number };
   }): void {
     if (event.data.type === "BACKGROUND_SYNC_SUCCESS") {
-      context.handleBackgroundSyncSuccess(event.data.pendingId);
+      if (event.data.pendingId)
+        context.handleBackgroundSyncSuccess(event.data.pendingId);
     }
     if (event.data.type === "BACKGROUND_SYNC_FAILURE") {
-      context.handleBackgroundSyncFailure(
-        event.data.pendingId,
-        event.data.status,
-      );
+      if (event.data.pendingId && typeof event.data.status === "number")
+        context.handleBackgroundSyncFailure(
+          event.data.pendingId,
+          event.data.status,
+        );
     }
   }
 
@@ -311,7 +313,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
       const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
         config: { private: true },
       });
-      const channel = supabaseChannel as unknown as RealtimeChannelLike;
+      const channel: RealtimeChannelLike = supabaseChannel;
       context.realtimeChannel.value = channel;
 
       supabaseChannel

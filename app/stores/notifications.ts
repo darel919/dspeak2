@@ -16,6 +16,35 @@ import type {
 
 const MAX_INBOX_ITEMS = 100;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseNotification(value: unknown): NotificationRecord | null {
+  if (!isRecord(value) || typeof value.id !== "string") return null;
+  return {
+    ...value,
+    id: value.id,
+  };
+}
+
+function parseNotificationPreferences(value: unknown): NotificationPreferences {
+  if (!isRecord(value)) throw new Error("Invalid notification preferences");
+  if (
+    typeof value.mode !== "string" ||
+    typeof value.push !== "boolean" ||
+    typeof value.sound !== "boolean" ||
+    typeof value.previews !== "boolean"
+  )
+    throw new Error("Invalid notification preferences");
+  return {
+    mode: value.mode,
+    push: value.push,
+    sound: value.sound,
+    previews: value.previews,
+  };
+}
+
 export const useNotificationsStore = defineStore("notifications", () => {
   const notificationSupported = ref(false);
   const pushSupported = ref(false);
@@ -162,7 +191,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
   async function authenticatedFetch(
     path: string,
     options: NotificationFetchOptions = {},
-  ): Promise<Record<string, unknown>> {
+  ): Promise<unknown> {
     const userData = useAuthStore().getUserData();
     if (!userData?.id) throw new Error("User not authenticated");
     const response = await fetch(`${config.public.apiPath}/chat/${path}`, {
@@ -176,14 +205,18 @@ export const useNotificationsStore = defineStore("notifications", () => {
     });
     if (!response.ok)
       throw new Error(`Notification request failed: ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
+    return response.json();
   }
 
   async function fetchInbox() {
     const result = await authenticatedFetch("notifications");
-    inbox.value = boundInbox(
-      Array.isArray(result.items) ? (result.items as NotificationRecord[]) : [],
-    );
+    const resultRecord = isRecord(result) ? result : {};
+    const items = Array.isArray(resultRecord.items)
+      ? resultRecord.items
+          .map(parseNotification)
+          .filter((item): item is NotificationRecord => item !== null)
+      : [];
+    inbox.value = boundInbox(items);
     return inbox.value;
   }
 
@@ -226,23 +259,27 @@ export const useNotificationsStore = defineStore("notifications", () => {
   }
 
   async function fetchPreferences() {
-    preferences.value = (await authenticatedFetch(
-      "notification-preferences",
-    )) as unknown as NotificationPreferences;
+    preferences.value = parseNotificationPreferences(
+      await authenticatedFetch("notification-preferences"),
+    );
     return preferences.value;
   }
 
   async function savePreferences(value: Partial<NotificationPreferences>) {
-    preferences.value = (await authenticatedFetch("notification-preferences", {
-      method: "PUT",
-      body: JSON.stringify({ ...preferences.value, ...value }),
-    })) as unknown as NotificationPreferences;
+    preferences.value = parseNotificationPreferences(
+      await authenticatedFetch("notification-preferences", {
+        method: "PUT",
+        body: JSON.stringify({ ...preferences.value, ...value }),
+      }),
+    );
     return preferences.value;
   }
 
   function receiveRealtime(message: NotificationRealtimePayload) {
     if (message?.type === "notification_created" && message.data) {
-      const senderId = message.data.senderId;
+      const notification = parseNotification(message.data);
+      if (!notification) return;
+      const senderId = notification.senderId;
       const currentUserId = useAuthStore().getUserData()?.id;
       if (
         senderId &&
@@ -252,17 +289,17 @@ export const useNotificationsStore = defineStore("notifications", () => {
         return;
       }
       inbox.value = boundInbox([
-        message.data,
-        ...inbox.value.filter((item) => item.id !== message.data?.id),
+        notification,
+        ...inbox.value.filter((item) => item.id !== notification.id),
       ]);
       if (preferences.value.push && preferences.value.mode !== "none") {
-        void showNotification(message.data.title || "dSpeak Notification", {
+        void showNotification(notification.title || "dSpeak Notification", {
           body:
-            message.data.body ||
-            message.data.content ||
+            notification.body ||
+            notification.content ||
             "You have a new notification.",
-          tag: message.data.id ? `notification-${message.data.id}` : undefined,
-          data: message.data.data || {},
+          tag: notification.id ? `notification-${notification.id}` : undefined,
+          data: notification.data || {},
         });
       }
     }
@@ -271,7 +308,13 @@ export const useNotificationsStore = defineStore("notifications", () => {
         error.value = cause instanceof Error ? cause.message : String(cause);
       });
     if (message?.type === "notifications_read") {
-      const ids = new Set(message.data?.ids || []);
+      const ids = new Set(
+        Array.isArray(message.data?.ids)
+          ? message.data.ids.filter(
+              (id): id is string => typeof id === "string",
+            )
+          : [],
+      );
       const readAt = new Date().toISOString();
       inbox.value = inbox.value.map((item) =>
         !ids.size || ids.has(item.id) ? { ...item, read_at: readAt } : item,

@@ -26,20 +26,33 @@ import {
 import type { OwnedErrorValue } from "~/shared/types/shared-utilities.ts";
 import type {
   VoiceMediaSessionLike,
-  VoiceSettingsLike,
   VoiceSoundboardActivityInput,
   VoiceUserRecord,
 } from "~/shared/types/voice-media-actions.ts";
 import type { VoiceStateUpdate } from "~/shared/types/voice-participant-state.ts";
-import type {
-  SharedAudioAttenuationLike,
-  SharedAudioDuckingLike,
-  SharedAudioStatsLike,
-} from "~~/shared/types/voice.ts";
 
 const EMPTY_MEDIA_FEEDS = new Map<string, unknown>();
 const MAX_USER_VOLUME_ENTRIES = 200;
 const MAX_TRACK_VOLUME_ENTRIES = 400;
+
+interface DjSessionRecord extends Record<string, unknown> {
+  id: string;
+  status?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeDjSession(value: unknown): DjSessionRecord {
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id)
+    throw new TypeError("DJ session response is invalid");
+  return {
+    ...Object.fromEntries(Object.entries(value)),
+    id: value.id,
+    ...(typeof value.status === "string" ? { status: value.status } : {}),
+  };
+}
 
 export const useVoiceStore = defineStore("voice", () => {
   const config = useRuntimeConfig();
@@ -79,21 +92,15 @@ export const useVoiceStore = defineStore("voice", () => {
   }
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
   const sharedAudioStats = computed(() =>
-    normalizeSharedAudioStats(
-      unref(sfuComposable.value?.sharedAudioStats) as SharedAudioStatsLike,
-    ),
+    normalizeSharedAudioStats(unref(sfuComposable.value?.sharedAudioStats)),
   );
   const sharedAudioAttenuation = computed(() =>
     normalizeSharedAudioAttenuation(
-      unref(
-        sfuComposable.value?.sharedAudioAttenuation,
-      ) as SharedAudioAttenuationLike,
+      unref(sfuComposable.value?.sharedAudioAttenuation),
     ),
   );
   const sharedAudioDucking = computed(() =>
-    normalizeSharedAudioDucking(
-      unref(sfuComposable.value?.sharedAudioDucking) as SharedAudioDuckingLike,
-    ),
+    normalizeSharedAudioDucking(unref(sfuComposable.value?.sharedAudioDucking)),
   );
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
@@ -407,7 +414,7 @@ export const useVoiceStore = defineStore("voice", () => {
     playFatalError: (joinError) => useFatalClientError().report(joinError),
     protocolUpdateRequired,
     screenSharing,
-    settingsStore: settingsStore as unknown as VoiceSettingsLike,
+    settingsStore,
     soundboardActivityTimers,
     stopBroadcast,
     systemAudioSharing,
@@ -424,23 +431,21 @@ export const useVoiceStore = defineStore("voice", () => {
   async function refreshDjSession(sessionId: string) {
     if (!djSession.value || djSession.value.id !== sessionId) return;
     try {
-      const fetchUnknown = $fetch as unknown as (
-        url: string,
-        options: Record<string, unknown>,
-      ) => Promise<unknown>;
-      const next = (await fetchUnknown(`${config.public.apiPath}/dj/session`, {
-        query: { sessionId },
-      })) as { id: string; status: string };
+      const next = normalizeDjSession(
+        await $fetch(`${config.public.apiPath}/dj/session`, {
+          query: { sessionId },
+        }),
+      );
       if (!djSession.value || djSession.value.id !== sessionId) return;
       djSession.value = next;
       broadcastAudioSharing.value = next.status === "live";
-      if (!["stopped", "error"].includes(next.status)) {
+      if (!["stopped", "error"].includes(next.status ?? "")) {
         djStatusTimer = setTimeout(() => refreshDjSession(sessionId), 1500);
       }
     } catch (err: unknown) {
       const statusCode =
-        err && typeof err === "object" && "statusCode" in err
-          ? (err as { statusCode?: number }).statusCode
+        isRecord(err) && typeof err.statusCode === "number"
+          ? err.statusCode
           : undefined;
       if (statusCode === 404) {
         djSession.value = null;
@@ -455,14 +460,12 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!connected.value || !sfuComposable.value)
       throw new Error("Not connected to a voice channel");
     clearDjStatusTimer();
-    const fetchUnknown = $fetch as unknown as (
-      url: string,
-      options: Record<string, unknown>,
-    ) => Promise<unknown>;
-    const session = (await fetchUnknown(`${config.public.apiPath}/dj/session`, {
-      method: "POST",
-      body: { channelId: currentChannelId.value },
-    })) as { id: string; status?: string };
+    const session = normalizeDjSession(
+      await $fetch(`${config.public.apiPath}/dj/session`, {
+        method: "POST",
+        body: { channelId: currentChannelId.value },
+      }),
+    );
     djSession.value = session;
     broadcastAudioSharing.value = false;
     djStatusTimer = setTimeout(() => refreshDjSession(session.id), 1000);

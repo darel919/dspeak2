@@ -9,13 +9,47 @@ import { createTopologyProviderActions } from "./providers.ts";
 import { createTopologyResourceHelpers } from "./resources.ts";
 import { resolveMediaProviderIdentity } from "../media-provider-identity.ts";
 import { remoteMediaFeedKey } from "../remote-media-handoff.ts";
+import { normalizeIceServers } from "../native-p2p-common.ts";
+import type {
+  CloudflareConsumerEntry,
+  CloudflarePublication,
+} from "../types/cloudflare-media.ts";
+import type { MediasoupConsumerEntry } from "../types/mediasoup-client.ts";
 import type {
   TopologyControllerOptions,
   TopologyData,
-  TopologyConnectionState,
   TopologySfuSession,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
+}
+
+function isMediaStreamTrack(value: unknown): value is MediaStreamTrack {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    (value.kind === "audio" || value.kind === "video")
+  );
+}
+
+function topologySourceEntry(
+  entry:
+    CloudflareConsumerEntry | CloudflarePublication | MediasoupConsumerEntry,
+): TopologySourceEntry | null {
+  if (
+    !("track" in entry) ||
+    !isMediaStreamTrack(entry.track) ||
+    typeof entry.source !== "string"
+  )
+    return null;
+  return {
+    ...entry,
+    source: entry.source,
+    track: entry.track,
+  };
+}
 
 export function createHybridMediaTopologyController({
   CloudflareRealtimeSession,
@@ -87,7 +121,7 @@ export function createHybridMediaTopologyController({
     handleProviderFailure,
     handleProviderRecovering,
   } = createTopologyResourceHelpers({
-    NativeP2pMesh: NativeP2pMesh as never,
+    NativeP2pMesh,
     buildP2pVideoSenderOptions,
     buildVoiceProducerOptions,
     closeSocket,
@@ -124,11 +158,6 @@ export function createHybridMediaTopologyController({
       topologyState.value,
       true,
     );
-    const SessionClass = (
-      provider === "cloudflare-realtime"
-        ? CloudflareRealtimeSession
-        : MediasoupClientSession
-    ) as new (options: Record<string, unknown>) => TopologySfuSession;
     const hasLocalAudio = [...localSources.values()].some(
       (entry) => entry.track.kind === "audio",
     );
@@ -140,66 +169,93 @@ export function createHybridMediaTopologyController({
         ? "mixed"
         : "video"
       : "audio";
-    const session = new SessionClass({
-      send: (message: Record<string, unknown>) =>
-        provider === "cloudflare-realtime"
-          ? send(message)
-          : Boolean(getProviderSocket()?.send(message)),
-      iceServers: getIceServers(),
-      getControlConnectionEpoch: () => getConnectionEpoch(),
-      localPeerId: getLocalPeerId(),
-      onRemoteTrack: (entry: TopologySourceEntry) =>
-        handoff.stage(
-          {
-            ...entry,
-            key: entry.key || remoteMediaFeedKey(entry),
-            provider: entry.provider || provider,
-          },
-          getActiveProvider(),
-        ),
-      onRemoteTrackEnded: (entry: TopologySourceEntry) =>
-        handoff.remove({
-          ...entry,
-          key: entry.key || remoteMediaFeedKey(entry),
-          provider: entry.provider || provider,
-        }),
-      onStateChange: (
-        direction: string,
-        state: string,
-        summary: TopologyConnectionState,
-      ) => {
-        const fallbackActive = getActiveProvider() === "sfu";
-        if (topologyState.value.mode !== "sfu" && !fallbackActive) return;
-        if (state === "closed") {
-          mediaConnectionState.value = "failed";
-          setConnectionPhase("failed", {
-            direction,
-            reason: `transport-${state}`,
-          });
-          reportSfuFailure("media-transport-failed", provider);
-          return;
-        }
-        if (state === "failed") {
-          mediaConnectionState.value = "recovering";
-          setConnectionPhase("reconnecting", {
-            direction,
-            reason: `transport-${state}`,
-          });
-          reportSfuFailure("media-transport-failed", provider);
-          return;
-        }
-        transportReady.value = summary.ready === true;
-        iceConnectedBoth.value =
-          summary.sendRequired === true &&
-          summary.receiveRequired === true &&
-          summary.send === "connected" &&
-          summary.recv === "connected";
-      },
-      getAudioBitrate: getEffectiveAudioBitrate,
-      getAudioStereo,
-      getVideoSettings: getRequestedVideoSettings,
-      mediaProfile,
+    const iceServers = normalizeIceServers(getIceServers());
+    const onRemoteTrack = (
+      entry: CloudflareConsumerEntry | MediasoupConsumerEntry,
+    ) => {
+      const sourceEntry = topologySourceEntry(entry);
+      if (!sourceEntry) return;
+      handoff.stage(
+        {
+          ...sourceEntry,
+          key: sourceEntry.key || remoteMediaFeedKey(sourceEntry),
+          provider: "sfu",
+        },
+        getActiveProvider(),
+      );
+    };
+    const onRemoteTrackEnded = (
+      entry:
+        | CloudflareConsumerEntry
+        | CloudflarePublication
+        | MediasoupConsumerEntry,
+    ) => {
+      const sourceEntry = topologySourceEntry(entry);
+      if (!sourceEntry) return;
+      handoff.remove({
+        ...sourceEntry,
+        key: sourceEntry.key || remoteMediaFeedKey(sourceEntry),
+        provider: "sfu",
+      });
+    };
+    const onStateChange = (
+      direction: string,
+      state: string,
+      summary: Record<string, unknown>,
+    ) => {
+      const fallbackActive = getActiveProvider() === "sfu";
+      if (topologyState.value.mode !== "sfu" && !fallbackActive) return;
+      if (state === "closed") {
+        mediaConnectionState.value = "failed";
+        setConnectionPhase("failed", {
+          direction,
+          reason: `transport-${state}`,
+        });
+        reportSfuFailure("media-transport-failed", provider);
+        return;
+      }
+      if (state === "failed") {
+        mediaConnectionState.value = "recovering";
+        setConnectionPhase("reconnecting", {
+          direction,
+          reason: `transport-${state}`,
+        });
+        reportSfuFailure("media-transport-failed", provider);
+        return;
+      }
+      transportReady.value = summary.ready === true;
+      iceConnectedBoth.value =
+        summary.sendRequired === true &&
+        summary.receiveRequired === true &&
+        summary.send === "connected" &&
+        summary.recv === "connected";
+    };
+    const getVideoSettings = (source: string): Record<string, unknown> => ({
+      ...getRequestedVideoSettings(source),
     });
+    const session =
+      provider === "cloudflare-realtime"
+        ? new CloudflareRealtimeSession({
+            send: (message) => Boolean(send(message)),
+            iceServers,
+            getControlConnectionEpoch: () => getConnectionEpoch(),
+            localPeerId: getLocalPeerId() || undefined,
+            onRemoteTrack,
+            onRemoteTrackEnded,
+            onStateChange,
+            getVideoSettings,
+          })
+        : new MediasoupClientSession({
+            send: (message) => getProviderSocket()?.send(message) ?? false,
+            iceServers,
+            onRemoteTrack,
+            onRemoteTrackEnded,
+            onStateChange,
+            getAudioBitrate: getEffectiveAudioBitrate,
+            getAudioStereo,
+            getVideoSettings,
+            mediaProfile,
+          });
     session.provider = provider;
     session.providerId = providerId;
     setSfu(session);
@@ -771,8 +827,7 @@ export function createHybridMediaTopologyController({
     if (provider === "p2p" && getP2pMesh()) {
       const values = Object.values(peerConnectionMetrics.value).filter(
         (metric): metric is Record<string, unknown> =>
-          Boolean(metric) &&
-          Number.isFinite(Number((metric as Record<string, unknown>).rttMs)),
+          isRecord(metric) && Number.isFinite(Number(metric.rttMs)),
       );
       const jitterMs = values.reduce(
         (max, metric) => Math.max(max, Number(metric.jitterMs) || 0),

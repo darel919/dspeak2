@@ -84,7 +84,7 @@ export interface QueuedMessage extends StorageRecord {
   id: string;
   channelId?: string;
   content?: string;
-  ownerId?: string;
+  ownerId?: string | number;
   pendingId?: string;
   attachments?: unknown[];
   replyTo?: unknown;
@@ -241,7 +241,8 @@ function storageSnapshot(value: unknown): unknown {
         "Local record is not JSON-compatible",
         "DataCloneError",
       );
-    return JSON.parse(serialized) as unknown;
+    const parsed: unknown = JSON.parse(serialized);
+    return parsed;
   } catch (error: unknown) {
     if (errorName(error) === "DataCloneError") throw error;
     throw new DOMException(
@@ -706,8 +707,14 @@ export async function purgeUserLocalData(userId: string): Promise<void> {
 
 function recordField(record: unknown, field: string): string {
   if (!record || typeof record !== "object" || !(field in record)) return "";
-  const value = (record as Record<string, unknown>)[field];
+  const value = Object.getOwnPropertyDescriptor(record, field)?.value;
   return String(value || "");
+}
+
+function databaseIds(): DatabaseId[] {
+  return Object.keys(DATABASES).filter(
+    (databaseId): databaseId is DatabaseId => databaseId in DATABASES,
+  );
 }
 
 function deleteDatabase(databaseId: DatabaseId): Promise<void> {
@@ -738,9 +745,7 @@ function deleteDatabase(databaseId: DatabaseId): Promise<void> {
 }
 
 export async function resetLocalDatabases(): Promise<void> {
-  const results = await Promise.allSettled(
-    (Object.keys(DATABASES) as DatabaseId[]).map(deleteDatabase),
-  );
+  const results = await Promise.allSettled(databaseIds().map(deleteDatabase));
   const failure = results.find((result) => result.status === "rejected");
   if (failure) {
     const issue = classifyIdbError(failure.reason, {
@@ -766,7 +771,7 @@ export async function resetLocalDatabases(): Promise<void> {
 }
 
 export async function probeLocalDatabases(): Promise<boolean> {
-  for (const databaseId of Object.keys(DATABASES) as DatabaseId[]) {
+  for (const databaseId of databaseIds()) {
     const definition = DATABASES[databaseId];
     let database: IDBDatabase | null = null;
     try {

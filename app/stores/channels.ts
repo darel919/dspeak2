@@ -743,7 +743,7 @@ export const useChannelsStore = defineStore("channels", () => {
           handle.close();
           return;
         }
-        connection.channel = handle.channel as RealtimeChannelLike;
+        connection.channel = handle.channel;
         connection.close = handle.close;
       })
       .catch((err) => {

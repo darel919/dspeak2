@@ -170,19 +170,15 @@ export async function handleProviderTicket(
 
 export function createSignaling(session: NativeMediasoupSfuSession) {
   session.signaling?.stop?.();
-  const controlState = session as unknown as {
-    controlConnectionEpoch?: number;
-    lastAppliedRoomRevision?: string;
-    lastAppliedPublicationRevision?: string | number;
-  };
+  const connectionEpoch = session.getControlConnectionEpoch?.() || 1;
   session.signaling = createMediaSignalingSocket({
     buildHeartbeatData: (sequence) => ({
       sequence,
-      connectionEpoch: controlState.controlConnectionEpoch || 1,
+      connectionEpoch,
       topologyEpoch: Number(session.topologyState?.epoch) || 0,
       sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
-      publicationRevision: controlState.lastAppliedPublicationRevision || "0",
-      lastAppliedRoomRevision: controlState.lastAppliedRoomRevision || "0",
+      publicationRevision: "0",
+      lastAppliedRoomRevision: "0",
       localSourceDigest: {},
     }),
     buildUrl: () => session.buildUrl(session.channelId),
@@ -190,8 +186,8 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
       protocolVersion: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
       contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
       mediaSessionId: session.mediaSessionId,
-      connectionEpoch: controlState.controlConnectionEpoch || 1,
-      lastAppliedRoomRevision: controlState.lastAppliedRoomRevision || "0",
+      connectionEpoch,
+      lastAppliedRoomRevision: "0",
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
       mediaCapabilities: session.mediaCapabilities,
       capabilityProtocol: "video-codec-matrix-v1",
@@ -206,10 +202,7 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
         onFailure: (error) => session._fail(asError(error, "Signaling failed")),
       }),
     isIntentionalClose: () => session.intentionalClose,
-    onClose: (event) =>
-      session._handleSignalingClose(
-        event as unknown as Record<string, unknown>,
-      ),
+    onClose: (event) => session._handleSignalingClose(event),
     onError: (error) => session._fail(error),
     onOpen: () => {
       session.connectionPhase = "protocol-negotiating";
@@ -231,7 +224,7 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
     reconnectBaseDelayMs: 500,
     reconnectJitterMs: 250,
     reconnectMaxDelayMs: 10000,
-  }) as unknown as NonNullable<typeof session.signaling>;
+  });
 }
 
 export function resolveConnect(session: NativeMediasoupSfuSession) {

@@ -8,12 +8,7 @@ import { terminateFailedStartup } from "../utils/startup-failure.ts";
 import { isPersistentEnvironment } from "../../shared/runtime-mode.ts";
 
 export default defineNitroPlugin(async (nitroApp) => {
-  if (
-    process.env.NITRO_PRESET === "static" ||
-    (nitroApp as unknown as { options?: { preset?: string } }).options
-      ?.preset === "static"
-  )
-    return;
+  if (process.env.NITRO_PRESET === "static") return;
   try {
     const environment = await validateRuntimeEnvironment();
     if (environment?.supabaseUrl) {

@@ -58,10 +58,7 @@ test("room creation creates the owner membership exactly once inside one transac
     roomsApi.indexOf('if (!suffix && method === "PUT")'),
   );
   assert.match(createRoom, /db\.transaction\(async \(tx\)/);
-  assert.match(
-    createRoom,
-    /seedRoomRoles\(nextRoom, userId, tx(?: as [^)]+)?\)/,
-  );
+  assert.match(createRoom, /seedRoomRoles\(nextRoom, userId, tx\)/);
   assert.doesNotMatch(createRoom, /insert\(roomMemberships\)/);
 });
 

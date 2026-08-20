@@ -126,7 +126,7 @@ export interface NativeP2pSessionOptions {
   sendMessage?: (type: string, data: Record<string, unknown>) => unknown;
   onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
-  onStateChange?: (state: Record<string, unknown>) => unknown;
+  onStateChange?: (state: NativeP2pSessionSurface) => unknown;
   onError?: (error: unknown) => unknown;
   getAudioBitrate?: (source: string) => number | null;
   getAudioStereo?: (source: string) => boolean | null;

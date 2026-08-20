@@ -14,7 +14,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
     channelId: string | null,
     items: ChatMessage[],
     active = false,
-  ): ChatMessage[] | undefined {
+  ): ChatMessage[] {
     const normalizedChannelId = String(channelId);
     context.channelMessages.delete(normalizedChannelId);
     context.channelMessages.set(
@@ -161,7 +161,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
   async function prepareChannels(
     channelIds: string[],
     concurrency = 2,
-  ): Promise<unknown> {
+  ): Promise<void> {
     const pendingIds = [...new Set(channelIds.map(String))].filter(
       (channelId) => channelId && !context.isChannelPrepared(channelId),
     );

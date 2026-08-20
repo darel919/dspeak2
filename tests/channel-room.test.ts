@@ -43,8 +43,9 @@ describe("voice join resolves the room before connecting", () => {
     );
     assert.match(
       source,
-      /withVoiceJoinDeadline\(\s*\(\) => session!\.connect\(channelId, \{ roomId: joiningRoomId \}\)/,
+      /session!\.connect\(channelId,[\s\S]*?roomId: joiningRoomId/,
     );
+    assert.match(source, /withVoiceJoinDeadline\(/);
   });
 
   it("forwards connect options through the browser engine adapter", async () => {
@@ -54,7 +55,7 @@ describe("voice join resolves the room before connecting", () => {
     );
     assert.match(
       source,
-      /connect\(channelId(?:: string)?, options(?:\?: BrowserJoinInput)?\) \{\s*return this\.session\.connect\(channelId, options\);/,
+      /connect\(\s*channelId: string,\s*options\?: \{ roomId\?: string \}\s*\)\s*\{\s*return this\.session\.connect\(channelId, options\);/,
     );
   });
 
@@ -65,7 +66,7 @@ describe("voice join resolves the room before connecting", () => {
     );
     assert.match(
       source,
-      /const roomId =\s*options\.roomId \|\| getRoomId\(\) \|\| channel\?\.room\?\.id \|\| null;/,
+      /const roomId =\s*options\.roomId \|\| getRoomId\(\) \|\| channelRoomId\(channel\);/,
     );
     const bootstrapCall = source.indexOf(
       "const bootstrap = await mediaSessionSetup.getBootstrap(",

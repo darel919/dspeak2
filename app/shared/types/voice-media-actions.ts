@@ -4,6 +4,12 @@ import type { SoundSettings } from "../system-sounds.ts";
 import type { RtcStatsSnapshot } from "./rtc-stats.ts";
 import type { RemotePresentationObservationMode } from "../remote-source-convergence.ts";
 
+type VoiceMediaFeedValue = Map<string, unknown> | ReadonlyMap<string, unknown>;
+type VoiceMediaFeedState =
+  | VoiceMediaFeedValue
+  | Ref<VoiceMediaFeedValue>
+  | Readonly<Ref<ReadonlyMap<string, unknown>>>;
+
 export interface VoiceUserRecord {
   id: string;
   speaking?: boolean;
@@ -53,26 +59,26 @@ export interface VoiceMediaSessionLike {
   activeProvider?: Ref<string | null> | string | null;
   error?: Ref<string | null> | string | null;
   joinReady?: Ref<boolean> | boolean;
-  localVideoFeeds?: Ref<Map<string, unknown>> | Map<string, unknown>;
-  remoteVideoFeeds?: Ref<Map<string, unknown>> | Map<string, unknown>;
-  remoteAudioFeeds?: Ref<Map<string, unknown>> | Map<string, unknown>;
+  localVideoFeeds?: VoiceMediaFeedState;
+  remoteVideoFeeds?: VoiceMediaFeedState;
+  remoteAudioFeeds?: VoiceMediaFeedState;
   sharedAudioStats?: Ref<unknown> | unknown;
   sharedAudioAttenuation?: Ref<unknown> | unknown;
   sharedAudioDucking?: Ref<unknown> | unknown;
   transportReady?: Ref<boolean> | boolean;
-  connect: (channelId: string, options?: { roomId?: string | null }) => unknown;
+  connect: (channelId: string, options?: { roomId?: string }) => unknown;
   disconnect?: () => unknown;
   prepareAudioPlayback?: () => unknown;
-  startAudioProduction: () => Promise<VoiceProducerLike | null | undefined>;
+  startAudioProduction: () => Promise<unknown>;
   stopAudioProduction?: () => Promise<unknown>;
   startVideoProduction: (
-    source: string,
+    source: "camera" | "screen",
     options?: MediaCaptureStartOptions,
-  ) => Promise<VoiceProducerLike | null | undefined>;
-  stopVideoProduction: (source: string) => Promise<unknown>;
+  ) => Promise<unknown>;
+  stopVideoProduction: (source: "camera" | "screen") => Promise<unknown>;
   startSystemAudioProduction: (
     options?: MediaCaptureStartOptions,
-  ) => Promise<VoiceProducerLike | null | undefined>;
+  ) => Promise<unknown>;
   stopSystemAudioProduction: () => Promise<unknown>;
   sendParticipantVoiceState?: (state: {
     muted: boolean;

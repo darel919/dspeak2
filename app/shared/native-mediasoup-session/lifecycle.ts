@@ -2,6 +2,7 @@ import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../../shared/media-signaling
 import { asError } from "../native-mediasoup-utils.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
 import type { NativeMediasoupSfuSessionSurface } from "../types/native-mediasoup-session.ts";
+import type { SignalingMessage } from "../types/media-signaling.ts";
 export class NativeMediasoupLifecycleMethods {
   async disconnect(this: NativeMediasoupSfuSession) {
     this.intentionalClose = true;
@@ -100,10 +101,7 @@ export class NativeMediasoupLifecycleMethods {
     await Promise.all(cleanup);
   }
 
-  _handleSignalingClose(
-    this: NativeMediasoupSfuSession,
-    event: Record<string, unknown>,
-  ) {
+  _handleSignalingClose(this: NativeMediasoupSfuSession, event: CloseEvent) {
     this.connected = false;
     this.protocolState = null;
     if (this.intentionalClose) return;
@@ -216,7 +214,7 @@ export class NativeMediasoupLifecycleMethods {
 
   sendOrThrow(
     this: NativeMediasoupSfuSession,
-    message: unknown,
+    message: SignalingMessage,
     label: string,
   ) {
     const sent =
@@ -278,7 +276,7 @@ export class NativeMediasoupLifecycleMethods {
   }
 
   _emitState(this: NativeMediasoupSfuSession) {
-    this.onStateChange?.(this as unknown as Record<string, unknown>);
+    this.onStateChange?.(this);
   }
 }
 

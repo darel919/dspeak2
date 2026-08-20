@@ -20,7 +20,10 @@ export function hasReader(readers: unknown, userId: string | number | null) {
   return readerIds(readers).includes(String(userId));
 }
 
-export function addReader(readers: ReaderValue[], user: ReaderValue) {
+export function addReader(
+  readers: ReaderValue[] | undefined,
+  user: ReaderValue,
+) {
   const userId = readerId(user);
   if (!userId || hasReader(readers, userId)) {
     return Array.isArray(readers) ? readers : [];
@@ -29,8 +32,8 @@ export function addReader(readers: ReaderValue[], user: ReaderValue) {
 }
 
 export function mergeReaders(
-  currentReaders: ReaderValue[],
-  nextReaders: ReaderValue[],
+  currentReaders: ReaderValue[] | undefined,
+  nextReaders: ReaderValue[] | undefined,
 ) {
   const currentById = new Map<string, ReaderValue>(
     (Array.isArray(currentReaders) ? currentReaders : [])

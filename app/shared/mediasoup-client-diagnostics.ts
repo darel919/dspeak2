@@ -13,9 +13,10 @@ export async function collectMediasoupStats(
     ["send", session.sendTransport],
     ["recv", session.recvTransport],
   ] as const) {
-    const pc = transport?._handler?._pc;
-    if (!pc) continue;
-    transports.push(await collectPeerConnectionStats(pc, kind));
+    if (!transport?.getStats) continue;
+    transports.push(
+      await collectPeerConnectionStats({ getStats: transport.getStats }, kind),
+    );
   }
   return transports;
 }
@@ -28,9 +29,13 @@ export async function collectMediasoupDiagnosticStats(
     ["send", session.sendTransport],
     ["recv", session.recvTransport],
   ] as const) {
-    const pc = transport?._handler?._pc;
-    if (!pc) continue;
-    transports.push(await collectPeerConnectionDiagnosticStats(pc, kind));
+    if (!transport?.getStats) continue;
+    transports.push(
+      await collectPeerConnectionDiagnosticStats(
+        { getStats: transport.getStats },
+        kind,
+      ),
+    );
   }
   return transports;
 }

@@ -23,6 +23,8 @@ import type {
   NativeTopology,
 } from "../../shared/types/native-media.ts";
 import type { JoinSessionInput } from "../../shared/media/types.ts";
+import type { MediaCaptureStartOptions } from "../../shared/types/media-capture.ts";
+import type { NativeMediasoupSfuSessionSurface } from "../../shared/types/native-mediasoup-session.ts";
 
 async function waitForNativeTopology(engine: NativeMediaEngine) {
   let operation = engine.nativeTopologyOperation;
@@ -92,12 +94,10 @@ export async function initialize(
               participantState,
             );
         },
-        onStateChange: (state: Record<string, unknown>) => {
+        onStateChange: (state: NativeMediasoupSfuSessionSurface) => {
           engine._syncLocalFeeds();
           if (state.topologyState)
-            engine
-              ._handleNativeTopology(state.topologyState as NativeTopology)
-              .catch(() => {});
+            engine._handleNativeTopology(state.topologyState).catch(() => {});
           engine._emit("state", state);
         },
         onP2pSignal: (data: NativeCaptureRequest) =>
@@ -604,11 +604,11 @@ async function setCameraEnabledNow(
 
 export async function startScreenShare(
   engine: NativeMediaEngine,
-  options: NativeCaptureRequest = {},
+  options: MediaCaptureStartOptions = {},
 ) {
   const operation = (engine.screenOperation || Promise.resolve())
     .catch(() => {})
-    .then(() => startScreenShareNow(engine, options));
+    .then(() => startScreenShareNow(engine, { ...options }));
   engine.screenOperation = operation.catch(() => {});
   return operation;
 }
@@ -617,8 +617,7 @@ async function startScreenShareNow(
   engine: NativeMediaEngine,
   options: NativeCaptureRequest = {},
 ) {
-  const selection =
-    (options.captureSelection as NativeCaptureRequest | undefined) || null;
+  const selection = getCaptureSelection(options);
   if (selection)
     assertDesktopCaptureMode(selection, ["video", "both"], "screen-video");
   const combinedAudio = selection?.mode === "both";
@@ -682,9 +681,7 @@ async function startScreenShareNow(
     });
     nativeCaptureStarted = true;
     engine.activeScreenCapture = selection || {};
-    const sourceCaptureSelection =
-      (request.captureSelection as NativeCaptureRequest | null | undefined) ||
-      selection;
+    const sourceCaptureSelection = getCaptureSelection(request) || selection;
     const entry = {
       source: "screen",
       track: { kind: "video" },

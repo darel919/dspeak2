@@ -11,7 +11,7 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
   const client = session();
   client.sessionId = "cloudflare-session";
   client.subscriptionsStarted = true;
-  const registry = new Map<string, unknown>();
+  const registry = new Map<string, CloudflarePublication>();
 
   const oldX = {
     peerId: "peer-1",
@@ -45,30 +45,20 @@ test("stale mid-subscribe reconciliation converges to the newest canonical snaps
     return true;
   };
 
-  interface NarrowedSession {
-    handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
-    reconcilePublications: (
-      publications: CloudflarePublication[],
-      removedPublications?: CloudflarePublication[],
-      isStale?: () => boolean,
-      getLatestCanonical?: () => CloudflarePublication[],
-    ) => Promise<unknown>;
-  }
-  const sessionNarrowed = client as unknown as NarrowedSession;
-  await sessionNarrowed.handle("cloudflare-publication-available", {
+  await client.handle("cloudflare-publication-available", {
     ...newY,
   });
   assert.equal(client.publications.has("screen-Y"), true);
 
   let stale = false;
   let registrySnapshotAtStale: unknown[] | null = null;
-  const reconcilePromise = sessionNarrowed.reconcilePublications(
+  const reconcilePromise = client.reconcilePublications(
     [oldX],
     [],
     () => stale,
     () => {
       registrySnapshotAtStale = [...registry.values()];
-      return [...registry.values()] as CloudflarePublication[];
+      return [...registry.values()];
     },
   );
 
@@ -92,7 +82,7 @@ test("stale mid-subscribe convergence treats an empty canonical state as authori
   const client = session();
   client.sessionId = "cloudflare-session";
   client.subscriptionsStarted = true;
-  const registry = new Map<string, unknown>();
+  const registry = new Map<string, CloudflarePublication>();
 
   const oldX = {
     peerId: "peer-1",
@@ -114,22 +104,12 @@ test("stale mid-subscribe convergence treats an empty canonical state as authori
     return true;
   };
 
-  interface NarrowedSession {
-    reconcilePublications: (
-      publications: CloudflarePublication[],
-      removedPublications?: CloudflarePublication[],
-      isStale?: () => boolean,
-      getLatestCanonical?: () => CloudflarePublication[],
-    ) => Promise<unknown>;
-  }
-  const sessionNarrowed = client as unknown as NarrowedSession;
-
   let stale = false;
-  const reconcilePromise = sessionNarrowed.reconcilePublications(
+  const reconcilePromise = client.reconcilePublications(
     [oldX],
     [],
     () => stale,
-    () => [...registry.values()] as CloudflarePublication[],
+    () => [...registry.values()],
   );
 
   stale = true;
@@ -146,7 +126,7 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
   const client = session();
   client.sessionId = "cloudflare-session";
   client.subscriptionsStarted = true;
-  const registry = new Map<string, unknown>();
+  const registry = new Map<string, CloudflarePublication>();
 
   const oldX = {
     peerId: "peer-1",
@@ -189,22 +169,12 @@ test("stale mid-subscribe convergence survives an overtaking revision R40→R41�
     return true;
   };
 
-  interface NarrowedSession {
-    reconcilePublications: (
-      publications: CloudflarePublication[],
-      removedPublications?: CloudflarePublication[],
-      isStale?: () => boolean,
-      getLatestCanonical?: () => CloudflarePublication[],
-    ) => Promise<unknown>;
-  }
-  const sessionNarrowed = client as unknown as NarrowedSession;
-
   let stale = false;
-  const reconcilePromise = sessionNarrowed.reconcilePublications(
+  const reconcilePromise = client.reconcilePublications(
     [oldX],
     [],
     () => stale,
-    () => [...registry.values()] as CloudflarePublication[],
+    () => [...registry.values()],
   );
 
   registry.set(newY.trackName, newY);
@@ -232,7 +202,7 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
   const client = session();
   client.sessionId = "cloudflare-session";
   client.subscriptionsStarted = true;
-  const registry = new Map<string, unknown>();
+  const registry = new Map<string, CloudflarePublication>();
 
   const oldX = {
     peerId: "peer-1",
@@ -280,23 +250,12 @@ test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 o
     return true;
   };
 
-  interface NarrowedSession {
-    reconcilePublications: (
-      publications: CloudflarePublication[],
-      removedPublications?: CloudflarePublication[],
-      isStale?: () => boolean,
-      getLatestCanonical?: () => CloudflarePublication[],
-      getLatestRevision?: () => string | null,
-    ) => Promise<unknown>;
-  }
-  const sessionNarrowed = client as unknown as NarrowedSession;
-
   let stale = false;
-  const reconcilePromise = sessionNarrowed.reconcilePublications(
+  const reconcilePromise = client.reconcilePublications(
     [oldX],
     [],
     () => stale,
-    () => [...registry.values()] as CloudflarePublication[],
+    () => [...registry.values()],
   );
 
   registry.set(newY.trackName, newY);

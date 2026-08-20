@@ -6,6 +6,8 @@ import type {
   CloudflareSessionOptions,
 } from "./types/cloudflare-media.ts";
 export class CloudflareRealtimeSession {
+  declare provider?: string;
+  declare providerId?: string | null;
   declare peerConnection: RTCPeerConnection | null;
   declare sessionId: string | null;
   declare initializing: Promise<void> | null;

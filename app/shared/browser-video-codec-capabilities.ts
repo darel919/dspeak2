@@ -20,12 +20,8 @@ type BrowserCapabilityInfo = {
 };
 
 type BrowserMediaCapabilitiesApi = {
-  encodingInfo?: (
-    configuration: Record<string, unknown>,
-  ) => Promise<BrowserCapabilityInfo>;
-  decodingInfo?: (
-    configuration: Record<string, unknown>,
-  ) => Promise<BrowserCapabilityInfo>;
+  encodingInfo?: MediaCapabilities["encodingInfo"];
+  decodingInfo?: MediaCapabilities["decodingInfo"];
 };
 
 type BrowserRtpCapabilitiesApi = {
@@ -74,11 +70,8 @@ function browserApi(
   const receiver = (
     globalThis as { RTCRtpReceiver?: BrowserRtpCapabilitiesApi }
   ).RTCRtpReceiver;
-  const mediaCapabilities = (
-    globalThis.navigator as unknown as {
-      mediaCapabilities?: BrowserMediaCapabilitiesApi;
-    }
-  )?.mediaCapabilities;
+  const mediaCapabilities: BrowserMediaCapabilitiesApi | undefined =
+    globalThis.navigator?.mediaCapabilities;
   return { sender, receiver, mediaCapabilities };
 }
 
@@ -118,26 +111,24 @@ async function queryDirection(
   entries: BrowserCodecEntry[],
   mediaCapabilities: BrowserMediaCapabilitiesApi | null | undefined,
 ) {
-  const query =
-    direction === "encode"
-      ? mediaCapabilities?.encodingInfo
-      : mediaCapabilities?.decodingInfo;
-  if (!query) return { info: null, error: null };
+  if (!mediaCapabilities) return { info: null, error: null };
   let best: BrowserCapabilityInfo | null = null;
   let error: string | null = null;
   const candidates = entries.length ? entries.slice(0, 4) : [undefined];
   for (const entry of candidates) {
     try {
-      const result = await query.call(mediaCapabilities, {
-        type: "webrtc",
-        video: {
-          contentType: contentType(codec, entry),
-          width: PROBE_WIDTH,
-          height: PROBE_HEIGHT,
-          bitrate: PROBE_BITRATE,
-          framerate: PROBE_FPS,
-        },
-      });
+      const video = {
+        contentType: contentType(codec, entry),
+        width: PROBE_WIDTH,
+        height: PROBE_HEIGHT,
+        bitrate: PROBE_BITRATE,
+        framerate: PROBE_FPS,
+      } satisfies VideoConfiguration;
+      const result =
+        direction === "encode"
+          ? await mediaCapabilities.encodingInfo?.({ type: "webrtc", video })
+          : await mediaCapabilities.decodingInfo?.({ type: "webrtc", video });
+      if (!result) continue;
       const info: BrowserCapabilityInfo =
         result && typeof result === "object" ? result : {};
       if (!best || (info.supported === true && best.supported !== true))

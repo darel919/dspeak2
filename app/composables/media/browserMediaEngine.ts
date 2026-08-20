@@ -77,7 +77,11 @@ export class BrowserMediaEngine extends MediaEngine {
 
   override async joinSession(input: BrowserJoinInput): Promise<void> {
     await this.initialize();
-    await this.session.connect(input.channelId || input);
+    const channelId = input.channelId || "";
+    await this.session.connect(
+      channelId,
+      input.roomId ? { roomId: input.roomId } : undefined,
+    );
   }
 
   override async leaveSession(): Promise<void> {
@@ -331,9 +335,9 @@ export class BrowserMediaEngine extends MediaEngine {
 
   connect(
     channelId: string,
-    options?: BrowserJoinInput,
+    options?: { roomId?: string },
   ): ReturnType<BrowserMediaEngineSession["connect"]>;
-  connect(channelId: string, options?: BrowserJoinInput) {
+  connect(channelId: string, options?: { roomId?: string }) {
     return this.session.connect(channelId, options);
   }
 
@@ -362,7 +366,7 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   async startVideoProduction(
-    source: string,
+    source: "camera" | "screen",
     options: BrowserScreenShareOptions = {},
   ): Promise<unknown> {
     const result = await this.session.startVideoProduction(source, options);
@@ -371,7 +375,7 @@ export class BrowserMediaEngine extends MediaEngine {
     return result;
   }
 
-  async stopVideoProduction(source: string): Promise<unknown> {
+  async stopVideoProduction(source: "camera" | "screen"): Promise<unknown> {
     const result = await this.session.stopVideoProduction(source);
     if (source === "camera") this.cameraEnabled = false;
     if (source === "screen") this.screenSharing = false;

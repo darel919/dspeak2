@@ -320,14 +320,12 @@ export default defineNuxtConfig({
           ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`
           : "/api",
       appVersion: buildIdentity.version,
-      appBuild: buildIdentity as unknown as {
-        version: string;
-        commit: string;
-        shortCommit: string;
-        branch: string;
-        builtAt: string;
-        repository: string;
-        updateBranch: string;
+      appBuild: {
+        ...buildIdentity,
+        commit: buildIdentity.commit || "",
+        shortCommit: buildIdentity.shortCommit || "",
+        branch: buildIdentity.branch || "",
+        builtAt: buildIdentity.builtAt || "",
       },
       VAPID_PUBLIC_KEY:
         process.env.VAPID_PUBLIC_KEY || process.env.VAPID_PUBKEY,

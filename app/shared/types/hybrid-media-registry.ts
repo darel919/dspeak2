@@ -74,7 +74,7 @@ export interface VoiceDetector {
   analyser: AnalyserNode;
   key: string;
   source: MediaStreamAudioSourceNode;
-  samples: Uint8Array;
+  samples: Uint8Array<ArrayBuffer>;
   speaking: boolean;
   activeSamples: number;
   quietSamples: number;

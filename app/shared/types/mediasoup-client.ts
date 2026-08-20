@@ -1,3 +1,5 @@
+import type { types as MediasoupTypes } from "mediasoup-client";
+
 export type MediasoupTransportDirection = "send" | "recv";
 export type MediasoupMediaProfile = "audio" | "video" | "mixed";
 export type MediasoupTransportState =
@@ -16,13 +18,16 @@ export interface MediasoupConsumerLike {
     jitterBufferTarget?: number;
   };
   getStats: () => Promise<unknown>;
-  on: (event: string, callback: () => void) => unknown;
+  on<K extends keyof MediasoupTypes.ConsumerEvents & string>(
+    event: K,
+    callback: (...args: MediasoupTypes.ConsumerEvents[K]) => unknown,
+  ): unknown;
   close: () => unknown;
 }
 
 export interface MediasoupProducerLike {
   id: string;
-  track?: MediaStreamTrack;
+  track?: MediaStreamTrack | null;
   paused?: boolean;
   getStats: () => Promise<unknown>;
   replaceTrack: (options: { track: MediaStreamTrack }) => Promise<unknown>;
@@ -31,7 +36,10 @@ export interface MediasoupProducerLike {
   ) => Promise<unknown>;
   resume: () => unknown;
   pause: () => unknown;
-  on: (event: string, callback: () => void) => unknown;
+  on<K extends keyof MediasoupTypes.ProducerEvents & string>(
+    event: K,
+    callback: (...args: MediasoupTypes.ProducerEvents[K]) => unknown,
+  ): unknown;
   close: () => unknown;
 }
 
@@ -80,27 +88,31 @@ export interface MediasoupSourceEntry {
 export interface MediasoupTransportLike {
   id: string;
   closed?: boolean;
-  on: (event: string, callback: (...args: never[]) => unknown) => unknown;
+  on<K extends keyof MediasoupTypes.TransportEvents & string>(
+    event: K,
+    callback: (...args: MediasoupTypes.TransportEvents[K]) => unknown,
+  ): unknown;
+  getStats?: () => Promise<unknown>;
   close: () => unknown;
-  consume: (options: Record<string, unknown>) => Promise<MediasoupConsumerLike>;
-  produce: (options: Record<string, unknown>) => Promise<MediasoupProducerLike>;
-  restartIce: (options: { iceParameters: unknown }) => Promise<unknown>;
-  _handler?: { _pc?: RTCPeerConnection };
+  consume(options: Record<string, unknown>): Promise<MediasoupConsumerLike>;
+  produce(options: Record<string, unknown>): Promise<MediasoupProducerLike>;
+  restartIce(options: { iceParameters: unknown }): Promise<unknown>;
 }
 
 export interface MediasoupDeviceLike {
   loaded?: boolean;
-  rtpCapabilities: unknown;
-  load: (options: { routerRtpCapabilities: unknown }) => Promise<unknown>;
-  createSendTransport: (
-    options: Record<string, unknown>,
-  ) => MediasoupTransportLike;
-  createRecvTransport: (
-    options: Record<string, unknown>,
-  ) => MediasoupTransportLike;
+  rtpCapabilities: MediasoupTypes.RtpCapabilities;
+  load(options: {
+    routerRtpCapabilities: MediasoupTypes.RtpCapabilities;
+  }): Promise<void>;
+  createSendTransport(options: Record<string, unknown>): MediasoupTransportLike;
+  createRecvTransport(options: Record<string, unknown>): MediasoupTransportLike;
 }
 
 export interface MediasoupClientSessionLike {
+  [key: string]: unknown;
+  provider?: string;
+  providerId?: string | null;
   send: (message: Record<string, unknown>) => unknown;
   iceServers: unknown[];
   onRemoteTrack?: (entry: MediasoupConsumerEntry) => unknown;
@@ -157,10 +169,12 @@ export interface MediasoupClientSessionLike {
     requestId: string,
     label: string,
     timeoutMs?: number,
-  ) => Promise<Record<string, unknown>>;
+  ) => Promise<unknown>;
   sendOrThrow: (message: Record<string, unknown>, label: string) => void;
   resetReadiness: () => void;
   closeMedia: () => unknown;
+  stats: () => Promise<unknown>;
+  diagnosticStats: () => Promise<unknown>;
   applyJitterBufferConfig: (entry: MediasoupConsumerEntry) => unknown;
   setJitterBufferConfig: (config: {
     minDelayMs?: number;

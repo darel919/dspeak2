@@ -781,7 +781,7 @@ async function handleRooms(event: RoomsApiEvent, suffix: string) {
         .returning();
       const nextRoom = room[0];
       if (!nextRoom) throw new Error("Room creation failed");
-      await seedRoomRoles(nextRoom, userId, tx as unknown as typeof db);
+      await seedRoomRoles(nextRoom, userId, tx);
       await tx.insert(channels).values([
         {
           roomId: nextRoom.id,

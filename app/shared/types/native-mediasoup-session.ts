@@ -1,5 +1,7 @@
 import type { CloudflarePublication } from "../types/cloudflare-media.ts";
 import type { NativeConsumerEntry } from "./native-mediasoup.ts";
+import type { NativeTopology } from "./native-media.ts";
+import type { SignalingMessage } from "./media-signaling.ts";
 import type { VideoSettings } from "./video-settings.ts";
 import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type {
@@ -73,7 +75,7 @@ export interface NativeSignalingSocket {
   open: () => Promise<unknown>;
   waitForReady?: () => Promise<unknown>;
   stop?: () => unknown;
-  send: (message: unknown) => boolean | void;
+  send: (message: SignalingMessage) => boolean | void;
   acknowledgeHeartbeat?: (sequence: number, timestamp: number) => unknown;
   acceptServerHello: (data: Record<string, unknown>) => boolean;
   getProtocolState: () => Record<string, unknown> | null;
@@ -88,7 +90,7 @@ export interface NativeProviderSignaling {
     capabilityProtocol?: string;
   }) => Promise<unknown>;
   close: () => unknown;
-  send: (message: unknown) => boolean | void;
+  send: (message: SignalingMessage) => boolean | void;
 }
 
 export interface NativeCloudflareSessionLike {
@@ -151,7 +153,9 @@ export interface NativeCloudflareSessionLike {
     minDelayMs?: number;
     targetDelayMs?: number;
   }) => unknown;
-  handleReceiveEvent: (event: Record<string, unknown>) => boolean;
+  handleReceiveEvent: (
+    event: import("./native-cloudflare.ts").NativeCloudflareEvent,
+  ) => boolean;
   handleMessage: (type: string, data: Record<string, unknown>) => unknown;
   connectionState?: () => Record<string, unknown>;
   stats?: () => unknown;
@@ -271,7 +275,7 @@ export interface NativeMediasoupSfuSessionSurface {
   localVideoFeeds: Map<string, Record<string, unknown>>;
   remoteVideoFeeds: Map<string, Record<string, unknown>>;
   remoteAudioFeeds: Map<string, Record<string, unknown>>;
-  topologyState: Record<string, unknown> | null;
+  topologyState: NativeTopology | null;
   localPeerId: string;
   lastInRoom: Array<Record<string, unknown>>;
   device: NativeDeviceEntry | null;
@@ -320,7 +324,7 @@ export interface NativeMediasoupSfuSessionSurface {
   onCurrentlyInChannel?: (data: Record<string, unknown>) => unknown;
   onBeforeNativeTeardown?: () => unknown;
   onNativeMediaClose?: () => unknown;
-  onStateChange?: (session: Record<string, unknown>) => unknown;
+  onStateChange?: (session: NativeMediasoupSfuSessionSurface) => unknown;
   onError?: (error: Error) => unknown;
   getAudioBitrate?: (source: string) => number | null;
   getAudioStereo?: (source: string) => boolean | null;

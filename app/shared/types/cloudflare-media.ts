@@ -28,6 +28,15 @@ export interface CloudflareSourceInput extends Record<string, unknown> {
   audioStereo?: boolean;
   generation: number;
 }
+export interface CloudflareSourceRequest extends Record<string, unknown> {
+  source: string;
+  track: MediaStreamTrack;
+  stream?: MediaStream;
+  ownerSource?: string | null;
+  audioBitrate?: number;
+  audioStereo?: boolean;
+  generation?: number;
+}
 export interface CloudflareConsumerEntry extends Record<string, unknown> {
   track: MediaStreamTrack;
   receiver?: RTCRtpReceiver;
@@ -82,7 +91,7 @@ export interface DeferredPromise<T> extends Promise<T> {
 export interface CloudflareSessionOptions {
   send: (message: Record<string, unknown>) => boolean;
   iceServers: RTCIceServer[];
-  onRemoteTrack: (entry: CloudflarePublication) => unknown;
+  onRemoteTrack: (entry: CloudflareConsumerEntry) => unknown;
   onRemoteTrackEnded: (
     entry: CloudflarePublication | CloudflareConsumerEntry,
   ) => unknown;
@@ -96,6 +105,9 @@ export interface CloudflareSessionOptions {
 }
 
 export interface CloudflareSessionLike extends CloudflareSessionOptions {
+  [key: string]: unknown;
+  provider?: string;
+  providerId?: string | null;
   peerConnection: RTCPeerConnection | null;
   sessionId: string | null;
   initializing: Promise<void> | null;
@@ -137,6 +149,12 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   ) => Promise<CloudflareRequestResult>;
   initialize: () => Promise<void>;
   closeMedia: () => void;
+  addSource: (entry: CloudflareSourceRequest) => Promise<unknown>;
+  handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
+  setJitterBufferConfig: (config?: {
+    minDelayMs?: number;
+    targetDelayMs?: number;
+  }) => unknown;
   enqueueNegotiation: (operation: () => Promise<unknown>) => Promise<unknown>;
   enqueueSourceOperation: (
     source: string,

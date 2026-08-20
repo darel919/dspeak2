@@ -10,18 +10,13 @@ import {
   nativeOnlyError,
 } from "./native-media-engine-common.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
-import type {
-  NativeCaptureRequest,
-  NativeErrorLike,
-} from "../../shared/types/native-media.ts";
+import type { MediaCaptureStartOptions } from "../../shared/types/media-capture.ts";
 
 export function startSystemAudioProduction(
   engine: NativeMediaEngine,
-  args: unknown[] = [],
+  options: MediaCaptureStartOptions = {},
 ) {
-  const options = (args[0] as NativeCaptureRequest | undefined) || {};
-  const selection =
-    (options.captureSelection as NativeCaptureRequest | undefined) || null;
+  const selection = options.captureSelection || null;
   if (selection)
     assertDesktopCaptureMode(selection, ["audio", "both"], "system-audio");
   if (engine.activeScreenCapture?.mode === "both")
@@ -37,7 +32,7 @@ export function startSystemAudioProduction(
   if (options.explicitBrowserFallback && !selection) {
     if (engine.nativeOnly)
       throw nativeOnlyError("browser system audio fallback");
-    return engine.browserEngine.startSystemAudioProduction(...args);
+    return engine.browserEngine.startSystemAudioProduction(options);
   }
   const request = selection
     ? desktopCaptureRequest(selection, {
@@ -65,7 +60,7 @@ export function startSystemAudioProduction(
           },
         ),
       );
-    return engine.browserEngine.startSystemAudioProduction(...args);
+    return engine.browserEngine.startSystemAudioProduction(options);
   }
   const replaceActiveCapture = engine.activeSystemAudioCapture
     ? engine.stopSystemAudioProduction()
@@ -76,9 +71,7 @@ export function startSystemAudioProduction(
     .then(async (result: unknown) => {
       nativeCaptureStarted = true;
       engine.activeSystemAudioCapture = selection || {};
-      const sourceCaptureSelection =
-        (request.captureSelection as NativeCaptureRequest | null | undefined) ||
-        selection;
+      const sourceCaptureSelection = request.captureSelection || selection;
       const entry = {
         source: "screen-audio",
         ownerSource: "system-audio",
@@ -116,14 +109,11 @@ export function startSystemAudioProduction(
       });
       if (engine.nativeOnly) throw failure;
       if (selection && !options.explicitBrowserFallback) throw failure;
-      return engine.browserEngine.startSystemAudioProduction(...args);
+      return engine.browserEngine.startSystemAudioProduction(options);
     });
 }
 
-export function stopSystemAudioProduction(
-  engine: NativeMediaEngine,
-  args: unknown[] = [],
-) {
+export function stopSystemAudioProduction(engine: NativeMediaEngine) {
   const nativeCaptureActive =
     engine._usesNativeCapture("nativeScreenAudio") ||
     engine.activeSystemAudioCapture !== null;
@@ -147,7 +137,7 @@ export function stopSystemAudioProduction(
       if (!failure) return;
       if (engine.nativeOnly) throw failure;
       await Promise.resolve(
-        engine.browserEngine.stopSystemAudioProduction(...args),
+        engine.browserEngine.stopSystemAudioProduction(),
       ).finally(() =>
         engine._emit("error", {
           source: "native",
@@ -160,5 +150,5 @@ export function stopSystemAudioProduction(
     })();
   }
   if (engine.nativeOnly) throw nativeOnlyError("system audio production stop");
-  return engine.browserEngine.stopSystemAudioProduction(...args);
+  return engine.browserEngine.stopSystemAudioProduction();
 }

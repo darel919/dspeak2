@@ -1,6 +1,7 @@
 import { Device } from "mediasoup-client";
+import type { types as MediasoupTypes } from "mediasoup-client";
+import type { MediasoupClientSessionLike } from "./types/mediasoup-client.ts";
 import type {
-  MediasoupClientSessionLike,
   MediasoupDeviceLike,
   MediasoupMessage,
   MediasoupMediaProfile,
@@ -47,7 +48,30 @@ function waitFor(
     });
   });
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isMediasoupMessage(value: unknown): value is MediasoupMessage {
+  return isRecord(value);
+}
+
+function parseRtpCapabilities(
+  value: unknown,
+): MediasoupTypes.RtpCapabilities | null {
+  if (!isRecord(value)) return null;
+  if (value.codecs !== undefined && !Array.isArray(value.codecs)) return null;
+  if (
+    value.headerExtensions !== undefined &&
+    !Array.isArray(value.headerExtensions)
+  )
+    return null;
+  return value;
+}
 export class MediasoupClientSession {
+  provider?: string;
+  providerId?: string | null;
   send!: (message: Record<string, unknown>) => unknown;
   iceServers!: unknown[];
   onRemoteTrack?: (
@@ -143,7 +167,7 @@ export class MediasoupClientSession {
     this.consumerControlTimeoutMs = consumerControlTimeoutMs;
     this.recoveryTimeoutMs = recoveryTimeoutMs;
     this.consumerRetryDelayMs = consumerRetryDelayMs;
-    this.device = null as MediasoupDeviceLike | null;
+    this.device = null;
     this.sendTransport = null as MediasoupTransportLike | null;
     this.recvTransport = null as MediasoupTransportLike | null;
     this.sources = new Map();
@@ -210,25 +234,30 @@ export class MediasoupClientSession {
     return this.readyPromise;
   }
 
-  async handle(type: string, data: MediasoupMessage) {
+  async handle(type: string, data: unknown) {
+    if (!isMediasoupMessage(data)) return false;
     if (this.closed) return false;
     if (type === "rtp-capabilities") {
       if (data.requestId !== this.initializationRequestId) return false;
       try {
         const mediaRevision = this.mediaRevision;
-        this.device = new Device() as unknown as MediasoupDeviceLike;
-        await this.device.load({ routerRtpCapabilities: data });
+        const device = new Device();
+        this.device = device;
+        const routerRtpCapabilities = parseRtpCapabilities(data);
+        if (!routerRtpCapabilities)
+          throw new Error("SFU returned invalid RTP capabilities");
+        await device.load({ routerRtpCapabilities });
         if (
           this.closed ||
           mediaRevision !== this.mediaRevision ||
           data.requestId !== this.initializationRequestId
         )
           return false;
-        this.lastSentClientRtpCapabilities = this.device.rtpCapabilities;
+        this.lastSentClientRtpCapabilities = device.rtpCapabilities;
         this.sendOrThrow(
           {
             type: "client-rtp-capabilities",
-            data: { rtpCapabilities: this.device.rtpCapabilities },
+            data: { rtpCapabilities: device.rtpCapabilities },
           },
           "SFU capability negotiation",
         );
@@ -358,7 +387,7 @@ export class MediasoupClientSession {
       (
         { dtlsParameters }: { dtlsParameters: unknown },
         callback: (value?: unknown) => void,
-        errback: (error: unknown) => void,
+        errback: (error: Error) => void,
       ) => {
         const requestId = this.requestId("connect");
         const acknowledgement = waitFor(
@@ -394,7 +423,7 @@ export class MediasoupClientSession {
           appData,
         }: { kind: string; rtpParameters: unknown; appData: unknown },
         callback: (value: { id: string }) => void,
-        errback: (error: unknown) => void,
+        errback: (error: Error) => void,
       ) => {
         const requestId = this.requestId("produce");
         const acknowledgement = waitFor(
@@ -444,7 +473,7 @@ export class MediasoupClientSession {
       (
         { dtlsParameters }: { dtlsParameters: unknown },
         callback: (value?: unknown) => void,
-        errback: (error: unknown) => void,
+        errback: (error: Error) => void,
       ) => {
         const requestId = this.requestId("connect");
         const acknowledgement = waitFor(
@@ -508,38 +537,26 @@ export class MediasoupClientSession {
   }
 
   connectionState() {
-    return getMediasoupConnectionState(
-      this as unknown as MediasoupClientSessionLike,
-    );
+    return getMediasoupConnectionState(this);
   }
 
   handleServerTransportState(data: MediasoupMessage) {
-    return handleMediasoupTransportState(
-      this as unknown as MediasoupClientSessionLike,
-      data,
-    );
+    return handleMediasoupTransportState(this, data);
   }
 
   handleTransportRecovery(
     direction: MediasoupTransportDirection,
     state: MediasoupTransportState,
   ) {
-    return handleMediasoupTransportRecovery(
-      this as unknown as MediasoupClientSessionLike,
-      direction,
-      state,
-    );
+    return handleMediasoupTransportRecovery(this, direction, state);
   }
 
   restartTransportIce(direction: MediasoupTransportDirection) {
-    return restartMediasoupTransportIce(
-      this as unknown as MediasoupClientSessionLike,
-      direction,
-    );
+    return restartMediasoupTransportIce(this, direction);
   }
 }
 
-export interface MediasoupClientSession {
+export interface MediasoupClientSession extends MediasoupClientSessionLike {
   publish: (
     entry: import("./types/mediasoup-client.ts").MediasoupSourceEntry,
   ) => Promise<unknown>;

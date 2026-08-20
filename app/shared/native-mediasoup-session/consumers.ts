@@ -31,11 +31,7 @@ export class NativeMediasoupConsumersMethods {
     producerId: string,
     metadata: Record<string, unknown> = {},
   ) {
-    return requestConsumer(
-      this as unknown as NativeMediasoupSfuSession,
-      producerId,
-      metadata,
-    );
+    return requestConsumer(this, producerId, metadata);
   }
 
   adaptVideoReceiver(
@@ -43,25 +39,18 @@ export class NativeMediasoupConsumersMethods {
     logicalStreamId: string,
     preferredLayers: { spatialLayer?: number; temporalLayer?: number },
   ) {
-    return adaptVideoReceiver(
-      this as unknown as NativeMediasoupSfuSession,
-      logicalStreamId,
-      preferredLayers,
-    );
+    return adaptVideoReceiver(this, logicalStreamId, preferredLayers);
   }
 
   producersHasId(this: NativeMediasoupSfuSession, producerId: string) {
-    return producersHasId(
-      this as unknown as NativeMediasoupSfuSession,
-      producerId,
-    );
+    return producersHasId(this, producerId);
   }
 
   async _createConsumer(
     this: NativeMediasoupSfuSession,
     data: Record<string, unknown>,
   ) {
-    return createConsumer(this as unknown as NativeMediasoupSfuSession, data);
+    return createConsumer(this, data);
   }
 
   setRemoteReceiving(
@@ -77,7 +66,7 @@ export class NativeMediasoupConsumersMethods {
         receivingValue,
       );
     return setRemoteReceiving(
-      this as unknown as NativeMediasoupSfuSession,
+      this,
       userIdOrKey,
       sourceOrReceiving,
       receivingValue,
@@ -90,12 +79,7 @@ export class NativeMediasoupConsumersMethods {
     source: string,
     ownerSource: string | null = null,
   ) {
-    return shouldReceive(
-      this as unknown as NativeMediasoupSfuSession,
-      userId,
-      source,
-      ownerSource,
-    );
+    return shouldReceive(this, userId, source, ownerSource);
   }
 
   setConsumerVolume(
@@ -106,12 +90,7 @@ export class NativeMediasoupConsumersMethods {
   ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.setConsumerVolume(userId, source, volume);
-    return setConsumerVolume(
-      this as unknown as NativeMediasoupSfuSession,
-      userId,
-      source,
-      volume,
-    );
+    return setConsumerVolume(this, userId, source, volume);
   }
 
   sendParticipantVoiceState(
@@ -120,10 +99,7 @@ export class NativeMediasoupConsumersMethods {
   ) {
     if (this.selectedProvider === "cloudflare-realtime")
       return this.cloudflareSession?.sendParticipantVoiceState(state);
-    return sendParticipantVoiceState(
-      this as unknown as NativeMediasoupSfuSession,
-      state,
-    );
+    return sendParticipantVoiceState(this, state);
   }
 
   async setConsumerReceiving(
@@ -131,11 +107,7 @@ export class NativeMediasoupConsumersMethods {
     entry: NativeConsumerEntry,
     receiving: boolean,
   ) {
-    return setConsumerReceiving(
-      this as unknown as NativeMediasoupSfuSession,
-      entry,
-      receiving,
-    );
+    return setConsumerReceiving(this, entry, receiving);
   }
 
   applyJitterBufferConfig(
@@ -187,18 +159,11 @@ export class NativeMediasoupConsumersMethods {
     data: Record<string, unknown>,
     receiving: boolean,
   ) {
-    return resolveConsumerControl(
-      this as unknown as NativeMediasoupSfuSession,
-      data,
-      receiving,
-    );
+    return resolveConsumerControl(this, data, receiving);
   }
 
   closeConsumerByProducer(this: NativeMediasoupSfuSession, producerId: string) {
-    return closeConsumerByProducer(
-      this as unknown as NativeMediasoupSfuSession,
-      producerId,
-    );
+    return closeConsumerByProducer(this, producerId);
   }
 
   closeConsumer(
@@ -206,9 +171,7 @@ export class NativeMediasoupConsumersMethods {
     entry: NativeConsumerEntry,
     { releaseNative = true }: { releaseNative?: boolean } = {},
   ) {
-    return closeConsumer(this as unknown as NativeMediasoupSfuSession, entry, {
-      releaseNative,
-    });
+    return closeConsumer(this, entry, { releaseNative });
   }
 
   async handle(
@@ -256,26 +219,15 @@ export class NativeMediasoupConsumersMethods {
     action: import("../types/native-mediasoup.ts").NativeAction,
   ) {
     if (this.selectedProvider === "cloudflare-realtime") return false;
-    return handleNativeAction(
-      this as unknown as NativeMediasoupSfuSession,
-      action,
-    );
+    return handleNativeAction(this, action);
   }
 
   handleReceiveEvent(
     this: NativeMediasoupSfuSession,
     event: import("../types/native-mediasoup.ts").NativeReceiveEvent,
   ) {
-    if (
-      this.cloudflareSession?.handleReceiveEvent(
-        event as unknown as Record<string, unknown>,
-      )
-    )
-      return true;
-    return handleReceiveEvent(
-      this as unknown as NativeMediasoupSfuSession,
-      event,
-    );
+    if (this.cloudflareSession?.handleReceiveEvent(event)) return true;
+    return handleReceiveEvent(this, event);
   }
 
   _handleTransportState(
@@ -314,21 +266,14 @@ export class NativeMediasoupConsumersMethods {
     direction: "send" | "recv",
     state: string,
   ) {
-    return handleNativeMediasoupTransportRecovery(
-      this as unknown as NativeMediasoupSfuSession,
-      direction,
-      state,
-    );
+    return handleNativeMediasoupTransportRecovery(this, direction, state);
   }
 
   restartTransportIce(
     this: NativeMediasoupSfuSession,
     direction: "send" | "recv",
   ) {
-    return restartNativeMediasoupTransportIce(
-      this as unknown as NativeMediasoupSfuSession,
-      direction,
-    );
+    return restartNativeMediasoupTransportIce(this, direction);
   }
 }
 

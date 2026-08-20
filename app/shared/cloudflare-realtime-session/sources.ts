@@ -9,6 +9,7 @@ import type {
   CloudflareSessionLike,
   CloudflareSourceEntry,
   CloudflareSourceInput,
+  CloudflareSourceRequest,
   CloudflareSubscriptionBatchOptions,
   CloudflareSubscriptionGuardPhase,
 } from "../types/cloudflare-media.ts";
@@ -61,13 +62,17 @@ export function bindingStillOwnedForCompensation(
 }
 
 export class CloudflareSourcesMethods {
-  async addSource(this: CloudflareSessionLike, entry: CloudflareSourceInput) {
+  async addSource(this: CloudflareSessionLike, entry: CloudflareSourceRequest) {
     if (!entry?.source)
       throw new Error("A media source identifier is required");
     const source = String(entry.source);
+    const sourceInput: CloudflareSourceInput = {
+      ...entry,
+      generation: entry.generation ?? 1,
+    };
     return this.enqueueSourceOperation(source, async () => {
       await this.initialize();
-      return this.enqueueNegotiation(() => this.addSourceInternal(entry));
+      return this.enqueueNegotiation(() => this.addSourceInternal(sourceInput));
     });
   }
 

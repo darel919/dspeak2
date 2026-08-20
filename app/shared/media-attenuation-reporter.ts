@@ -15,6 +15,13 @@ export interface AttenuationReportInput {
   entry: AttenuationEntry;
 }
 
+export interface MediaAttenuationState {
+  fromPeerId?: string | number | null;
+  source?: string;
+  active?: boolean;
+  effectivePercent?: number | string;
+}
+
 interface AttenuationReport {
   active: boolean;
   effectivePercent: number;
@@ -73,12 +80,7 @@ export function createMediaAttenuationReporter({
       sentStates.set(key, signature);
   }
 
-  function receive(data: {
-    fromPeerId?: string | number | null;
-    source?: string;
-    active?: boolean;
-    effectivePercent?: number | string;
-  }) {
+  function receive(data: MediaAttenuationState) {
     if (
       !data.fromPeerId ||
       data.source !== "screen-audio" ||

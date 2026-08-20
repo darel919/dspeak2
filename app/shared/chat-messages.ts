@@ -1,12 +1,12 @@
 import { apiErrorMessage } from "./api-errors.ts";
 import type { ChatMessageRecord } from "~~/shared/types/message.ts";
 
-export function reconcileSentMessage(
-  messages: ChatMessageRecord[],
+export function reconcileSentMessage<T extends ChatMessageRecord>(
+  messages: T[],
   pendingId: string,
-  serverMessage: ChatMessageRecord,
-): ChatMessageRecord {
-  const pendingIndex = messages.findIndex((message: ChatMessageRecord) => {
+  serverMessage: T,
+): T {
+  const pendingIndex = messages.findIndex((message) => {
     if (message.id === pendingId) return true;
     return (
       message.status === "pending" &&
@@ -32,9 +32,9 @@ export function reconcileSentMessage(
   return pendingMessage;
 }
 
-export function reconcileIncomingMessage(
-  messages: ChatMessageRecord[],
-  serverMessage: ChatMessageRecord,
+export function reconcileIncomingMessage<T extends ChatMessageRecord>(
+  messages: T[],
+  serverMessage: T,
 ) {
   const existing = messages.find((message) => message.id === serverMessage.id);
   if (existing) {
@@ -67,9 +67,9 @@ export function isPendingDuplicate(
   );
 }
 
-export function mergeServerMessagesWithPending(
-  serverMessages: ChatMessageRecord[],
-  cachedMessages: ChatMessageRecord[],
+export function mergeServerMessagesWithPending<T extends ChatMessageRecord>(
+  serverMessages: T[],
+  cachedMessages: T[],
 ) {
   const serverClientIds = new Set(
     serverMessages.map((message) => message.client_id).filter(Boolean),
@@ -82,8 +82,8 @@ export function mergeServerMessagesWithPending(
   return [...serverMessages, ...pendingMessages];
 }
 
-export function removeMessageAliases(
-  messages: ChatMessageRecord[],
+export function removeMessageAliases<T extends ChatMessageRecord>(
+  messages: T[],
   messageId: string,
   clientId = "",
 ) {

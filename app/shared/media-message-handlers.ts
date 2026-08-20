@@ -266,10 +266,22 @@ export function setupMediaMessageHandlers({
     }
   });
   registerHandler("currentlyInChannel", (data: MediaMessage) => {
-    lastInRoom.value = Array.isArray(data.inRoom) ? data.inRoom : [];
-    for (const profile of Array.isArray(data.profiles) ? data.profiles : [])
-      voiceStore.upsertUserProfile(profile);
-    syncConnectedUsers(data.inRoom);
+    const inRoom = Array.isArray(data.inRoom)
+      ? data.inRoom.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
+    lastInRoom.value = inRoom;
+    for (const profile of Array.isArray(data.profiles) ? data.profiles : []) {
+      if (
+        profile &&
+        typeof profile === "object" &&
+        "id" in profile &&
+        typeof profile.id === "string"
+      )
+        voiceStore.upsertUserProfile({ ...profile, id: profile.id });
+    }
+    syncConnectedUsers(inRoom);
     for (const participantState of Array.isArray(data.participantStates)
       ? data.participantStates
       : [])

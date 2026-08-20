@@ -16,6 +16,7 @@ import { waitForOutboundSourceFlow } from "./media-source-flow.ts";
 import { STORAGE_KEYS } from "~/const/storage.ts";
 import { useConfirmDialog } from "~/composables/useConfirmDialog";
 import type {
+  VoiceProducerLike,
   VoiceMediaActionOptions,
   VoiceMediaSessionLike,
 } from "./types/voice-media-actions.ts";
@@ -44,6 +45,18 @@ function voiceError(error: unknown): VoiceErrorLike & { name?: string } {
     };
   }
   return {};
+}
+
+function isVoiceProducerLike(value: unknown): value is VoiceProducerLike {
+  if (!value || typeof value !== "object") return false;
+  if (
+    "track" in value &&
+    value.track != null &&
+    (typeof MediaStreamTrack === "undefined" ||
+      !(value.track instanceof MediaStreamTrack))
+  )
+    return false;
+  return !("on" in value) || typeof value.on === "function";
 }
 
 export function createVoiceMediaActions({
@@ -373,7 +386,7 @@ export function createVoiceMediaActions({
       }
 
       const deadlineAt = Date.now() + VOICE_JOIN_TIMEOUT_MS;
-      sfuComposable.value = (await withVoiceJoinDeadline(
+      sfuComposable.value = await withVoiceJoinDeadline(
         () =>
           mediaModule.useMediasoupSfu({
             voiceStore: getVoiceStore(),
@@ -381,7 +394,7 @@ export function createVoiceMediaActions({
             channelsStore,
           }),
         deadlineAt,
-      )) as unknown as VoiceMediaSessionLike;
+      );
       session = sfuComposable.value;
       if (!session) throw new Error("Voice media session is unavailable");
       await withVoiceJoinDeadline(
@@ -394,7 +407,10 @@ export function createVoiceMediaActions({
         channelsStore.getChannelById(channelId),
       );
       await withVoiceJoinDeadline(
-        () => session!.connect(channelId, { roomId: joiningRoomId }),
+        () =>
+          session!.connect(channelId, {
+            ...(joiningRoomId ? { roomId: joiningRoomId } : {}),
+          }),
         deadlineAt,
       );
       ensureCurrentJoin();
@@ -590,7 +606,8 @@ export function createVoiceMediaActions({
             (closed as Error & { code?: string }).code = "MEDIA_SESSION_CLOSED";
             throw closed;
           }
-          if (producer?.track) producer.track.enabled = true;
+          if (isVoiceProducerLike(producer) && producer.track)
+            producer.track.enabled = true;
           await waitForAudioSourceFlow(session);
           if (!connected.value || sfuComposable.value !== session) {
             const closed = new Error("Voice media session closed");
@@ -747,10 +764,12 @@ export function createVoiceMediaActions({
           syncLocalVoiceState();
           sendParticipantVoiceState();
         };
-        producer?.track?.addEventListener?.("ended", handleScreenShareEnded, {
-          once: true,
-        });
-        producer?.on?.("trackended", handleScreenShareEnded);
+        if (isVoiceProducerLike(producer)) {
+          producer.track?.addEventListener?.("ended", handleScreenShareEnded, {
+            once: true,
+          });
+          producer.on?.("trackended", handleScreenShareEnded);
+        }
       }
       error.value = null;
     } catch (shareError: unknown) {
@@ -814,10 +833,12 @@ export function createVoiceMediaActions({
           syncLocalVoiceState();
           sendParticipantVoiceState();
         };
-        producer?.track?.addEventListener?.("ended", handleEnded, {
-          once: true,
-        });
-        producer?.on?.("trackended", handleEnded);
+        if (isVoiceProducerLike(producer)) {
+          producer.track?.addEventListener?.("ended", handleEnded, {
+            once: true,
+          });
+          producer.on?.("trackended", handleEnded);
+        }
       }
       error.value = null;
     } catch (shareError: unknown) {

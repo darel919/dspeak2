@@ -11,7 +11,6 @@ import { createHybridMediaRegistry } from "~/shared/hybrid-media-registry.ts";
 import { createHybridMediaAudioState } from "~/shared/hybrid-media-audio-state.ts";
 import { RemoteMediaHandoff } from "~/shared/remote-media-handoff.ts";
 import { createHybridMediaTopologyController } from "~/shared/hybrid-media-topology-controller.ts";
-import type { TopologyHandoff } from "~/shared/types/topology-controller.ts";
 import { createHybridMediaSessionTermination } from "~/shared/hybrid-media-session-termination.ts";
 import { mediaDebug } from "~/shared/media-debug.ts";
 import {
@@ -102,7 +101,6 @@ import type {
   HybridSfuSession,
   HybridTopologyController,
   HybridTopologyState,
-  HybridTopologyPeer,
   HybridTopologyWaiter,
 } from "~/shared/types/hybrid-media-session.ts";
 import type { RuntimeDependencyContext } from "~/shared/types/hybrid-media-session-lifecycle.ts";
@@ -110,7 +108,6 @@ import type { HybridMediaSessionApiContext } from "~/shared/types/hybrid-media-s
 import type {
   TopologyData,
   TopologyP2pMesh,
-  TopologySfuSession,
   TopologySourceEntry,
   TopologyState,
 } from "~/shared/types/topology-controller.ts";
@@ -119,6 +116,17 @@ import type { ParticipantMediaCapabilities } from "~/shared/types/video-codec-ca
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function normalizeVideoStatsReport(
+  value: unknown,
+): Map<string, Record<string, unknown>> | null {
+  if (!(value instanceof Map)) return null;
+  const report = new Map<string, Record<string, unknown>>();
+  for (const [key, entry] of value) {
+    if (typeof key === "string" && isRecord(entry)) report.set(key, entry);
+  }
+  return report;
 }
 
 function finiteStat(value: unknown): number | undefined {
@@ -255,20 +263,17 @@ export function useHybridMediaSession() {
       }
       return normalizeReceiverStats(report);
     }
-    const nativeSfu = sfu as unknown as {
-      getInboundRtpStats?: () => Promise<unknown>;
-    } | null;
     let reports: unknown = null;
     let statsCache: {
       promise: Promise<unknown>;
       consumers: number;
     } | null = null;
     try {
-      if (!nativeSfu?.getInboundRtpStats) return null;
+      if (!sfu?.stats) return null;
       if (!nativeSfuStatsCache) {
         let value: unknown;
         try {
-          value = nativeSfu.getInboundRtpStats();
+          value = sfu.stats();
         } catch {
           return null;
         }
@@ -314,33 +319,25 @@ export function useHybridMediaSession() {
   ) {
     if (signal.aborted) return false;
     if (entry.provider === "p2p") {
-      const mesh = p2pMesh as unknown as {
-        connections?: Map<
-          string,
-          { pc?: { restartIce?: () => Promise<unknown> } }
-        >;
-      } | null;
-      const peer = mesh?.connections?.get(String(entry.peerId || ""));
-      if (!peer?.pc?.restartIce) return false;
-      await peer.pc.restartIce();
+      const peer = p2pMesh?.connections.get(String(entry.peerId || ""));
+      if (!peer?.pc) return false;
+      peer.pc.restartIce();
       return false;
     }
-    const provider = sfu as unknown as {
-      closeConsumerByProducer?: (producerId: string) => unknown;
-      requestConsumer?: (producerId: string) => unknown;
-      subscribe?: (publication: unknown) => Promise<unknown>;
-      recoverRemotePublication?: (
-        trackName: string,
-        expectedReceiverIncarnation?: string,
-      ) => Promise<boolean>;
-    } | null;
+    const provider = sfu;
+    if (!provider) return false;
     if (
       entry.provider === "sfu" &&
       !entry.producerId &&
       entry.cloudflareTrackName &&
-      (provider?.recoverRemotePublication || provider?.subscribe)
+      (("recoverRemotePublication" in provider &&
+        typeof provider.recoverRemotePublication === "function") ||
+        ("subscribe" in provider && typeof provider.subscribe === "function"))
     ) {
-      if (provider.recoverRemotePublication)
+      if (
+        "recoverRemotePublication" in provider &&
+        typeof provider.recoverRemotePublication === "function"
+      )
         await provider.recoverRemotePublication(
           String(entry.cloudflareTrackName),
           entry.receiverIncarnationId,
@@ -353,12 +350,22 @@ export function useHybridMediaSession() {
               String(candidate.trackName || "") ===
               String(entry.cloudflareTrackName),
           );
-        if (publication) await provider.subscribe?.(publication);
+        if (
+          publication &&
+          "subscribe" in provider &&
+          typeof provider.subscribe === "function"
+        )
+          await provider.subscribe(publication);
       }
       return false;
     }
     if (entry.provider !== "sfu" || !entry.producerId) return false;
-    if (!provider?.closeConsumerByProducer || !provider.requestConsumer)
+    if (
+      !("closeConsumerByProducer" in provider) ||
+      typeof provider.closeConsumerByProducer !== "function" ||
+      !("requestConsumer" in provider) ||
+      typeof provider.requestConsumer !== "function"
+    )
       return false;
     await provider.closeConsumerByProducer(String(entry.producerId));
     if (signal.aborted) return false;
@@ -725,22 +732,16 @@ export function useHybridMediaSession() {
     getSfu: () => sfu,
     getVideoReport: (source: string) => {
       if (activeProvider === "sfu") {
-        const report = sfu?.producers.get(source)?.producer.getStats();
+        const report = sfu?.producers?.get(source)?.producer?.getStats();
         return report
-          ? Promise.resolve(report).then(
-              (value) =>
-                value as unknown as Map<string, Record<string, unknown>>,
-            )
+          ? Promise.resolve(report).then(normalizeVideoStatsReport)
           : Promise.resolve(null);
       }
       if (activeProvider === "p2p")
         return p2pMesh
           ? p2pMesh
               .getOutboundTrackStats(source)
-              .then(
-                (report) =>
-                  report as unknown as Map<string, Record<string, unknown>>,
-              )
+              .then(normalizeVideoStatsReport)
           : Promise.resolve(null);
       return Promise.resolve(null);
     },
@@ -920,9 +921,9 @@ export function useHybridMediaSession() {
     getProviderSocket: () => providerSocket,
     getRequestedVideoSettings,
     getSelectedSfuProvider: () => selectedSfuProvider,
-    getSfu: () => sfu as unknown as TopologySfuSession | null,
-    getP2pMesh: () => p2pMesh as unknown as TopologyP2pMesh | null,
-    handoff: handoff as unknown as TopologyHandoff,
+    getSfu: () => sfu,
+    getP2pMesh: () => p2pMesh,
+    handoff,
     iceConnectedBoth,
     localSources,
     mediaConnectionState,
@@ -936,7 +937,7 @@ export function useHybridMediaSession() {
       data: TopologyData,
       nextTopologyState: TopologyState,
     ) => {
-      for (const peer of nextTopologyState.peers as HybridTopologyPeer[]) {
+      for (const peer of nextTopologyState.peers) {
         const profileId = peer.profile?.id;
         if (peer.profile && profileId != null)
           voiceStore.upsertUserProfile({
@@ -958,24 +959,22 @@ export function useHybridMediaSession() {
       }
     },
     peerConnectionMetrics,
-    publishLocalSources: async (provider: unknown) => {
-      const p2pMeshLocal = p2pMesh as HybridP2pMesh | null;
-      const sfuLocal = sfu as HybridSfuSession | null;
-      if (provider === p2pMeshLocal && p2pMeshLocal) {
+    publishLocalSources: async (provider) => {
+      if (provider === p2pMesh && p2pMesh) {
         for (const entry of localSources.values()) {
-          await p2pMeshLocal.publishSource(
+          await p2pMesh.publishSource(
             entry.source,
             entry.track,
             entry.stream,
-            entry as any,
+            entry,
           );
         }
-      } else if (provider === sfuLocal && sfuLocal) {
+      } else if (provider === sfu && sfu) {
         for (const entry of localSources.values()) {
-          await sfuLocal.addSource(entry);
+          await sfu.addSource(entry);
         }
-        if (typeof sfuLocal.startSubscriptions === "function") {
-          await sfuLocal.startSubscriptions();
+        if (typeof sfu.startSubscriptions === "function") {
+          await sfu.startSubscriptions();
         }
       }
     },
@@ -985,14 +984,16 @@ export function useHybridMediaSession() {
     replayCloudflarePublications: async (session) => {
       if (!session) return;
       for (const publication of cloudflarePublications.values()) {
-        const pub = publication as Record<string, unknown>;
-        const trackName = pub.trackName;
-        const peerId = pub.peerId;
-        const source = pub.source;
+        const trackName = publication.trackName;
+        const peerId = publication.peerId;
+        const source = publication.source;
         if (!trackName || !peerId || !source) continue;
         if ("handle" in session && typeof session.handle === "function") {
           try {
-            await session.handle("cloudflare-publication-available", pub);
+            await session.handle(
+              "cloudflare-publication-available",
+              publication,
+            );
           } catch (err) {
             mediaDebug("cloudflare-replay-failed", {
               trackName,
@@ -1006,16 +1007,16 @@ export function useHybridMediaSession() {
     sfuRoundTripTime,
     setActiveProvider,
     setP2pMesh: (mesh: TopologyP2pMesh | null) => {
-      p2pMesh = mesh as unknown as HybridP2pMesh | null;
+      p2pMesh = mesh;
     },
     setProviderSocket: (socket) => {
-      providerSocket = socket as HybridProviderSocket | null;
+      providerSocket = socket;
     },
     setSelectedSfuProvider: (provider: string) => {
       selectedSfuProvider = provider;
     },
     setSfu: (session) => {
-      sfu = session as HybridSfuSession | null;
+      sfu = session;
     },
     setConnectionPhase,
     setRouteConnectionState,
@@ -1095,10 +1096,10 @@ export function useHybridMediaSession() {
     getBootstrap: getMediaControlBootstrap,
     handleP2pQualification,
     handleProviderFailure,
-    handleProviderRecovering: (data: Record<string, unknown>) => {
+    handleProviderRecovering: (data: Record<string, unknown> = {}) => {
       return topologyController?.handleProviderRecovering(data);
     },
-    handleProviderTicket: (data: Record<string, unknown>) =>
+    handleProviderTicket: (data: TopologyData) =>
       topologyController?.handleProviderTicket(data),
     mediaPathMetrics,
     peerConnectionMetrics,
@@ -1118,10 +1119,7 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     setConnectionEpoch: (epoch: number) => {
       sessionConnectionEpoch = epoch;
-      const existing = sfu as
-        { controlConnectionEpoch?: number } | null | undefined;
-      if (existing && "controlConnectionEpoch" in existing)
-        existing.controlConnectionEpoch = epoch;
+      if (sfu) sfu.controlConnectionEpoch = epoch;
     },
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     applyRoomRevision,
@@ -1143,7 +1141,7 @@ export function useHybridMediaSession() {
     setLastAppliedPublicationRevision: (value: string) => {
       lastAppliedPublicationRevision.value = value;
     },
-  } as unknown as RuntimeDependencyContext);
+  } satisfies RuntimeDependencyContext);
 
   function normalizeServerRevision(value: unknown): string {
     if (typeof value === "string" && value !== "" && /^\d+$/.test(value)) {
@@ -1301,8 +1299,8 @@ export function useHybridMediaSession() {
     sharedAudioStats,
     sfuRoundTripTime,
     sendParticipantVoiceState,
-    setMediaCapabilities: (value: unknown) => {
-      mediaCapabilities.value = value as ParticipantMediaCapabilities | null;
+    setMediaCapabilities: (value: ParticipantMediaCapabilities | null) => {
+      mediaCapabilities.value = value;
     },
     setRemoteScreenReceiving: (feedKey: string, receiving: boolean) =>
       registry.setVideoReceiving(feedKey, receiving),
@@ -1356,5 +1354,5 @@ export function useHybridMediaSession() {
     applyVolumeForTrack: (userId: string, source: string, volume: number) =>
       registry.applyVolume(userId, source, volume),
     ensureAudioElements: () => registry.ensurePlayback(),
-  } as unknown as HybridMediaSessionApiContext);
+  } satisfies HybridMediaSessionApiContext);
 }

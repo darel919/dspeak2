@@ -1,4 +1,6 @@
 import type { CloudflarePublication } from "./cloudflare-media.ts";
+import type { NativeCloudflareEvent } from "./native-cloudflare.ts";
+import type { SignalingMessage } from "./media-signaling.ts";
 
 export interface NativeCloudflareSessionOptions {
   invoke: NativeCloudflareSessionSurface["invoke"];
@@ -33,7 +35,7 @@ export interface NativeCloudflareSessionSurface {
     operation: string,
     payload?: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
-  send?: (message: unknown) => unknown;
+  send?: (message: SignalingMessage) => unknown;
   ensureControlReady?: () => Promise<unknown>;
   onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
   onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
@@ -135,7 +137,7 @@ export interface NativeCloudflareSessionSurface {
     minDelayMs?: number;
     targetDelayMs?: number;
   }) => unknown;
-  handleReceiveEvent: (event: Record<string, unknown>) => boolean;
+  handleReceiveEvent: (event: NativeCloudflareEvent) => boolean;
   startSubscriptions: () => Promise<unknown>;
   addSource: (
     entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,

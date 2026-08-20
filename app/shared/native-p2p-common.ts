@@ -5,7 +5,6 @@ import {
   normalizeVideoCodecName,
   type VideoCodecName,
 } from "./types/video-codec-capabilities.ts";
-import type { VideoCodec } from "./types/video-settings.ts";
 
 type P2pStat = RTCStats & Record<string, unknown>;
 type P2pTrackEntry =
@@ -14,6 +13,10 @@ interface P2pFlowEntry {
   key: string;
   bytes: number;
   flowing: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object";
 }
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
@@ -135,17 +138,16 @@ export function applyP2pVideoCodecPreferences(
     globalThis.RTCRtpReceiver?.getCapabilities?.("video")?.codecs ||
     globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs;
   if (!capabilities?.length) return false;
-  const sortedPreferences = sortP2pVideoCodecPreferences(
-    capabilities as unknown as VideoCodec[],
-  );
+  const sortedPreferences = sortP2pVideoCodecPreferences(capabilities);
   const allowed = new Set(allowedCodecs || []);
   const preferences = allowed.size
     ? sortedPreferences.filter(
         (codec) =>
           isAuxiliaryP2pVideoCodec(codec.mimeType) ||
-          allowed.has(
-            p2pCodecNameFromMimeType(codec.mimeType) as VideoCodecName,
-          ),
+          (() => {
+            const codecName = p2pCodecNameFromMimeType(codec.mimeType);
+            return codecName !== null && allowed.has(codecName);
+          })(),
       )
     : sortedPreferences;
   const selectedPreferences = preferences.length
@@ -157,11 +159,7 @@ export function applyP2pVideoCodecPreferences(
       transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind;
     if (kind !== "video" || !transceiver.setCodecPreferences) continue;
     try {
-      transceiver.setCodecPreferences(
-        selectedPreferences as unknown as Parameters<
-          RTCRtpTransceiver["setCodecPreferences"]
-        >[0],
-      );
+      transceiver.setCodecPreferences(selectedPreferences);
       applied = true;
     } catch {}
   }
@@ -169,16 +167,35 @@ export function applyP2pVideoCodecPreferences(
 }
 
 export function directIceServers(servers: unknown): RTCIceServer[] {
-  return (Array.isArray(servers) ? servers : []).flatMap((value: unknown) => {
-    if (!value || typeof value !== "object") return [];
-    const server = value as Record<string, unknown>;
+  return normalizeIceServers(servers).flatMap((server) => {
     const urls = (
       Array.isArray(server.urls) ? server.urls : [server.urls]
     ).filter(
       (url) => typeof url === "string" && url.toLowerCase().startsWith("stun:"),
     );
-    if (!urls.length) return [];
-    return [{ urls: Array.isArray(server.urls) ? urls : urls[0] }];
+    const firstUrl = urls[0];
+    if (!firstUrl) return [];
+    return [{ urls: Array.isArray(server.urls) ? urls : firstUrl }];
+  });
+}
+
+export function normalizeIceServers(servers: unknown): RTCIceServer[] {
+  return (Array.isArray(servers) ? servers : []).flatMap((value: unknown) => {
+    if (!isRecord(value)) return [];
+    const server = value;
+    const rawUrls = (
+      Array.isArray(server.urls) ? server.urls : [server.urls]
+    ).filter((url): url is string => typeof url === "string" && url.length > 0);
+    const firstUrl = rawUrls[0];
+    if (!firstUrl) return [];
+    const normalized: RTCIceServer = {
+      urls: Array.isArray(server.urls) ? rawUrls : firstUrl,
+    };
+    if (typeof server.username === "string")
+      normalized.username = server.username;
+    if (typeof server.credential === "string")
+      normalized.credential = server.credential;
+    return [normalized];
   });
 }
 
@@ -338,14 +355,8 @@ export async function mediaFlowSnapshot(
 export function isViableP2pPair(
   pair: Record<string, unknown> | null | undefined,
 ) {
-  const local =
-    pair?.local && typeof pair.local === "object"
-      ? (pair.local as Record<string, unknown>)
-      : null;
-  const remote =
-    pair?.remote && typeof pair.remote === "object"
-      ? (pair.remote as Record<string, unknown>)
-      : null;
+  const local = isRecord(pair?.local) ? pair.local : null;
+  const remote = isRecord(pair?.remote) ? pair.remote : null;
   return (
     !!pair &&
     pair.state === "succeeded" &&

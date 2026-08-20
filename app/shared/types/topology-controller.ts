@@ -3,6 +3,13 @@ import type { JitterBufferConfig } from "./adaptive-media.ts";
 import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type { VideoSettings } from "./video-settings.ts";
 import type { CloudflarePublication } from "./cloudflare-media.ts";
+import type { CloudflareRealtimeSession } from "../cloudflare-realtime-session.ts";
+import type { MediasoupClientSession } from "../mediasoup-client-session.ts";
+import type { RemoteMediaHandoff } from "../remote-media-handoff.ts";
+import type {
+  NativeP2pMeshOptions,
+  NativeP2pMeshSurface,
+} from "./native-p2p.ts";
 
 export interface TopologyPeer {
   peerId?: string;
@@ -60,21 +67,7 @@ export interface TopologyVideoSenderOptions {
   [key: string]: unknown;
 }
 
-export interface TopologyNativeP2pOptions {
-  iceServers: unknown[];
-  sendSignal: (payload: Record<string, unknown>) => unknown;
-  onRemoteTrack: (entry: TopologySourceEntry) => unknown;
-  onRemoteTrackEnded: (entry: TopologySourceEntry) => unknown;
-  onFailure: (failure: unknown) => unknown;
-  onSnapshot: (snapshot: Record<string, unknown>) => unknown;
-  getAudioStereo: (source: string) => boolean;
-  getSenderOptions: (
-    source: string,
-    track: MediaStreamTrack,
-  ) => Record<string, unknown>;
-  mediaCapabilities?: ParticipantMediaCapabilities | null;
-  getControlConnectionEpoch: () => number;
-}
+export type TopologyNativeP2pOptions = NativeP2pMeshOptions;
 
 export interface TopologyProviderActionsContext {
   MediasoupProviderSocket: new (options: {
@@ -105,7 +98,9 @@ export interface TopologyProviderActionsContext {
 }
 
 export interface TopologyResourceHelpersContext {
-  NativeP2pMesh: new (options: TopologyNativeP2pOptions) => TopologyP2pMesh;
+  NativeP2pMesh: new (
+    options: TopologyNativeP2pOptions,
+  ) => NativeP2pMeshSurface;
   buildP2pVideoSenderOptions: (
     options: Record<string, unknown>,
   ) => TopologyVideoSenderOptions;
@@ -161,7 +156,7 @@ export interface TopologyState {
   targetTransport?: "p2p" | "sfu" | null;
   [key: string]: unknown;
 }
-export interface TopologySourceEntry {
+export interface TopologySourceEntry extends Record<string, unknown> {
   source: string;
   track: MediaStreamTrack;
   key?: string;
@@ -184,20 +179,30 @@ export interface TopologyConnectionState {
 export interface TopologySfuSession {
   provider?: string;
   providerId?: string | null;
+  controlConnectionEpoch?: number;
+  lastReceivedConsumerParams?: unknown;
+  lastSentClientRtpCapabilities?: unknown;
+  producers?: ReadonlyMap<
+    string,
+    { producer?: { getStats: () => Promise<unknown> } }
+  >;
+  stats?: () => Promise<unknown>;
+  diagnosticStats?: () => Promise<unknown>;
+  closeConsumerByProducer?: (producerId: string) => unknown;
+  requestConsumer?: (producerId: string) => unknown;
+  subscribe?: (publication: CloudflarePublication) => Promise<unknown>;
+  recoverRemotePublication?: (
+    trackName: string,
+    expectedReceiverIncarnation?: string,
+  ) => Promise<boolean>;
   initialize: () => Promise<unknown>;
   addSource: (entry: TopologySourceEntry) => Promise<unknown>;
-  publishSource: (
-    source: string,
-    track: MediaStreamTrack,
-    stream?: MediaStream,
-    entry?: TopologySourceEntry,
-  ) => Promise<unknown>;
   startSubscriptions?: () => Promise<unknown>;
   connectionState: () => TopologyConnectionState;
   mediaReadiness?: (count: number) => Promise<Record<string, unknown>>;
   expectedInboundFlowCount?: () => number;
-  handle: (type: string, data: unknown) => Promise<unknown>;
-  reconcilePublications: (
+  handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
+  reconcilePublications?: (
     publications: CloudflarePublication[],
     removedPublications?: CloudflarePublication[],
     isStale?: () => boolean,
@@ -207,54 +212,20 @@ export interface TopologySfuSession {
   setJitterBufferConfig: (config: JitterBufferConfig) => unknown;
   [key: string]: unknown;
 }
-export interface TopologyP2pMesh {
-  applyTopology: (data: TopologyData) => Promise<unknown>;
-  publishSource: (
-    source: string,
-    track: MediaStreamTrack,
-    stream?: MediaStream,
-    entry?: TopologySourceEntry,
-  ) => Promise<unknown>;
-  isMediaReady: () => boolean;
-  setJitterBufferConfig: (config: JitterBufferConfig) => unknown;
-  [key: string]: unknown;
-}
-export interface TopologyHandoff {
-  stage: (
-    entry: TopologySourceEntry & { key: string; provider: string },
-    provider: string | null,
-  ) => unknown;
-  remove: (
-    entry: TopologySourceEntry & { key: string; provider: string },
-  ) => unknown;
-  pruneExpectedFeeds: (
-    peers: TopologyPeer[],
-    localPeerId: string | null,
-  ) => unknown;
-  clear: () => unknown;
-  bind: (provider: string) => unknown;
-  retire: (provider: string) => unknown;
-  entries: (provider: "p2p" | "sfu") => Iterable<{
-    userId?: string | number | null;
-    source: string;
-  }>;
-  count: (provider: "p2p" | "sfu") => number;
-  hasExpectedFeeds: (
-    provider: "p2p" | "sfu",
-    peers: TopologyPeer[],
-    localPeerId: string | number | null,
-  ) => boolean;
-}
+export type TopologyP2pMesh = NativeP2pMeshSurface;
+export type TopologyHandoff = RemoteMediaHandoff;
 export interface TopologyGeneration {
   capture: () => number;
   assert: (generation: number) => void;
   retire: () => number;
 }
 export interface TopologyControllerOptions {
-  CloudflareRealtimeSession: unknown;
-  MediasoupClientSession: unknown;
+  CloudflareRealtimeSession: typeof CloudflareRealtimeSession;
+  MediasoupClientSession: typeof MediasoupClientSession;
   MediasoupProviderSocket: TopologyProviderActionsContext["MediasoupProviderSocket"];
-  NativeP2pMesh: unknown;
+  NativeP2pMesh: new (
+    options: TopologyNativeP2pOptions,
+  ) => NativeP2pMeshSurface;
   buildP2pVideoSenderOptions: (
     options: Record<string, unknown>,
   ) => Record<string, unknown>;

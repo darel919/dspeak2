@@ -27,7 +27,6 @@ import type { SoundboardRecord } from "../../shared/types/soundboard.ts";
 import type { AuthorizationRoom } from "../types/room-authorization.ts";
 import type {
   SoundboardBody,
-  SoundboardConversionResult,
   SoundboardEvent,
 } from "../types/soundboard-api.ts";
 
@@ -169,12 +168,10 @@ async function uploadClip(event: SoundboardEvent, userId: string) {
         statusCode: 400,
         statusMessage: "Audio file is required",
       });
-    const converted = (await convertSoundboardSource(
-      source,
-    )) as unknown as SoundboardConversionResult;
+    const converted = await convertSoundboardSource(source);
     const convertedIcon: Buffer | null =
       iconImage instanceof File && iconImage.size
-        ? ((await convertSoundboardIcon(iconImage)) as unknown as Buffer)
+        ? await convertSoundboardIcon(iconImage)
         : null;
 
     const audioKey = `soundboards/${roomId}/${crypto.randomUUID()}.ogg`;
@@ -269,7 +266,7 @@ async function updateClip(event: SoundboardEvent, userId: string) {
   const iconImage = body.iconImage;
   const convertedIcon: Buffer | null =
     iconImage instanceof File && iconImage.size
-      ? ((await convertSoundboardIcon(iconImage)) as unknown as Buffer)
+      ? await convertSoundboardIcon(iconImage)
       : null;
   if (
     body.icon !== undefined &&

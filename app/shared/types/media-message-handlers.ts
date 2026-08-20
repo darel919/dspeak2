@@ -1,6 +1,7 @@
 import type { Ref } from "vue";
 import type { TopologyData } from "./topology-controller.ts";
 import type { TopologyController } from "./topology-controller.ts";
+import type { VoiceUserRecord } from "./voice-media-actions.ts";
 
 export type MediaMessage = Record<string, unknown>;
 
@@ -22,10 +23,10 @@ export interface MediaMessageHandlersContext {
   setHeartbeatAck: (sequence: number, acknowledgedAt: number) => unknown;
   setLocalPeerId: (peerId: string | null) => unknown;
   sfuProducerIds: () => string[];
-  syncConnectedUsers: (data: unknown) => unknown;
+  syncConnectedUsers: (data?: unknown[]) => unknown;
   voiceStore: {
     updateUserVoiceState: (userId: string, data: MediaMessage) => unknown;
-    upsertUserProfile: (profile: MediaMessage) => unknown;
+    upsertUserProfile: (profile: VoiceUserRecord) => unknown;
   };
   ensureP2p: () => {
     receiveSignal: (data: MediaMessage) => Promise<unknown>;

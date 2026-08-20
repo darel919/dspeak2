@@ -467,18 +467,14 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function completeWebSignIn(code: string) {
-    const fetchUnknown = $fetch as unknown as (
-      url: string,
-      options: Record<string, unknown>,
-    ) => Promise<unknown>;
-    const tokens = (await fetchUnknown(
+    const tokens = await $fetch<AuthTokenResponse>(
       `${config.public.apiPath}/auth/callback-session`,
       {
         method: "POST",
         credentials: "include",
         body: { code },
       },
-    )) as AuthTokenResponse;
+    );
     const { getSupabaseClient } = await import("~/utils/supabase-client");
     const client = getSupabaseClient();
     if (!client) throw new Error("Supabase client is not configured");

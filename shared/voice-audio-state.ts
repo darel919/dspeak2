@@ -16,49 +16,50 @@ const DEFAULT_SHARED_AUDIO_DUCKING = Object.freeze({
   effectivePercent: 100,
 });
 
-import type {
-  SharedAudioAttenuationLike,
-  SharedAudioDuckingLike,
-  SharedAudioStatsLike,
-} from "./types/voice.ts";
-
 function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-export function normalizeSharedAudioStats(stats: SharedAudioStatsLike) {
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : {};
+}
+
+export function normalizeSharedAudioStats(stats: unknown) {
+  const values = record(stats);
   return {
-    kbps: finiteNumber(stats?.kbps, DEFAULT_SHARED_AUDIO_STATS.kbps),
-    level: finiteNumber(stats?.level, DEFAULT_SHARED_AUDIO_STATS.level),
-    dbfs: finiteNumber(stats?.dbfs, DEFAULT_SHARED_AUDIO_STATS.dbfs),
+    kbps: finiteNumber(values.kbps, DEFAULT_SHARED_AUDIO_STATS.kbps),
+    level: finiteNumber(values.level, DEFAULT_SHARED_AUDIO_STATS.level),
+    dbfs: finiteNumber(values.dbfs, DEFAULT_SHARED_AUDIO_STATS.dbfs),
   };
 }
 
-export function normalizeSharedAudioAttenuation(
-  attenuation: SharedAudioAttenuationLike,
-) {
+export function normalizeSharedAudioAttenuation(attenuation: unknown) {
+  const values = record(attenuation);
   return {
-    active: attenuation?.active === true,
+    active: values.active === true,
     effectivePercent: finiteNumber(
-      attenuation?.effectivePercent,
+      values.effectivePercent,
       DEFAULT_SHARED_AUDIO_ATTENUATION.effectivePercent,
     ),
     expectedListeners: finiteNumber(
-      attenuation?.expectedListeners,
+      values.expectedListeners,
       DEFAULT_SHARED_AUDIO_ATTENUATION.expectedListeners,
     ),
     reportingListeners: finiteNumber(
-      attenuation?.reportingListeners,
+      values.reportingListeners,
       DEFAULT_SHARED_AUDIO_ATTENUATION.reportingListeners,
     ),
   };
 }
 
-export function normalizeSharedAudioDucking(ducking: SharedAudioDuckingLike) {
+export function normalizeSharedAudioDucking(ducking: unknown) {
+  const values = record(ducking);
   return {
-    active: ducking?.active === true,
+    active: values.active === true,
     effectivePercent: finiteNumber(
-      ducking?.effectivePercent,
+      values.effectivePercent,
       DEFAULT_SHARED_AUDIO_DUCKING.effectivePercent,
     ),
   };

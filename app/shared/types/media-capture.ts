@@ -29,6 +29,7 @@ export interface MediaCaptureEntry {
 export interface MediaCaptureStartOptions {
   captureSelection?: DesktopCaptureSelection | null;
   explicitBrowserFallback?: boolean;
+  includeSystemAudio?: boolean;
   roomBitrateBps?: number | null;
 }
 

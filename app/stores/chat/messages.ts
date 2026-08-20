@@ -150,9 +150,10 @@ export function createChatMessageActions(context: ChatStoreContext) {
           break;
         case "notification_created":
         case "notifications_read":
-          context.dependencies
-            .useNotificationsStore()
-            .receiveRealtime(data as never);
+          context.dependencies.useNotificationsStore().receiveRealtime({
+            type: data.type,
+            data: data.data,
+          });
           break;
         default:
           context.dependencies.debugLog(

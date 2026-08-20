@@ -9,10 +9,41 @@ export interface RtcTransportPair {
   bytesReceived?: number;
   availableOutgoingBitrate?: number;
   availableIncomingBitrate?: number;
+  local?: { candidateType?: unknown; protocol?: unknown };
   [key: string]: unknown;
 }
 
+interface RtcInboundAudioStats {
+  jitter?: unknown;
+  jitterBufferDelay?: unknown;
+  averageJitterBufferTargetDelay?: unknown;
+  averageJitterBufferMinimumDelay?: unknown;
+  averageJitterBufferTargetDelayMs?: unknown;
+  averageJitterBufferMinimumDelayMs?: unknown;
+  jitterBufferEmittedCount?: unknown;
+}
+
+interface RtcPeerConnectionStates {
+  connectionState?: unknown;
+  iceConnectionState?: unknown;
+  signalingState?: unknown;
+}
+
 export interface RtcTransportSnapshot extends PeerMetric {
+  id?: unknown;
+  rttMs?: unknown;
+  jitterMs?: unknown;
+  packetLossPercent?: unknown;
+  availableOutgoingBitrate?: unknown;
+  availableIncomingBitrate?: unknown;
+  jitterBufferDelayMs?: unknown;
+  jitterBufferTargetDelayMs?: unknown;
+  jitterBufferMinimumDelayMs?: unknown;
+  jitterBufferEmittedCount?: unknown;
+  candidateType?: unknown;
+  protocol?: unknown;
+  pcStates?: RtcPeerConnectionStates;
+  inboundAudio?: RtcInboundAudioStats;
   candidatePair?:
     (RtcTransportPair & NonNullable<PeerMetric["candidatePair"]>) | null;
   [key: string]: unknown;
@@ -21,7 +52,7 @@ export interface RtcTransportSnapshot extends PeerMetric {
 export interface RtcStatsSnapshot {
   timestamp: number;
   transports?: RtcTransportSnapshot[];
-  protocol?: string | null;
+  protocol?: unknown;
   lifecycle?: unknown[];
   readiness?: unknown;
   [key: string]: unknown;

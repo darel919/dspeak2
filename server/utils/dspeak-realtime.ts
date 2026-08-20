@@ -15,7 +15,19 @@ async function loadPublisher(): Promise<RealtimePublisher | null> {
   }
   const { supabaseAdmin } = await import("../auth/supabase.ts");
   if (!supabaseAdmin) return null;
-  realtimePublisher = supabaseAdmin as unknown as RealtimePublisher;
+  realtimePublisher = {
+    channel(topic, options) {
+      const channel = supabaseAdmin.channel(
+        topic,
+        options?.config
+          ? { config: { private: options.config.private === true } }
+          : undefined,
+      );
+      return {
+        httpSend: (event, message) => channel.httpSend(event, message),
+      };
+    },
+  };
   return realtimePublisher;
 }
 

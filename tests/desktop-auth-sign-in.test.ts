@@ -50,7 +50,8 @@ test("desktop sign-in uses Supabase OAuth PKCE flow", () => {
   assert.match(authStore, /DESKTOP_OAUTH_CALLBACK_RECEIVED/);
   assert.match(authStore, /DESKTOP_OAUTH_STATE_VALIDATED/);
   assert.match(authStore, /DESKTOP_OAUTH_CODE_EXCHANGE_SUCCEEDED/);
-  assert.match(authStore, /DESKTOP_API_SESSION_BRIDGE_STARTED/);
+  assert.match(authStore, /SESSION_BRIDGE_REQUEST/);
+  assert.match(authStore, /SESSION_BRIDGE_RESPONSE/);
   assert.match(authStore, /DESKTOP_API_SESSION_BRIDGE_SUCCEEDED/);
   assert.match(authStore, /DESKTOP_SIGN_IN_COMPLETE/);
   assert.match(authStore, /desktop-session/);
@@ -132,15 +133,14 @@ test("duplicate callback cannot start a restore while the bridge is in flight", 
   );
 });
 
-test("original bridge error is rethrown through the restore fallback", () => {
+test("original bridge error is preserved and rethrown before restore fallback", () => {
   assert.match(
     authStore,
-    /catch \(error\) \{[\s\S]*?if \(await restoreSession\(\)\) \{[\s\S]*?return true;\s*\}[\s\S]*?throw error;/,
+    /request\.then\(\s*\(\) => \{[\s\S]*?\},\s*\(error\) => \{\n\s*if \(desktopCallbackPromise !== request\) return;\n\s*desktopCallbackPromiseError = error;\n\s*desktopCallbackPromise = null;\n\s*desktopCallbackCode = "";/,
   );
-  assert.match(authStore, /throw error;/);
   assert.match(
     authStore,
-    /if \(\n\s*desktopCallbackPromiseError &&\n\s*isDesktopAuthError\(desktopCallbackPromiseError\)\n\s*\) \{[\s\S]*?throw desktopCallbackPromiseError;/,
+    /if \(desktopOAuthSessionExchanged\) \{[\s\S]*?if \(\n\s*desktopCallbackPromiseError &&\n\s*isDesktopAuthError\(desktopCallbackPromiseError\)\n\s*\) \{\n\s*throw desktopCallbackPromiseError;\n\s*\}\n\s*const restoreResult = await restoreSessionDetailed\(\);/,
   );
 });
 

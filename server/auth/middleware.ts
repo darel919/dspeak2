@@ -5,6 +5,8 @@ import {
 } from "./supabase.ts";
 import type { AuthEvent } from "../types/auth.ts";
 
+type BearerEvent = Pick<H3Event, "headers" | "context">;
+
 export function hasVerifiedBearerContext(
   event: Pick<H3Event, "context">,
 ): boolean {
@@ -12,7 +14,7 @@ export function hasVerifiedBearerContext(
 }
 
 function setBearerAuthContext(
-  event: AuthEvent,
+  event: BearerEvent,
   token: string,
   payload: SupabaseAccessTokenClaims,
 ) {
@@ -31,22 +33,24 @@ function requireBearerClaims(payload: unknown): SupabaseAccessTokenClaims {
   if (
     !payload ||
     typeof payload !== "object" ||
-    typeof (payload as { sub?: unknown }).sub !== "string" ||
-    !(payload as { sub: string }).sub
+    Array.isArray(payload) ||
+    !("sub" in payload) ||
+    typeof payload.sub !== "string" ||
+    !payload.sub
   ) {
     throw new Error("Supabase access token has no subject");
   }
-  return payload as SupabaseAccessTokenClaims;
+  return { ...payload, sub: payload.sub };
 }
 
 export async function ensureVerifiedBearer(
-  event: AuthEvent,
+  event: BearerEvent,
   verifier: (
     token: string,
   ) => Promise<SupabaseAccessTokenClaims> = verifySupabaseAccessToken,
 ) {
   if (hasVerifiedBearerContext(event))
-    return event.context.authPayload as SupabaseAccessTokenClaims;
+    return requireBearerClaims(event.context.authPayload);
 
   const token = extractBearerToken(event);
   if (!token) return null;

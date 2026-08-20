@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMediaSourceController } from "../app/shared/media-source-controller.ts";
+import { FakeMediaStreamTrack } from "./helpers/fake-media.ts";
+import type { TopologySourceEntry } from "../app/shared/types/topology-controller.ts";
+
+function sourceEntry(source: string, id: string): TopologySourceEntry {
+  return {
+    source,
+    track: new FakeMediaStreamTrack(source === "audio" ? "audio" : "video", id),
+  };
+}
 
 function controller(overrides: Record<string, unknown> = {}) {
   const localSources = new Map();
@@ -108,10 +117,7 @@ test("stop commits control intent before provider transport cleanup", async () =
     }),
     getP2pMesh: () => null,
   });
-  const entry = {
-    source: "screen",
-    track: { id: "screen-track" },
-  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  const entry = sourceEntry("screen", "screen-track");
   harness.localSources.set(entry.source, entry);
 
   const removal = harness.instance.removeSource(entry);
@@ -135,10 +141,7 @@ test("stop commits control intent before provider transport cleanup", async () =
 
 test("stop ACK timeout marks the source reconciling and never settles idle", async () => {
   const harness = controller({ autoAck: false });
-  const entry = {
-    source: "screen",
-    track: { id: "screen-track" },
-  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  const entry = sourceEntry("screen", "screen-track");
   harness.localSources.set(entry.source, entry);
   const timeoutMs = 15_000;
 
@@ -591,10 +594,7 @@ test("stale-generation STOP: NACK adopts canonical generation, retries inactive,
     }),
   });
 
-  const entry = {
-    source: "screen",
-    track: { id: "screen-track" },
-  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  const entry = sourceEntry("screen", "screen-track");
   harness.localSources.set(entry.source, entry);
 
   const removal = harness.instance.removeSource(entry);
@@ -711,10 +711,7 @@ test("stop ACK lost: server already committed inactive, canonical snapshot says 
     }),
   });
 
-  const entry = {
-    source: "screen",
-    track: { id: "screen-track" },
-  } as unknown as Parameters<typeof harness.instance.removeSource>[0];
+  const entry = sourceEntry("screen", "screen-track");
   harness.localSources.set(entry.source, entry);
 
   const removal = harness.instance.removeSource(entry);

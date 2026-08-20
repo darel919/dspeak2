@@ -103,7 +103,7 @@ export const noUnsafeDictionaryTypeRule = defineRule({
     type: "problem",
     docs: {
       description:
-        "Disallow object-dictionary contracts whose direct value type is unknown, any, object, {}, or a union/alias containing one of those escape hatches.",
+        "Disallow object-dictionary contracts whose direct value type is any, object, {}, or a union/alias containing one of those escape hatches.",
     },
     messages: {
       unsafeDictionary:

@@ -5,9 +5,34 @@ import type {
   MediaReadinessContext,
 } from "./types/hybrid-media-diagnostics.ts";
 import { getSharedStatsSnapshot } from "./rtc-stats-sampler.ts";
+import type {
+  RtcStatsSnapshot,
+  RtcTransportSnapshot,
+} from "./types/rtc-stats.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function normalizeDiagnosticParameters(value: unknown): {
+  encodings?: Array<Record<string, unknown>>;
+  degradationPreference?: string;
+} | null {
+  if (!isRecord(value)) return null;
+  const encodings = Array.isArray(value.encodings)
+    ? value.encodings.filter(isRecord)
+    : undefined;
+  const degradationPreference =
+    typeof value.degradationPreference === "string"
+      ? value.degradationPreference
+      : undefined;
+  return { encodings, degradationPreference };
 }
 
 function isDiagnosticSourceEntry(
@@ -18,6 +43,76 @@ function isDiagnosticSourceEntry(
     typeof value.source === "string" &&
     value.track instanceof MediaStreamTrack
   );
+}
+
+export function normalizeRtcTransport(
+  value: Record<string, unknown>,
+): RtcTransportSnapshot {
+  const candidatePair = isRecord(value.candidatePair)
+    ? {
+        currentRoundTripTime: value.candidatePair.currentRoundTripTime,
+        packetLoss: value.candidatePair.packetLoss,
+        local: isRecord(value.candidatePair.local)
+          ? {
+              candidateType: value.candidatePair.local.candidateType,
+              protocol: value.candidatePair.local.protocol,
+            }
+          : undefined,
+        remote: isRecord(value.candidatePair.remote)
+          ? { address: value.candidatePair.remote.address }
+          : undefined,
+        availableOutgoingBitrate: finiteNumber(
+          value.candidatePair.availableOutgoingBitrate,
+        ),
+        availableIncomingBitrate: finiteNumber(
+          value.candidatePair.availableIncomingBitrate,
+        ),
+      }
+    : null;
+  return {
+    id: value.id,
+    peerId: value.peerId,
+    userId: value.userId,
+    rtt: value.rtt,
+    rttMs: value.rttMs,
+    packetLoss: value.packetLoss,
+    packetLossPercent: value.packetLossPercent,
+    jitter: value.jitter,
+    jitterMs: value.jitterMs,
+    pcStates: isRecord(value.pcStates)
+      ? { iceConnectionState: value.pcStates.iceConnectionState }
+      : undefined,
+    candidatePair,
+    inboundAudio: isRecord(value.inboundAudio)
+      ? {
+          jitter: value.inboundAudio.jitter,
+          jitterBufferDelay: value.inboundAudio.jitterBufferDelay,
+          averageJitterBufferTargetDelay:
+            value.inboundAudio.averageJitterBufferTargetDelay,
+          averageJitterBufferMinimumDelay:
+            value.inboundAudio.averageJitterBufferMinimumDelay,
+          averageJitterBufferTargetDelayMs:
+            value.inboundAudio.averageJitterBufferTargetDelayMs,
+          averageJitterBufferMinimumDelayMs:
+            value.inboundAudio.averageJitterBufferMinimumDelayMs,
+          jitterBufferEmittedCount: value.inboundAudio.jitterBufferEmittedCount,
+        }
+      : undefined,
+    outboundAudio: isRecord(value.outboundAudio)
+      ? { packetsSent: value.outboundAudio.packetsSent }
+      : undefined,
+    remoteInboundAudio: isRecord(value.remoteInboundAudio)
+      ? { fractionLost: value.remoteInboundAudio.fractionLost }
+      : undefined,
+    availableOutgoingBitrate: value.availableOutgoingBitrate,
+    availableIncomingBitrate: value.availableIncomingBitrate,
+    jitterBufferDelayMs: value.jitterBufferDelayMs,
+    jitterBufferTargetDelayMs: value.jitterBufferTargetDelayMs,
+    jitterBufferMinimumDelayMs: value.jitterBufferMinimumDelayMs,
+    jitterBufferEmittedCount: value.jitterBufferEmittedCount,
+    candidateType: value.candidateType,
+    protocol: value.protocol,
+  };
 }
 
 export function createHybridMediaDiagnostics({
@@ -46,16 +141,18 @@ export function createHybridMediaDiagnostics({
 }: HybridMediaDiagnosticsContext) {
   const statsCacheOwner = {};
   function sfuProducerIds() {
-    const sfu = getSfu() as DiagnosticProvider | null;
+    const sfu = getSfu();
     return sfu?.producers
-      ? [...sfu.producers.values()].map((entry) => entry.producer.id)
+      ? [...sfu.producers.values()]
+          .map((entry) => entry.producer?.id)
+          .filter((id): id is string => typeof id === "string")
       : [];
   }
 
-  async function collectWebRTCStatsSnapshot() {
+  async function collectWebRTCStatsSnapshot(): Promise<RtcStatsSnapshot> {
     const activeProvider = getActiveProvider();
-    const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
-    const sfu = getSfu() as DiagnosticProvider | null;
+    const p2pMesh = getP2pMesh();
+    const sfu = getSfu();
     let p2pEdges: Array<Record<string, unknown>> = [];
     if (activeProvider === "p2p" && p2pMesh) {
       const edges = await p2pMesh.getSnapshot?.()?.catch(() => null);
@@ -69,16 +166,22 @@ export function createHybridMediaDiagnostics({
         ? (await sfu?.stats?.()) || []
         : (await p2pMesh?.stats?.()) || [];
     const transports = (Array.isArray(rawTransports) ? rawTransports : [])
-      .filter(Boolean)
-      .map((transport) => ({
-        ...transport,
-        pcStates: {
-          connectionState: transport.pcStates?.connectionState || "unknown",
-          iceConnectionState:
-            transport.pcStates?.iceConnectionState || "unknown",
-          signalingState: transport.pcStates?.signalingState || "unknown",
-        },
-      }));
+      .filter(isRecord)
+      .map((transport) => {
+        const normalized = normalizeRtcTransport(transport);
+        const rawPcStates = isRecord(transport.pcStates)
+          ? transport.pcStates
+          : {};
+        return {
+          ...normalized,
+          pcStates: {
+            ...normalized.pcStates,
+            connectionState: rawPcStates.connectionState || "unknown",
+            iceConnectionState: rawPcStates.iceConnectionState || "unknown",
+            signalingState: rawPcStates.signalingState || "unknown",
+          },
+        };
+      });
     const pair =
       activeProvider === "sfu"
         ? transports.find((transport) => transport.candidatePair)
@@ -87,12 +190,13 @@ export function createHybridMediaDiagnostics({
     const providerRttMs = transports.find((transport) =>
       Number.isFinite(Number(transport.rttMs)),
     )?.rttMs;
+    const normalizedProviderRttMs = finiteNumber(providerRttMs);
+    const normalizedPairRttSeconds = finiteNumber(pair?.currentRoundTripTime);
     sfuRoundTripTime.value =
-      providerRttMs != null
-        ? providerRttMs
-        : pair?.currentRoundTripTime == null
-          ? null
-          : pair.currentRoundTripTime * 1000;
+      normalizedProviderRttMs ??
+      (normalizedPairRttSeconds == null
+        ? null
+        : normalizedPairRttSeconds * 1000);
     if (activeProvider === "sfu" && sfuRoundTripTime.value != null)
       send({ type: "client-sfu-rtt", data: { rttMs: sfuRoundTripTime.value } });
     const paths =
@@ -104,10 +208,9 @@ export function createHybridMediaDiagnostics({
             packetLossPercent: edge.packetLoss,
             availableOutgoingBitrate: edge.bitrate,
             candidateType:
-              (
-                edge.candidatePair as
-                  { local?: { candidateType?: string } } | undefined
-              )?.local?.candidateType || null,
+              isRecord(edge.candidatePair) && isRecord(edge.candidatePair.local)
+                ? edge.candidatePair.local.candidateType || null
+                : null,
             protocol: edge.network,
           }))
         : transports.map((transport) => ({
@@ -162,10 +265,11 @@ export function createHybridMediaDiagnostics({
         },
       });
     refreshTopologyGraph(pair);
+    const lifecycleValue = getLifecycle?.();
     return {
       timestamp: Date.now(),
       protocol: getProtocolState?.() || null,
-      lifecycle: getLifecycle?.() || [],
+      lifecycle: Array.isArray(lifecycleValue) ? lifecycleValue : [],
       readiness: getReadiness?.() || null,
       media: {
         localAudioTracks: [...localSources.values()].filter(
@@ -176,7 +280,12 @@ export function createHybridMediaDiagnostics({
         audioLatency: getAudioLatencySnapshot?.() || null,
       },
       peerRoundTripTime: Object.keys(peerRoundTripTimes.value).length
-        ? Math.max(...(Object.values(peerRoundTripTimes.value) as number[]))
+        ? Math.max(
+            ...Object.values(peerRoundTripTimes.value).filter(
+              (value): value is number =>
+                typeof value === "number" && Number.isFinite(value),
+            ),
+          )
         : null,
       transports,
       topology: topologyGraph.value.topology,
@@ -191,8 +300,8 @@ export function createHybridMediaDiagnostics({
 
   async function getOutboundRtpStats() {
     const activeProvider = getActiveProvider();
-    const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
-    const sfu = getSfu() as DiagnosticProvider | null;
+    const p2pMesh = getP2pMesh();
+    const sfu = getSfu();
     const results: Array<Record<string, unknown>> = [];
     for (const entry of localSources.values()) {
       const settings = entry.track.getSettings?.() || {};
@@ -218,7 +327,9 @@ export function createHybridMediaDiagnostics({
       if (collected?.sample) rtpStatsSamples.set(key, collected.sample);
       const senderParameters =
         activeProvider === "p2p"
-          ? p2pMesh?.getOutboundTrackParameters?.(entry.source)
+          ? normalizeDiagnosticParameters(
+              p2pMesh?.getOutboundTrackParameters?.(entry.source),
+            )
           : producer?.rtpParameters;
       const encoding = senderParameters?.encodings?.[0] || null;
       results.push({
@@ -247,14 +358,14 @@ export function createHybridMediaDiagnostics({
   }
 
   async function getInboundRtpStats() {
-    const p2pMesh = getP2pMesh() as DiagnosticProvider | null;
+    const p2pMesh = getP2pMesh();
     const results: Array<Record<string, unknown>> = [];
     const remoteAudioEntries = [...remoteAudioFeeds.value.values()].filter(
       isDiagnosticSourceEntry,
-    ) as DiagnosticSourceEntry[];
+    );
     const remoteVideoEntries = [...remoteVideoFeeds.value.values()].filter(
       isDiagnosticSourceEntry,
-    ) as DiagnosticSourceEntry[];
+    );
     const remoteFeeds = [...remoteAudioEntries, ...remoteVideoEntries];
     for (const entry of remoteFeeds) {
       const settings = entry.track.getSettings?.() || {};
@@ -263,7 +374,7 @@ export function createHybridMediaDiagnostics({
         ? await entry.consumer.getStats().catch(() => null)
         : p2pMesh?.getInboundTrackStats
           ? await p2pMesh
-              .getInboundTrackStats?.(entry.peerId, entry.track)
+              .getInboundTrackStats?.(entry.peerId ?? "", entry.track)
               .catch(() => null)
           : null;
       const collected = report
@@ -292,9 +403,7 @@ export function createHybridMediaDiagnostics({
   }
 
   async function getWebRTCDiagnosticStats() {
-    const provider = (
-      getActiveProvider() === "sfu" ? getSfu() : getP2pMesh()
-    ) as DiagnosticProvider | null;
+    const provider = getActiveProvider() === "sfu" ? getSfu() : getP2pMesh();
     if (typeof provider?.diagnosticStats !== "function") return [];
     return (await provider.diagnosticStats()) || [];
   }

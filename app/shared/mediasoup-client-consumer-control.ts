@@ -34,7 +34,12 @@ export async function setMediasoupConsumerReceiving(
     }
     try {
       const result = await acknowledgement;
-      if (result?.consumerClosed) {
+      const consumerClosed =
+        result !== null &&
+        typeof result === "object" &&
+        "consumerClosed" in result &&
+        result.consumerClosed === true;
+      if (consumerClosed) {
         if (entry.receivingRevision === revision) {
           entry.track.enabled = false;
           entry.receiving = false;

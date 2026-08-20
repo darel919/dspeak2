@@ -12,16 +12,16 @@ export interface DiagnosticSourceEntry {
 }
 
 export interface DiagnosticProvider {
-  producers?: Map<string, { producer: DiagnosticProducer }>;
+  producers?: ReadonlyMap<string, { producer?: DiagnosticProducer }>;
   stats?: () => Promise<unknown>;
   diagnosticStats?: () => Promise<unknown>;
   getSnapshot?: () => Promise<unknown>;
   getOutboundTrackStats?: (source: string) => Promise<unknown>;
   getInboundTrackStats?: (
-    peerId: string | number | null | undefined,
+    peerId: string | number,
     track: MediaStreamTrack,
   ) => Promise<unknown>;
-  getOutboundTrackParameters?: (source: string) => DiagnosticParameters | null;
+  getOutboundTrackParameters?: (source: string) => unknown;
 }
 
 export interface DiagnosticProducer {
@@ -55,17 +55,17 @@ export interface HybridMediaDiagnosticsContext {
   getActiveProvider: () => string | null;
   getActiveRouteProvider?: () => string | null;
   getAudioLatencySnapshot?: () => Record<string, unknown>;
-  getP2pMesh: () => unknown;
+  getP2pMesh: () => DiagnosticProvider | null;
   getRequestedVideoSettings: (source: string) => { frameRate?: number };
   getLifecycle: () => unknown;
   getProtocolState: () => unknown;
   getReadiness: () => unknown;
-  getSfu: () => unknown;
+  getSfu: () => DiagnosticProvider | null;
   localSources: Map<string, DiagnosticSourceEntry>;
   playbackState: Ref<string>;
   peerRoundTripTimes: Ref<Record<string, unknown>>;
   remoteAudioFeeds: Ref<Map<string, unknown>>;
-  refreshTopologyGraph: (pair: null) => void;
+  refreshTopologyGraph: (pair: unknown) => void;
   remoteVideoFeeds: Ref<Map<string, unknown>>;
   send: (message: SignalingMessage) => unknown;
   sfuRoundTripTime: Ref<number | null>;

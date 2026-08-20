@@ -36,6 +36,7 @@ import { createChatMessageActions } from "./messages.ts";
 import { createChatReadActions } from "./reads.ts";
 import { createChatTransportActions } from "./transport.ts";
 import type {
+  ChatActionSet,
   ChatDependencies,
   ChatMessage,
   ChatRuntime,
@@ -103,8 +104,58 @@ export const useChatStore = defineStore("chat", () => {
     debugLog,
     hasTauriRuntimeMarker,
     getSupabaseClient,
+  } satisfies ChatDependencies;
+  const uninitializedAction = <T extends unknown[]>(..._args: T): never => {
+    throw new Error("Chat store action was used before initialization");
   };
-  const context = {
+  const initialActions: ChatActionSet = {
+    boundedMessages: uninitializedAction,
+    setChannelMessages: uninitializedAction,
+    isChannelPrepared: uninitializedAction,
+    prepareChannel: uninitializedAction,
+    prepareChannels: uninitializedAction,
+    fetchMessages: uninitializedAction,
+    handleBackgroundSyncSuccess: uninitializedAction,
+    handleBackgroundSyncFailure: uninitializedAction,
+    handleServiceWorkerMessage: uninitializedAction,
+    handleServiceWorkerControllerChange: uninitializedAction,
+    closeActiveTransport: uninitializedAction,
+    joinChannelMembership: uninitializedAction,
+    registerPageHideLeave: uninitializedAction,
+    leaveChannelMembership: uninitializedAction,
+    handleBrowserOffline: uninitializedAction,
+    handleBrowserOnline: uninitializedAction,
+    requestBackgroundSync: uninitializedAction,
+    triggerManualSync: uninitializedAction,
+    scheduleReconnect: uninitializedAction,
+    connectToChannel: uninitializedAction,
+    disconnectFromChannel: uninitializedAction,
+    handleWebSocketMessage: uninitializedAction,
+    handleParticipantChange: uninitializedAction,
+    sendMessage: uninitializedAction,
+    updateMessageReadBy: uninitializedAction,
+    updateMessage: uninitializedAction,
+    chatResponseError: uninitializedAction,
+    editMessage: uninitializedAction,
+    deleteMessage: uninitializedAction,
+    fetchMessageHistory: uninitializedAction,
+    removeMessage: uninitializedAction,
+    updateTypingStatus: uninitializedAction,
+    markMessageAsRead: uninitializedAction,
+    legacyReadStorageKey: uninitializedAction,
+    hydratePendingReadIds: uninitializedAction,
+    persistPendingReadIds: uninitializedAction,
+    scheduleReadFlush: uninitializedAction,
+    flushPendingReads: uninitializedAction,
+    sendTypingIndicator: uninitializedAction,
+    clearChat: uninitializedAction,
+    handleNewMessageNotification: uninitializedAction,
+    fetchBookmarks: uninitializedAction,
+    fetchPinned: uninitializedAction,
+    searchMessages: uninitializedAction,
+    undoMessage: uninitializedAction,
+  };
+  const context: ChatStoreContext = {
     messages,
     loading,
     error,
@@ -130,10 +181,9 @@ export const useChatStore = defineStore("chat", () => {
     INACTIVE_CHANNEL_MESSAGE_LIMIT: 300,
     CHANNEL_MEMORY_LIMIT: 8,
     runtime,
-    dependencies: dependencies as unknown as ChatDependencies,
-    legacyReadStorageKey: (userId: string) =>
-      `dspeak2_unread_message_ids_${userId}`,
-  } as unknown as ChatStoreContext;
+    dependencies,
+    ...initialActions,
+  };
 
   Object.assign(
     context,

@@ -56,7 +56,7 @@ export async function getMediaControlBootstrap({
   channelId: string;
   connectionMode: string;
   deviceId: string;
-  roomId: string;
+  roomId: string | null;
 }) {
   type BootstrapHeaders = { "Content-Type": string; Authorization?: string };
   const headers: BootstrapHeaders = {

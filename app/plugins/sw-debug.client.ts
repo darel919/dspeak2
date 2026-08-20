@@ -29,11 +29,11 @@ export default defineNuxtPlugin({
         { immediate: true },
       );
 
-      const registerHook = nuxtApp.hook as unknown as (
-        name: string,
-        callback: () => void,
-      ) => void;
-      registerHook("app:beforeUnmount", stopAuthWatcher);
+      const unmount = nuxtApp.vueApp.unmount.bind(nuxtApp.vueApp);
+      nuxtApp.vueApp.unmount = () => {
+        stopAuthWatcher();
+        unmount();
+      };
     } catch (error) {
       console.error("[ServiceWorker] Initialization failed:", error);
     }

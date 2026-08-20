@@ -4,11 +4,7 @@ import { db } from "../db/client.ts";
 import { profileRepository } from "../db/repositories/profiles.ts";
 import { putObject, deleteObject } from "../storage/r2.ts";
 import { fetchPublicBytes } from "../infrastructure/network/outbound-request.ts";
-import type {
-  OAuthProfileRecord,
-  PublicBytes,
-  SupabaseUser,
-} from "../types/auth.ts";
+import type { OAuthProfileRecord, SupabaseUser } from "../types/auth.ts";
 
 const profileProvisioningTimeoutMs = 15_000;
 
@@ -32,6 +28,12 @@ function supportedAvatarType(contentType: string | null): string {
   return "";
 }
 
+function normalizeOAuthProfileRecord(value: unknown): OAuthProfileRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError("OAuth profile is not an object");
+  return Object.fromEntries(Object.entries(value));
+}
+
 async function importProviderAvatar(
   user: SupabaseUser,
   profile: OAuthProfileRecord,
@@ -41,10 +43,10 @@ async function importProviderAvatar(
   if (!source) return profile;
 
   try {
-    const downloaded = (await fetchPublicBytes(source, {
+    const downloaded = await fetchPublicBytes(source, {
       maxBytes: 5 * 1024 * 1024,
       timeoutMs: 5000,
-    })) as PublicBytes;
+    });
     const contentType = supportedAvatarType(downloaded.contentType);
     if (!contentType || !downloaded.body.length) return profile;
     const avatarKey = `avatars/${user.id}/${crypto.randomUUID()}`;
@@ -70,7 +72,7 @@ async function importProviderAvatar(
         });
         return updated[0];
       });
-      return result as unknown as OAuthProfileRecord;
+      return normalizeOAuthProfileRecord(result);
     } catch (error) {
       await deleteObject(avatarKey).catch(() => {});
       throw error;
@@ -90,8 +92,8 @@ export async function provisionOAuthProfile(user: SupabaseUser) {
     throw new Error("OAuth user profile is incomplete");
   }
 
-  let timeoutId;
-  const timeout = new Promise((resolve, reject) => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(
       () => reject(new Error("User profile setup did not finish in time")),
       profileProvisioningTimeoutMs,
@@ -99,7 +101,7 @@ export async function provisionOAuthProfile(user: SupabaseUser) {
   });
 
   try {
-    const profile = (await Promise.race([
+    const profile = await Promise.race([
       profileRepository.getOrCreateOnFirstLogin(user.id, {
         email,
         displayName:
@@ -107,9 +109,12 @@ export async function provisionOAuthProfile(user: SupabaseUser) {
         avatarKey: null,
       }),
       timeout,
-    ])) as OAuthProfileRecord;
-    return await importProviderAvatar(user, profile);
+    ]);
+    return await importProviderAvatar(
+      user,
+      normalizeOAuthProfileRecord(profile),
+    );
   } finally {
-    clearTimeout(timeoutId);
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }

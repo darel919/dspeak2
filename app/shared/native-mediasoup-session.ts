@@ -190,6 +190,35 @@ export class NativeMediasoupSfuSession {
   get errorMessage() {
     return this.error?.message || this.error || null;
   }
+
+  get joinReady() {
+    return this.connectionState().ready === true;
+  }
+
+  get transportReady() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return Boolean(
+        this.cloudflareSession?.handle && this.cloudflareSession?.sessionId,
+      );
+    return Boolean(this.sendTransport && this.recvTransport);
+  }
+
+  get iceConnectedBoth() {
+    if (this.selectedProvider === "cloudflare-realtime")
+      return this.cloudflareSession?.connectionState?.().ready === true;
+    return (
+      this.transportStates.get("send") === "connected" &&
+      this.transportStates.get("recv") === "connected"
+    );
+  }
+
+  get isProducing() {
+    return this.producers.size > 0 || this.producerVariants.size > 0;
+  }
+
+  get remoteProducersCount() {
+    return this.consumers.size;
+  }
 }
 
 export interface NativeMediasoupSfuSession extends NativeMediasoupSfuSessionSurface {
@@ -223,7 +252,7 @@ export interface NativeMediasoupSfuSession extends NativeMediasoupSfuSessionSurf
   ) => Promise<unknown>;
   resetReadiness: () => unknown;
   rejectReadiness: (error: unknown) => unknown;
-  _handleSignalingClose: (event: Record<string, unknown>) => unknown;
+  _handleSignalingClose: (event: CloseEvent) => unknown;
   _acknowledgeHeartbeat: (data: Record<string, unknown>) => unknown;
   _handleServerError: (data: Record<string, unknown>) => unknown;
   _resolveConnect: () => unknown;

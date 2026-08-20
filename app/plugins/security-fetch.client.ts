@@ -71,7 +71,9 @@ async function getDesktopAccessToken(): Promise<string | undefined> {
 async function getDesktopHttpFetch(): Promise<FetchLike> {
   if (!desktopHttpFetch) {
     desktopHttpFetch = import("@tauri-apps/plugin-http").then(
-      ({ fetch: tauriFetch }) => tauriFetch as unknown as FetchLike,
+      ({ fetch: tauriFetch }) =>
+        (input, init) =>
+          tauriFetch(input, init),
     );
   }
   return desktopHttpFetch;
@@ -122,7 +124,7 @@ async function retryWithSupabaseBearer(
 }
 
 export default defineNuxtPlugin(() => {
-  const browserFetch = globalThis.fetch.bind(globalThis) as FetchLike;
+  const browserFetch: FetchLike = globalThis.fetch.bind(globalThis);
   const runtimeConfig = useRuntimeConfig();
   const runtimeStore = useRuntimeStore();
   const apiTarget = resolveApiRequestTarget(

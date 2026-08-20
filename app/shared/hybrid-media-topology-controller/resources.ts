@@ -6,6 +6,16 @@ import type {
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
 
+function isTopologySourceEntry(
+  value: Record<string, unknown>,
+): value is TopologySourceEntry {
+  return (
+    typeof value.source === "string" &&
+    typeof MediaStreamTrack !== "undefined" &&
+    value.track instanceof MediaStreamTrack
+  );
+}
+
 export function createTopologyResourceHelpers({
   NativeP2pMesh,
   buildP2pVideoSenderOptions,
@@ -44,7 +54,8 @@ export function createTopologyResourceHelpers({
         payload.type === "ready"
           ? send({ type: "p2p-qualified", data: payload })
           : send({ type: "p2p-signal", data: payload }),
-      onRemoteTrack: (entry: TopologySourceEntry) =>
+      onRemoteTrack: (entry) => {
+        if (!isTopologySourceEntry(entry)) return;
         handoff.stage(
           {
             ...entry,
@@ -52,15 +63,18 @@ export function createTopologyResourceHelpers({
             provider: "p2p",
           },
           getActiveProvider(),
-        ),
-      onRemoteTrackEnded: (entry: TopologySourceEntry) =>
+        );
+      },
+      onRemoteTrackEnded: (entry) => {
+        if (!isTopologySourceEntry(entry)) return;
         handoff.remove({
           ...entry,
           key: entry.key || remoteMediaFeedKey(entry),
           provider: "p2p",
-        }),
-      onFailure: (failure: unknown) =>
-        send({ type: "p2p-failed", data: failure }),
+        });
+      },
+      onFailure: (reason: string, error: unknown = null) =>
+        send({ type: "p2p-failed", data: { reason, error } }),
       onSnapshot: (snapshot: unknown) =>
         updateP2pStats(Array.isArray(snapshot) ? snapshot : []),
       getAudioStereo,

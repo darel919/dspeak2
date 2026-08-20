@@ -333,7 +333,9 @@ export function resolveNativeCaptureVideoSettings(
   };
 }
 
-export function sortP2pVideoCodecPreferences(codecs: VideoCodec[] = []) {
+export function sortP2pVideoCodecPreferences<
+  T extends Pick<VideoCodec, "mimeType">,
+>(codecs: T[] = []) {
   const priorities = ["video/H264", "video/VP9", "video/VP8"];
   return [...codecs].sort((left, right) => {
     const leftIndex = priorities.findIndex(

@@ -16,6 +16,7 @@ import type {
   MediaCaptureEntry,
   MediaCaptureSettings,
 } from "../app/shared/types/media-capture.ts";
+import { FakeMediaStream, FakeMediaStreamTrack } from "./helpers/fake-media.ts";
 
 interface RegistryHandle {
   update: (publication: CloudflarePublication) => boolean;
@@ -198,12 +199,11 @@ describe("media source controller tombstone resolution", () => {
     const localParticipantKey = "user-1:device-1";
 
     const mockCapture: MediaCaptureManager = {
-      getSettings: () =>
-        ({
-          audio: {},
-          micDeviceId: null,
-          cameraDeviceId: null,
-        }) as MediaCaptureSettings,
+      getSettings: (): MediaCaptureSettings => ({
+        audio: {},
+        micDeviceId: null,
+        cameraDeviceId: null,
+      }),
       getAudioStereo: (_source: string) => false,
       mediaDevices: navigator.mediaDevices,
       onMicrophoneFallback: (_details: unknown) => {},
@@ -213,7 +213,15 @@ describe("media source controller tombstone resolution", () => {
         _entry: unknown,
         _details?: Record<string, unknown>,
       ) => {},
-      startMicrophone: async () => ({}) as unknown as MediaCaptureEntry,
+      startMicrophone: async (): Promise<MediaCaptureEntry> => {
+        const track = new FakeMediaStreamTrack("audio", "microphone");
+        return {
+          source: "audio",
+          stream: new FakeMediaStream([track]),
+          track,
+          publication: Promise.resolve(null),
+        };
+      },
       stop: async () => {},
     };
 

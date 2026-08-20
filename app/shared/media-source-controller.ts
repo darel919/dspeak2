@@ -950,9 +950,10 @@ export function createMediaSourceController({
     return capture.stop("audio");
   }
 
-  function stopSystemAudioProduction() {
+  async function stopSystemAudioProduction(): Promise<void> {
     const entry = localSources.get("screen-audio");
-    if (entry?.ownerSource === "system-audio") capture.stop("screen-audio");
+    if (entry?.ownerSource === "system-audio")
+      await capture.stop("screen-audio");
   }
 
   function stopVideoProduction(source: "camera" | "screen") {

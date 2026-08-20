@@ -23,5 +23,5 @@ export interface NotificationFetchOptions extends RequestInit {
 
 export interface NotificationRealtimePayload {
   type?: string;
-  data?: NotificationRecord & { ids?: string[] };
+  data?: Record<string, unknown>;
 }

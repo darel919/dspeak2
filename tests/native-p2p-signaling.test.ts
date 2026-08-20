@@ -104,17 +104,23 @@ describe("browser P2P signaling", () => {
   });
 
   it("filters browser P2P preferences to the selected codec while retaining RTX", () => {
-    const previousReceiver = globalThis.RTCRtpReceiver;
+    const previousReceiver = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "RTCRtpReceiver",
+    );
     const calls = [];
-    globalThis.RTCRtpReceiver = {
-      getCapabilities: () => ({
-        codecs: [
-          { mimeType: "video/VP8" },
-          { mimeType: "video/H264" },
-          { mimeType: "video/rtx" },
-        ],
-      }),
-    } as never;
+    Object.defineProperty(globalThis, "RTCRtpReceiver", {
+      configurable: true,
+      value: {
+        getCapabilities: () => ({
+          codecs: [
+            { mimeType: "video/VP8" },
+            { mimeType: "video/H264" },
+            { mimeType: "video/rtx" },
+          ],
+        }),
+      },
+    });
     try {
       const pc = {
         getTransceivers: () => [
@@ -131,7 +137,11 @@ describe("browser P2P signaling", () => {
         ["video/H264", "video/rtx"],
       );
     } finally {
-      globalThis.RTCRtpReceiver = previousReceiver;
+      if (previousReceiver) {
+        Object.defineProperty(globalThis, "RTCRtpReceiver", previousReceiver);
+      } else {
+        delete globalThis.RTCRtpReceiver;
+      }
     }
   });
 });

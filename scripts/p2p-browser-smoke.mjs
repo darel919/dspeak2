@@ -31,14 +31,14 @@ async function pumpSignals([first, second]) {
   for (const message of firstSignals) {
     if (!message.signal) continue;
     await second.evaluate(
-      (signal) => window.receiveSignal("peer-a", signal),
+      (signal) => window.deliverSignal("peer-a", signal),
       message,
     );
   }
   for (const message of secondSignals) {
     if (!message.signal) continue;
     await first.evaluate(
-      (signal) => window.receiveSignal("peer-b", signal),
+      (signal) => window.deliverSignal("peer-b", signal),
       message,
     );
   }
@@ -95,15 +95,16 @@ async function setupPage(page, origin, peerId, remotePeerId) {
       });
       window.takeSignals = () =>
         JSON.parse(JSON.stringify(window.signals.splice(0)));
-      window.receiveSignal = (fromPeerId, message) => {
+      window.deliverSignal = (fromPeerId, message) =>
         window.mesh
           .receiveSignal({
             fromPeerId,
             epoch: message.epoch,
             signal: message.signal,
           })
-          .catch((error) => window.signalErrors.push(error.message));
-      };
+          .catch((error) =>
+            window.signalErrors.push(error?.stack || String(error)),
+          );
       window.publishVideo = async (source, color) => {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -365,10 +366,15 @@ try {
     pages,
   );
   const restoredBefore = await second.evaluate(() => window.mediaState());
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  await pumpSignals(pages);
+  await waitFor(
+    "fresh restored microphone RTP",
+    async () => {
+      const restoredAfter = await second.evaluate(() => window.mediaState());
+      return restoredAfter.inbound.audio > restoredBefore.inbound.audio;
+    },
+    pages,
+  );
   const restoredAfter = await second.evaluate(() => window.mediaState());
-  assert.ok(restoredAfter.inbound.audio > restoredBefore.inbound.audio);
   assert.equal(restoredAfter.failures.length, 0);
   assert.equal(restoredAfter.signalErrors.length, 0);
   console.log(

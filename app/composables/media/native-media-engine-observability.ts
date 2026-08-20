@@ -15,16 +15,34 @@ import type {
   MediaStats,
 } from "../../shared/media/types.ts";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeMediaDevices(value: unknown): MediaDeviceInfo[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (!isRecord(candidate)) return [];
+    if (typeof candidate.deviceId !== "string") return [];
+    if (typeof candidate.kind !== "string") return [];
+    return [
+      {
+        deviceId: candidate.deviceId,
+        label: typeof candidate.label === "string" ? candidate.label : "",
+        kind: candidate.kind,
+        ...(typeof candidate.groupId === "string"
+          ? { groupId: candidate.groupId }
+          : {}),
+      },
+    ];
+  });
+}
+
 export async function handleSignal(
   engine: NativeMediaEngine,
   message: MediaSignalMessage,
 ): Promise<unknown> {
-  const data =
-    message.data &&
-    typeof message.data === "object" &&
-    !Array.isArray(message.data)
-      ? (message.data as Record<string, unknown>)
-      : {};
+  const data = isRecord(message.data) ? message.data : {};
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) {
     if (engine.nativeOnly) throw nativeOnlyError("signaling");
     return engine.browserEngine.handleSignal?.(message);
@@ -42,7 +60,7 @@ export async function getDevices(
   if (!engine.flags.nativeBackendReady || !engine.nativeSession) {
     try {
       const devices = await engine._invoke("media_prepare_devices");
-      return Array.isArray(devices) ? (devices as MediaDeviceInfo[]) : [];
+      return normalizeMediaDevices(devices);
     } catch (error: unknown) {
       if (engine.nativeOnly) throw error;
       return engine.browserEngine.getDevices?.() || [];
@@ -50,10 +68,7 @@ export async function getDevices(
   }
   return engine
     ._invoke("media_get_devices")
-    .then((devices: unknown) => {
-      if (Array.isArray(devices)) return devices as MediaDeviceInfo[];
-      return [];
-    })
+    .then(normalizeMediaDevices)
     .catch((error: unknown) => {
       if (engine.nativeOnly) throw error;
       return engine.browserEngine.getDevices?.() || [];
@@ -78,9 +93,7 @@ export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
     if (engine.nativeOnly) throw nativeOnlyError("statistics");
     return (await engine.browserEngine.getStats?.()) || {};
   }
-  const statsSnapshot = (
-    engine as unknown as { getWebRTCStatsSnapshot: () => Promise<unknown> }
-  ).getWebRTCStatsSnapshot();
+  const statsSnapshot = engine.getWebRTCStatsSnapshot();
   return statsSnapshot
     .then((stats: unknown) => {
       const snapshot = normalizeNativeStatsSnapshot(
@@ -93,8 +106,9 @@ export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
             }
           : stats,
       );
-      emitQoe(engine, snapshot as MediaStats);
-      return snapshot as MediaStats;
+      const normalizedSnapshot = isRecord(snapshot) ? snapshot : {};
+      emitQoe(engine, normalizedSnapshot);
+      return normalizedSnapshot;
     })
     .catch((error: unknown) => {
       if (engine.nativeOnly) throw error;

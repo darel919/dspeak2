@@ -4,6 +4,22 @@ import type {
   LifecycleBootstrap,
   LifecycleDependencyContext,
 } from "./types/hybrid-media-session-lifecycle.ts";
+import type { MediaMessage } from "./types/media-message-handlers.ts";
+import type { ChannelRecord } from "./types/channels.ts";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function channelRoomId(
+  channel: ChannelRecord | null | undefined,
+): string | null {
+  const room = channel?.["room"];
+  if (typeof room === "string") return room;
+  if (room && typeof room === "object" && "id" in room)
+    return typeof room.id === "string" ? room.id : null;
+  return null;
+}
 
 export function createHybridMediaSessionLifecycle({
   authStore,
@@ -189,8 +205,11 @@ export function createHybridMediaSessionLifecycle({
     setConnectionPhase("socket-connecting");
     const channel = channelsStore.getChannelById(nextChannelId);
     const channelPolicy = channel?.mediaPolicy;
-    const connectionMode = channelPolicy?.connectionMode || "auto";
-    const roomId = options.roomId || getRoomId() || channel?.room?.id || null;
+    const connectionMode =
+      typeof channelPolicy?.connectionMode === "string"
+        ? channelPolicy.connectionMode
+        : "auto";
+    const roomId = options.roomId || getRoomId() || channelRoomId(channel);
     const supabaseClient = getSupabaseClient();
     const sessionResult = await supabaseClient?.auth.getSession();
     const accessToken = sessionResult?.data?.session?.access_token;
@@ -319,8 +338,10 @@ export function createHybridMediaSessionLifecycle({
       lastInRoom,
       participantSfuRoundTripTimes,
       queueTopology,
-      registerHandler: (type: string, handler: (data: unknown) => unknown) =>
-        messageHandlers.set(type, handler),
+      registerHandler: (
+        type: string,
+        handler: (data: MediaMessage) => unknown,
+      ) => messageHandlers.set(type, handler),
       remoteProducersCount,
       onOperationAck: (operationId: string) =>
         mediaSessionSetup.resolveOperationAck(operationId),
@@ -329,7 +350,7 @@ export function createHybridMediaSessionLifecycle({
       onRoomRevisionApplied: (roomRevision: string) =>
         mediaSessionSetup.applyRoomRevision(roomRevision),
       onSnapshotRequested: () => mediaSessionSetup.requestSnapshot(),
-      queueTargetedReconciliation: (operationId: string, data: unknown) =>
+      queueTargetedReconciliation: (operationId: string, data: MediaMessage) =>
         mediaSessionSetup.queueTargetedReconciliation(operationId, data),
       onConnectionEpochUpdated: (connectionEpoch: number) => {
         setConnectionEpoch(connectionEpoch);
@@ -392,44 +413,45 @@ export function createHybridMediaSessionLifecycle({
       onProviderRecovering: providerRecovery.receive,
       onProviderRecoveryTopology: mediaSessionSetup.handleProviderRecovering,
       onP2pQualification: mediaSessionSetup.handleP2pQualification,
-      onProviderTicket: (data: unknown) =>
+      onProviderTicket: (data: MediaMessage) =>
         mediaSessionSetup.handleProviderTicket(data),
       setHeartbeatAck: signaling.acknowledgeHeartbeat,
       setLocalPeerId,
       sfuProducerIds: mediaSessionSetup.sfuProducerIds,
       syncConnectedUsers,
       voiceStore,
-      getLastAppliedPublicationRevision: () =>
-        mediaSessionSetup.getLastAppliedPublicationRevision?.() || "0",
-      setLastAppliedPublicationRevision: (value: string) =>
-        mediaSessionSetup.setLastAppliedPublicationRevision?.(value),
     });
     messageHandlers.set("cloudflare-response", (data: unknown) =>
-      getSfu()?.handle("cloudflare-response", data),
+      isRecord(data)
+        ? getSfu()?.handle("cloudflare-response", data)
+        : undefined,
     );
-    messageHandlers.set("cloudflare-publication-available", (data: unknown) => {
-      mediaSessionSetup.queueCloudflarePublication(data);
-      const rawRevision =
-        data && typeof data === "object" && "publicationRevision" in data
-          ? data.publicationRevision
-          : undefined;
-      const rev =
-        typeof rawRevision === "string" && rawRevision !== ""
-          ? rawRevision
-          : typeof rawRevision === "number" &&
-              Number.isSafeInteger(rawRevision) &&
-              rawRevision >= 0
-            ? String(rawRevision)
-            : null;
-      if (rev) {
-        const currentRev =
-          mediaSessionSetup.getLastAppliedPublicationRevision?.();
-        if (currentRev && BigInt(rev) > BigInt(currentRev)) {
-          mediaSessionSetup.setLastAppliedPublicationRevision?.(rev);
+    messageHandlers.set(
+      "cloudflare-publication-available",
+      (data: MediaMessage) => {
+        mediaSessionSetup.queueCloudflarePublication(data);
+        const rawRevision =
+          data && typeof data === "object" && "publicationRevision" in data
+            ? data.publicationRevision
+            : undefined;
+        const rev =
+          typeof rawRevision === "string" && rawRevision !== ""
+            ? rawRevision
+            : typeof rawRevision === "number" &&
+                Number.isSafeInteger(rawRevision) &&
+                rawRevision >= 0
+              ? String(rawRevision)
+              : null;
+        if (rev) {
+          const currentRev =
+            mediaSessionSetup.getLastAppliedPublicationRevision?.();
+          if (currentRev && BigInt(rev) > BigInt(currentRev)) {
+            mediaSessionSetup.setLastAppliedPublicationRevision?.(rev);
+          }
         }
-      }
-      return getSfu()?.handle("cloudflare-publication-available", data);
-    });
+        return getSfu()?.handle("cloudflare-publication-available", data);
+      },
+    );
   }
 
   return { cancel, connect, handleSignalingClose, refreshControlTicket };

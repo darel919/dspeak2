@@ -41,26 +41,72 @@ export interface ChatAttachmentFile {
 }
 
 export interface ChatApiDependencies {
+  assertSafeOutboundUrl: (
+    value: string,
+    options?: { allowedHosts?: readonly string[] },
+  ) => Promise<URL>;
+  broadcastToChannel: (
+    channelId: string | number,
+    message: unknown,
+  ) => Promise<void>;
   broadcastToUser: (
     userId: string,
     message: Record<string, unknown>,
   ) => unknown;
+  canDeleteMessage: (
+    message: MessageLike | null | undefined,
+    userId: unknown,
+    permissions?: readonly string[],
+    isRoomOwner?: boolean,
+  ) => boolean;
+  canViewMessageHistory: (
+    permissions?: readonly string[],
+    isRoomOwner?: boolean,
+  ) => boolean;
   createError: (options: {
     statusCode: number;
     statusMessage: string;
   }) => Error;
+  enforceRateLimit: (
+    event: H3Event,
+    scope: string,
+    identity: string | null | undefined,
+    limit: number,
+    windowMs: number,
+  ) => void;
+  fetchPublicHtml: (
+    value: string,
+    options?: {
+      allowedHosts?: readonly string[];
+      maxBytes?: number;
+      maxRedirects?: number;
+      timeoutMs?: number;
+    },
+  ) => Promise<{ html: string; url: string }>;
+  getHeader: (event: H3Event, name: string) => string | undefined;
   getQuery: (event: H3Event) => Record<string, string | undefined>;
+  isMessageOwner: (
+    message: MessageLike | null | undefined,
+    userId: unknown,
+  ) => boolean;
   parseBody: (event: H3Event) => Promise<ChatRouteBody>;
+  persistMessageNotifications: (input: PushNotificationInput) => Promise<{
+    notifications: number;
+    recipients: string[];
+  }>;
   presentUser: (
     user: DSpeakProfileInput | null | undefined,
     detailed?: boolean,
   ) => unknown;
+  pushAllowedHosts: readonly string[];
   requireAuthenticatedUser: (event: H3Event) => Promise<string>;
   requireRoomMember: (
     room: AuthorizationRoom,
     userId: string,
   ) => Promise<RoomMemberAccess>;
   requireValue: (value: unknown, message: string) => string;
+  sendPushTest: (userId: string, deviceId: string) => Promise<unknown>;
+  setResponseStatus: (event: H3Event, statusCode: number) => void;
   [key: string]: unknown;
 }
 

@@ -1005,12 +1005,8 @@ export class RemoteMediaRegistry {
             ?.tracks.get(detector.key);
           if (!playbackTrack?.active || playbackTrack.entry.receiving === false)
             continue;
-          detector.analyser.getByteTimeDomainData(
-            detector.samples as unknown as Uint8Array<ArrayBuffer>,
-          );
-          const levelDb = byteTimeDomainLevelDb(
-            detector.samples as unknown as Uint8Array<ArrayBuffer>,
-          );
+          detector.analyser.getByteTimeDomainData(detector.samples);
+          const levelDb = byteTimeDomainLevelDb(detector.samples);
           const sensitivity =
             this.getAttenuation({})?.sensitivity || "standard";
           const thresholdOffset =

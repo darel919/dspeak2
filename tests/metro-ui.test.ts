@@ -466,12 +466,32 @@ test("audio-only system shares expose automatic listening controls", async () =>
   assert.match(source, /setRemoteSystemAudioReceiving/);
 });
 
-test("screen prompts and accepted video use one stable stage frame", async () => {
+test("screen prompts and accepted video share the adaptive stage frame", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   const feed = await readFile("app/components/VideoFeed.vue", "utf8");
-  assert.match(source, /screen-feed-frame-single/);
-  assert.match(source, /aspect-ratio: 16 \/ 9/);
-  assert.match(source, /width: min\(100cqw, calc\(100cqh \* 16 \/ 9\)\)/);
+  assert.match(
+    source,
+    /v-if="roomTiles\.length"\s+class="screen-feed-area min-h-0 flex-1 overflow-hidden p-4 md:p-6"/,
+  );
+  assert.match(
+    source,
+    /ref="videoStage"\s+class="voice-room-grid h-full min-h-0 w-full"/,
+  );
+  assert.match(source, /v-for="tile in displayedRoomTiles"/);
+  assert.match(
+    source,
+    /useAdaptiveVideoGrid\(\s*videoStage,\s*computed\(\(\) => displayedRoomTiles\.value\.length\),\s*\)/,
+  );
+  assert.match(
+    source,
+    /'--video-tile-width': `\$\{adaptiveLayout\.tileWidth\}px`/,
+  );
+  assert.match(
+    source,
+    /'--video-tile-height': `\$\{adaptiveLayout\.tileHeight\}px`/,
+  );
+  assert.match(source, /'--video-grid-gap': `\$\{adaptiveLayout\.gap\}px`/);
+  assert.match(source, /\.screen-feed-area\s*\{\s*container-type: size;/);
   assert.match(source, /:compact=/);
   assert.match(source, /:avatar-src="tile\.feed\.avatar"/);
   assert.match(feed, /\(localScreenPreviewPaused \|\| !receiving\)/);
@@ -517,13 +537,26 @@ test("participant volume controls render outside the scrolling participant strip
   assert.doesNotMatch(source, /absolute top-2 right-2 bg-base-200/);
 });
 
-test("odd overview tiles center the final participant in the grid", async () => {
+test("overview tiles center incomplete rows through the adaptive layout", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
-  assert.match(source, /@container \(min-width: 36\.75rem\)/);
-  assert.match(source, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
-  assert.match(source, /\.voice-room-tile:last-child:nth-child\(odd\)/);
-  assert.match(source, /grid-column: 1 \/ -1/);
-  assert.match(source, /width: calc\(50% - 0\.375rem\)/);
+  const overviewGrid = source.match(
+    /\.voice-room-grid:not\(\.voice-room-grid-focused\)\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+  const overviewTile = source.match(
+    /\.voice-room-grid:not\(\.voice-room-grid-focused\) \.voice-room-tile\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+
+  assert.ok(overviewGrid);
+  assert.match(overviewGrid, /display: flex/);
+  assert.match(overviewGrid, /flex-wrap: wrap/);
+  assert.match(overviewGrid, /align-content: center/);
+  assert.match(overviewGrid, /justify-content: center/);
+  assert.match(overviewGrid, /gap: var\(--video-grid-gap\)/);
+  assert.ok(overviewTile);
+  assert.match(overviewTile, /flex: 0 0 auto/);
+  assert.match(overviewTile, /width: var\(--video-tile-width\)/);
+  assert.match(overviewTile, /height: var\(--video-tile-height\)/);
+  assert.doesNotMatch(source, /\.voice-room-tile:last-child:nth-child\(odd\)/);
 });
 
 test("voice channel indicators show participant avatars and media status", async () => {

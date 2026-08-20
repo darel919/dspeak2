@@ -472,7 +472,7 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
     presentMessages,
     validateReplyTarget,
     validateMessageAttachments,
-  } as unknown as ChatRouteDependencies;
+  };
   const handleMessageRoutes = createChatMessagesHandler(routeDependencies);
   const handleFileRoutes = createChatFilesHandler(routeDependencies);
   const handleInteractionRoutes =
