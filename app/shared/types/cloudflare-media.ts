@@ -50,6 +50,18 @@ export interface CloudflareTrackEvent {
   receiver?: RTCRtpReceiver;
 }
 export type CloudflareSubscriptionGuardPhase = "before-bind" | "after-bind";
+export interface CloudflareRemoteTrackBinding {
+  trackName: string;
+  mid: string;
+  publication: CloudflarePublication;
+}
+export interface CloudflareSubscriptionBatchOptions {
+  isStale?: (phase: CloudflareSubscriptionGuardPhase) => boolean;
+  onTrackBound?: (binding: CloudflareRemoteTrackBinding) => void;
+  compensateStale?: (
+    bindings: CloudflareRemoteTrackBinding[],
+  ) => Promise<unknown>;
+}
 export interface CloudflarePeerConnectionLike {
   iceGatheringState?: string;
   localDescription?: { type?: string; sdp?: string | null } | null;
@@ -65,7 +77,9 @@ export interface CloudflareSessionOptions {
   send: (message: Record<string, unknown>) => boolean;
   iceServers: RTCIceServer[];
   onRemoteTrack: (entry: CloudflarePublication) => unknown;
-  onRemoteTrackEnded: (entry: CloudflarePublication) => unknown;
+  onRemoteTrackEnded: (
+    entry: CloudflarePublication | CloudflareConsumerEntry,
+  ) => unknown;
   onStateChange: (
     direction: string,
     state: string,
@@ -129,7 +143,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   subscribePublicationBatch: (
     publications: CloudflarePublication[],
     generation: number,
-    isStale?: (phase: CloudflareSubscriptionGuardPhase) => boolean,
+    options?: CloudflareSubscriptionBatchOptions,
   ) => Promise<unknown>;
   subscribePublications: (
     publications: CloudflarePublication[],
@@ -139,6 +153,12 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
     trackName: string,
     expectedReceiverIncarnation?: string,
     generation?: number,
+  ) => Promise<boolean>;
+  closePulledRemoteTracksSafely: (
+    bindings: CloudflareRemoteTrackBinding[],
+    peerConnection: RTCPeerConnection,
+    generation: number,
+    expectedConsumer?: CloudflareConsumerEntry,
   ) => Promise<boolean>;
   removeSourceInternal: (source: string) => Promise<void>;
   setRemoteReceiving: (
