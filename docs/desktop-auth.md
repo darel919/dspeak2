@@ -48,6 +48,43 @@ The session bridge responses carry two non-secret fingerprint headers:
 - `X-dSpeak-Build-Commit` — server build commit
 - `X-dSpeak-Supabase-Project` — Supabase project ref (e.g. `crmucqnebwlssqzthnek`)
 
+## Production edge and WAF requirements
+
+The release workflow runs a no-secret same-origin POST to
+`/api/auth/desktop-session` through `DSPEAK_PUBLIC_ORIGIN` before it builds the
+desktop installers. The request has no bearer token. A healthy deployment
+returns HTTP 401 with an `application/json` body whose `statusMessage` is
+`DESKTOP_SESSION_MISSING_BEARER`.
+
+The response must include both `X-dSpeak-Build-Commit` and
+`X-dSpeak-Supabase-Project`. The smoke rejects a redirect, a 429 response, a
+Vercel challenge, an HTML response, a non-application response, or a missing
+fingerprint. It uses manual redirect handling and prints only the public
+origin, HTTP status, diagnostic category, build commit, and Supabase project
+ref.
+
+Configure the production edge and WAF so this exact same-origin POST reaches
+Nitro. The edge must preserve the POST method, the application 401 status, the
+JSON content type, and both dSpeak fingerprint headers. Do not put a bearer
+token in the edge probe. Do not replace the application response with a bot
+challenge, an interactive Vercel challenge, an HTML error page, a redirect, or
+a rate-limit response. Keep the endpoint's application authentication in
+Nitro. The edge must not require a user token before Nitro can return the
+expected missing-bearer diagnostic.
+
+If the smoke fails, stop the release. Check the deployed commit and Supabase
+project fingerprints first. Then check the Vercel route, WAF challenge rules,
+rate limits, redirects, and origin forwarding. Restore the edge path and rerun
+`node scripts/desktop-session-edge-smoke.mjs` before rebuilding. Do not fix an
+edge failure by weakening the bearer check or by adding a secret to the smoke.
+
+The authenticated workflow job is optional. It runs only when the GitHub
+Actions secret `DSPEAK_TEST_TOKEN` exists. The job passes the token through its
+environment and runs exactly three session-bridge calls. It does not print the
+token, response bodies, authorization headers, or assertion data derived from
+them. `DSPEAK_TEST_TOKEN_OTHER_PROJECT` adds the cross-project rejection case;
+without it, the second call repeats the valid session with a new device id.
+
 When the client's configured Supabase project differs from the server's, the
 client reports `DESKTOP_SUPABASE_PROJECT_MISMATCH` instead of the generic
 bridge error. The server also emits `DESKTOP_SUPABASE_PROJECT_MISMATCH` when
@@ -99,6 +136,38 @@ node scripts/verify-auth-environment.mjs
 
 It prints the API origin, public origin, Supabase project ref, and normalized
 Supabase URL — never keys. Desktop and server must report the same project ref.
+
+Run the edge smoke from a trusted environment after deployment:
+
+```bash
+DSPEAK_PUBLIC_ORIGIN=https://app.example.com \
+node scripts/desktop-session-edge-smoke.mjs
+```
+
+The missing-bearer response is a successful edge check. It does not establish
+that a user can complete OAuth or that the session cookie can be persisted.
+
+## Desktop authentication recovery
+
+The desktop client treats callback receipt, OAuth state validation, PKCE code
+exchange, and the dSpeak session bridge as separate stages. A browser callback
+page only proves that Rust received the redirect. It does not prove that the
+PKCE exchange or the session bridge succeeded.
+
+When a stage fails, the client clears the one-time OAuth selector and callback
+state. A new sign-in starts a new OAuth attempt. The client does not fall back
+to WebView WebRTC or an unauthenticated desktop session. It reports the stage,
+HTTP status, server diagnostic category, request id, and safe deployment
+fingerprints without logging authorization codes, verifiers, access tokens, or
+refresh tokens.
+
+`DESKTOP_SESSION_MISSING_BEARER` is the expected diagnostic only for the
+no-secret edge smoke. An authenticated desktop request must use the configured
+Supabase project. A project mismatch, invalid token, profile provisioning
+failure, or email identity conflict remains an application failure and must be
+repaired at its owning boundary. A verified email identity conflict returns
+HTTP 409 and requires an administrator to make the one-off account decision;
+the client must not rewrite user ids or retry it as a transport failure.
 
 Tagged releases require these repository secrets:
 
