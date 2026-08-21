@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
-import {
-  MediaRoomDO,
-  controlMessageByteLength,
-  normalizeMediaSources,
-} from "../../dspeak-media-control/src/MediaRoomDO.ts";
+import { pathToFileURL } from "node:url";
+
+const mediaControlRoot = resolve(
+  process.env.DSPEAK_MEDIA_CONTROL_PATH ?? "../dspeak-media-control",
+);
+const { MediaRoomDO, controlMessageByteLength, normalizeMediaSources } =
+  await import(
+    pathToFileURL(resolve(mediaControlRoot, "src/MediaRoomDO.ts")).href
+  );
 
 test("media-control bounds message and source metadata", () => {
   assert.equal(controlMessageByteLength("voice"), 5);

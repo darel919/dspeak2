@@ -241,6 +241,16 @@ test("desktop releases publish signed updates and fail when the updater contract
   assert.match(workflow, /release:check/);
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
+  assert.match(workflow, /repository: darel919\/dspeak-media-control/);
+  assert.match(workflow, /path: dspeak-media-control/);
+  assert.match(
+    workflow,
+    /DSPEAK_MEDIA_CONTROL_PATH: \$\{\{ github\.workspace \}\}\/dspeak-media-control/,
+  );
+  assert.match(
+    workflow,
+    /sudo apt-get install --no-install-recommends -y ripgrep/,
+  );
   assert.match(
     workflow,
     /DSPEAK_PUBLIC_ORIGIN: \$\{\{ vars\.DSPEAK_PUBLIC_ORIGIN \|\| 'https:\/\/dspeak\.darelisme\.my\.id' \}\}/,
