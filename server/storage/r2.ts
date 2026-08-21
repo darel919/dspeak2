@@ -14,6 +14,7 @@ import type {
   R2ObjectRecord,
   R2ObjectTypeName,
   R2UploadResult,
+  R2UploadBody,
   UploadValidationResult,
 } from "../types/storage.ts";
 import type { ExternalField } from "../../shared/types/external.ts";
@@ -78,18 +79,24 @@ export async function createUploadUrl(
 
 export async function putObject(
   key: string,
-  body: R2Body,
+  body: R2UploadBody,
   contentType: string,
   contentLength: number | null | undefined,
 ): Promise<void> {
+  const uploadBody = await normalizeR2Body(body);
   const command = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
-    Body: body,
+    Body: uploadBody,
     ContentType: contentType,
     ContentLength: contentLength ?? undefined,
   });
   await r2Client.send(command);
+}
+
+export async function normalizeR2Body(body: R2UploadBody): Promise<R2Body> {
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
+  return body;
 }
 
 export async function createDownloadUrl(

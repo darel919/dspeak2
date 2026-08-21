@@ -73,20 +73,24 @@ test("existing users are preserved and the local ID is not duplicated", () => {
   });
 });
 
-test("local participant renders even when a local feed represents the same user", () => {
+test("local participant is suppressed when a local feed represents the same user", () => {
   assert.equal(
-    shouldRenderVoiceParticipant("local", new Set(["local"]), "local"),
-    true,
+    shouldRenderVoiceParticipant("local", new Set(["local"])),
+    false,
   );
+});
+
+test("local participant remains visible when no local feed represents the user", () => {
+  assert.equal(shouldRenderVoiceParticipant("local", new Set()), true);
 });
 
 test("remote participants represented by feeds stay suppressed", () => {
   assert.equal(
-    shouldRenderVoiceParticipant("remote", new Set(["remote"]), "local"),
+    shouldRenderVoiceParticipant("remote", new Set(["remote"])),
     false,
   );
   assert.equal(
-    shouldRenderVoiceParticipant("other", new Set(["remote"]), "local"),
+    shouldRenderVoiceParticipant("other", new Set(["remote"])),
     true,
   );
 });

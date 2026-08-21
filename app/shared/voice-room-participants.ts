@@ -23,7 +23,7 @@ export function mergeLocalVoiceParticipant(
   );
   const localParticipant: VoiceUserRecord = {
     ...options.currentUser,
-    ...(existingLocalUser || {}),
+    ...existingLocalUser,
     id: localUserId,
     muted: options.muted,
     deafened: options.deafened,
@@ -43,10 +43,6 @@ export function mergeLocalVoiceParticipant(
 export function shouldRenderVoiceParticipant(
   userId: string,
   representedUserIds: ReadonlySet<string>,
-  localUserId: string,
 ): boolean {
-  return (
-    (localUserId.length > 0 && userId === localUserId) ||
-    !representedUserIds.has(userId)
-  );
+  return !representedUserIds.has(userId);
 }

@@ -3,10 +3,7 @@
     <figure
       ref="feedElement"
       class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden bg-black shadow-lg"
-      :class="[
-        receiving && !poppedOut ? 'cursor-zoom-in' : '',
-        { 'fullscreen-feed-active': isFullscreen },
-      ]"
+      :class="{ 'fullscreen-feed-active': isFullscreen }"
       :data-feed-key="feedKey"
       :title="
         receiving && !isFullscreen && !poppedOut

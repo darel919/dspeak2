@@ -489,7 +489,7 @@ test("screen prompts and accepted video share the adaptive stage frame", async (
   const feed = await readFile("app/components/VideoFeed.vue", "utf8");
   assert.match(
     source,
-    /v-if="roomTiles\.length"\s+class="screen-feed-area min-h-0 flex-1 overflow-hidden p-4 md:p-6"/,
+    /v-if="roomTiles\.length"\s+class="screen-feed-area relative min-h-0 flex-1 overflow-hidden p-4 md:p-6"/,
   );
   assert.match(
     source,
@@ -498,7 +498,7 @@ test("screen prompts and accepted video share the adaptive stage frame", async (
   assert.match(source, /v-for="tile in displayedRoomTiles"/);
   assert.match(
     source,
-    /useAdaptiveVideoGrid\(\s*videoStage,\s*computed\(\(\) => displayedRoomTiles\.value\.length\),\s*\)/,
+    /useAdaptiveVideoGrid\(\s*videoStage,\s*computed\(\(\) => \(viewMode\.value === "overview" \? roomTiles\.value\.length : 0\)\),\s*\)/,
   );
   assert.match(
     source,
@@ -517,62 +517,71 @@ test("screen prompts and accepted video share the adaptive stage frame", async (
   assert.match(feed, /blur-xl opacity-60/);
 });
 
-test("voice video offers equal overview tiles and viewer-selected focus", async () => {
+test("voice video uses immediate direct-manipulation focus for every tile", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /@click="focusTile\(tile\.key\)"/);
   assert.match(
     source,
-    /tile\.type !== 'participant' && scheduleTileFocus\(tile\.key\)/,
+    /@keydown\.enter\.self\.prevent="focusTile\(tile\.key\)"/,
   );
-  assert.match(source, /@dblclick\.stop="cancelTileFocus"/);
+  assert.match(
+    source,
+    /@keydown\.space\.self\.prevent="focusTile\(tile\.key\)"/,
+  );
+  assert.match(source, /role="button"/);
+  assert.match(source, /tabindex="0"/);
+  assert.match(source, /getTileAriaLabel/);
+  assert.match(source, /Back to grid/);
+  assert.match(source, /@click="showOverview"/);
+  assert.match(source, /event\.key === "Escape"/);
+  assert.match(source, /!document\.fullscreenElement/);
+  assert.doesNotMatch(
+    source,
+    /scheduleTileFocus|cancelTileFocus|setTimeout\(\(\) => \{/,
+  );
+  assert.doesNotMatch(source, /@dblclick\.stop/);
   assert.match(source, /voice-room-grid-focused/);
   assert.match(source, /voice-room-tile-focused/);
-  assert.match(source, /justify-content: center/);
-  assert.match(source, /grid-template-rows: minmax\(0, 1fr\) 8rem/);
-  assert.match(source, /grid-column: 1 \/ -1/);
+  assert.match(source, /voice-support-index/);
+  assert.match(source, /voice-support-count/);
+  assert.match(source, /overflow-x: auto/);
+  assert.match(source, /--voice-filmstrip-height: clamp/);
+  assert.match(source, /voice-room-grid-focused-no-support/);
+  assert.match(source, /isFocusedSupportTile/);
   assert.match(source, /representedUsers/);
-  assert.match(source, /focusedTileKey\.value === key/);
-  assert.match(source, /viewMode\.value = "overview"/);
   assert.match(source, /participant-audio-tile-compact/);
-  assert.match(source, /setTimeout\(\(\) => \{/);
-  assert.match(source, /}, 240\)/);
-  assert.doesNotMatch(source, /aria-label="Voice channel view"/);
+  assert.match(source, /useVideoRoomLayout/);
 });
 
-test("voice video spotlights screen sharing without changing feed ownership", async () => {
+test("voice video keeps media sources stable without automatic spotlighting", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
-  assert.match(source, /getSmartVideoStageLayout/);
-  assert.match(source, /voice-room-grid-smart/);
-  assert.match(source, /smartVideoStageLayout\.heroKey/);
-  assert.match(source, /voice-room-tile-smart-support/);
+  assert.doesNotMatch(source, /getSmartVideoStageLayout|smartVideoStageLayout/);
+  assert.doesNotMatch(source, /voice-room-grid-smart|voice-room-tile-smart/);
+  assert.doesNotMatch(source, /focusedTileKey\.value = `broadcast-/);
+  assert.match(source, /watch\(roomTiles, \(tiles\) =>/);
+  assert.match(source, /reconcileTiles\(tiles\.map\(\(tile\) => tile\.key\)\)/);
+  assert.match(source, /v-for="tile in displayedRoomTiles"/);
+  assert.match(source, /:key="tile\.key"/);
   assert.match(source, /:popped-out=/);
   assert.match(source, /:receiver-incarnation-id=/);
   assert.match(source, /@pop-out=/);
   assert.match(source, /@first-frame=/);
 });
 
-test("voice video exposes centered stage and regular tile layouts", async () => {
+test("voice video removes the competing Stage and Tiles state machine", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
-  assert.match(source, /const videoLayoutMode = ref\("stage"\)/);
-  assert.match(source, /aria-label="Video layout"/);
-  assert.match(source, /setVideoLayoutMode\('stage'\)/);
-  assert.match(source, /setVideoLayoutMode\('tiles'\)/);
-  assert.match(source, /'voice-room-grid-stage'/);
-  assert.match(source, /'voice-room-grid-tiles'/);
-  assert.match(source, /voice-layout-toggle-button-active/);
-  assert.match(
-    source,
-    /voiceStore\.currentChannelId === props\.channel\.id[\s\S]*videoFeeds\.length/,
-  );
-  assert.match(source, /justify-content: center/);
-  assert.match(source, /max-width: 72rem/);
-  assert.match(source, /aspect-ratio: 16 \/ 9/);
-  assert.match(source, /margin-inline: auto/);
-  assert.match(source, /height: min\(calc\(100% - 10rem\), 40rem\)/);
-  assert.match(source, /--stage-support-width: min\(16rem, 28vw\)/);
   assert.doesNotMatch(
     source,
-    /voice-room-tile-smart-support \{[\s\S]*margin-inline: auto/,
+    /\bvideoLayoutMode\b|aria-label="Video layout"|>Stage<|>Tiles<\/>|voice-layout-toggle/,
   );
+  assert.doesNotMatch(source, /voice-room-grid-stage|voice-room-grid-tiles/);
+  assert.match(source, /'voice-room-grid-overview'/);
+  assert.match(source, /'voice-room-grid-focused'/);
+  assert.match(source, /const isSoloAudioOverview = computed/);
+  assert.match(source, /voice-room-grid-solo-audio/);
+  assert.match(source, /position: relative/);
+  assert.match(source, /voice-command-bar absolute inset-x-0 bottom-0/);
+  assert.match(source, /--voice-control-safe-area: 5rem/);
 });
 
 test("voice stage keeps a connected local participant beside local media", async () => {
@@ -603,10 +612,10 @@ test("participant volume controls render outside the scrolling participant strip
 test("overview tiles center incomplete rows through the adaptive layout", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   const overviewGrid = source.match(
-    /\.voice-room-grid:not\(\.voice-room-grid-focused\)\s*\{([\s\S]*?)\n\}/,
+    /\.voice-room-grid-overview\s*\{([\s\S]*?)\n\}/,
   )?.[1];
   const overviewTile = source.match(
-    /\.voice-room-grid:not\(\.voice-room-grid-focused\) \.voice-room-tile\s*\{([\s\S]*?)\n\}/,
+    /\.voice-room-grid-overview \.voice-room-tile\s*\{([\s\S]*?)\n\}/,
   )?.[1];
 
   assert.ok(overviewGrid);
