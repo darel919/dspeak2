@@ -235,10 +235,12 @@ export function createVoiceMediaActions({
   }
 
   async function waitForAudioSourceFlow(session: VoiceMediaSessionLike) {
-    const getOutboundRtpStats = session?.getOutboundRtpStats;
-    if (!(getOutboundRtpStats instanceof Function)) return true;
+    if (!(session?.getOutboundRtpStats instanceof Function)) return true;
     return waitForOutboundSourceFlow({
-      getStats: () => getOutboundRtpStats(),
+      getStats: () =>
+        session.getOutboundRtpStats
+          ? session.getOutboundRtpStats()
+          : Promise.resolve([]),
       source: "audio",
       timeoutMs: session.getVoiceTransportTimeout?.() || VOICE_JOIN_TIMEOUT_MS,
     });

@@ -94,6 +94,19 @@ test("microphone unmute enables publication before capture and rolls back failur
   assert.match(toggle, /await waitForAudioSourceFlow\(session\)/);
 });
 
+test("microphone RTP polling preserves the media session method receiver", async () => {
+  const source = await readFile("app/shared/voice-media-actions.ts", "utf8");
+  const waitStart = source.indexOf("async function waitForAudioSourceFlow");
+  const waitEnd = source.indexOf("async function leaveVoiceChannel", waitStart);
+  const wait = source.slice(waitStart, waitEnd);
+
+  assert.match(wait, /session\.getOutboundRtpStats\(\)/);
+  assert.doesNotMatch(
+    wait,
+    /const getOutboundRtpStats = session\?\.getOutboundRtpStats/,
+  );
+});
+
 test("native participant snapshots hydrate profiles before membership rendering", async () => {
   const source = await readFile(
     "app/composables/media/native-media-engine-session.ts",
