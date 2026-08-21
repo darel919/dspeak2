@@ -78,8 +78,10 @@ rate limits, redirects, and origin forwarding. Restore the edge path and rerun
 `node scripts/desktop-session-edge-smoke.mjs` before rebuilding. Do not fix an
 edge failure by weakening the bearer check or by adding a secret to the smoke.
 
-The authenticated workflow job is optional. It runs only when the GitHub
-Actions secret `DSPEAK_TEST_TOKEN` exists. The job passes the token through its
+The authenticated workflow job runs when the GitHub Actions secret
+`DSPEAK_TEST_TOKEN` exists. Tagged releases fail before desktop builds when
+that Production secret is missing. Manual non-tagged builds may omit it and
+still run the no-secret edge gate. The job passes the token through its
 environment and runs exactly three session-bridge calls. It does not print the
 token, response bodies, authorization headers, or assertion data derived from
 them. `DSPEAK_TEST_TOKEN_OTHER_PROJECT` adds the cross-project rejection case;
@@ -160,6 +162,13 @@ to WebView WebRTC or an unauthenticated desktop session. It reports the stage,
 HTTP status, server diagnostic category, request id, and safe deployment
 fingerprints without logging authorization codes, verifiers, access tokens, or
 refresh tokens.
+
+After Supabase completes the PKCE exchange, the Supabase session is retained
+even when the dSpeak bridge fails. The desktop can use `Retry app session` to
+send the current access token to `/api/auth/desktop-session` again. This retry
+does not start Google OAuth, reuse an authorization code, or create another
+PKCE exchange. `Start sign-in over` is the fallback when the Supabase session
+is absent or cannot be refreshed.
 
 `DESKTOP_SESSION_MISSING_BEARER` is the expected diagnostic only for the
 no-secret edge smoke. An authenticated desktop request must use the configured

@@ -13,6 +13,8 @@ export function createDesktopAuthError(
     serverDiagnostic: metadata.serverDiagnostic || code,
     serverBuildCommit: metadata.serverBuildCommit || "",
     serverProjectRef: metadata.serverProjectRef || "",
+    responseOrigin: metadata.responseOrigin || "unknown",
+    provider: metadata.provider || "",
     clientBuildCommit: metadata.clientBuildCommit || "",
     clientProjectRef: metadata.clientProjectRef || "",
     requestId: metadata.requestId || "",
@@ -26,6 +28,8 @@ export function createDesktopAuthError(
     viaHeader: metadata.viaHeader || "",
     vercelRequestId: metadata.vercelRequestId || "",
     cloudflareRay: metadata.cloudflareRay || "",
+    contentType: metadata.contentType || "",
+    vercelMitigated: metadata.vercelMitigated || "",
   });
 }
 

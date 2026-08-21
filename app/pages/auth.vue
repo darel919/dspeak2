@@ -140,6 +140,15 @@
           <p v-if="failureDiagnostic.cloudflareRay">
             CF-Ray: {{ failureDiagnostic.cloudflareRay }}
           </p>
+          <p v-if="failureDiagnostic.provider">
+            Provider: {{ failureDiagnostic.provider }}
+          </p>
+          <p v-if="failureDiagnostic.responseOrigin">
+            Origin: {{ failureDiagnostic.responseOrigin }}
+          </p>
+          <p v-if="failureDiagnostic.vercelMitigated">
+            Edge action: {{ failureDiagnostic.vercelMitigated }}
+          </p>
           <p v-if="failureDiagnostic.serverBuildCommit">
             Server {{ failureDiagnostic.serverBuildCommit }}
           </p>
@@ -157,8 +166,20 @@
           <button class="metro-btn" type="button" @click="copyDiagnostics">
             Copy diagnostics
           </button>
-          <button class="metro-btn" type="button" @click="showTerms = true">
-            Try sign-in again
+          <button
+            v-if="canRetryAppSession"
+            class="metro-btn"
+            type="button"
+            @click="retryAppSession"
+          >
+            Retry app session
+          </button>
+          <button
+            class="metro-btn metro-btn--ghost"
+            type="button"
+            @click="startOver"
+          >
+            Start sign-in over
           </button>
           <NuxtLink class="metro-btn metro-btn--ghost" to="/"
             >Return home</NuxtLink
@@ -198,8 +219,9 @@ let completionPromise = null;
 
 let loginUrl = "";
 let signInTimeout;
-let signInPoll;
+let signInFallbackTimeout;
 let signInCheckInFlight = false;
+const canRetryAppSession = ref(false);
 
 const termsUrl = computed(() =>
   desktopRuntime.value
@@ -218,22 +240,25 @@ function clearSignInTimeout() {
   signInTimeout = undefined;
 }
 
-function clearSignInPolling() {
-  if (!signInPoll) return;
-  clearInterval(signInPoll);
-  signInPoll = undefined;
+function clearSignInFallback() {
+  if (!signInFallbackTimeout) return;
+  clearTimeout(signInFallbackTimeout);
+  signInFallbackTimeout = undefined;
 }
 
-function startSignInPolling() {
-  clearSignInPolling();
-  signInPoll = setInterval(() => void checkSignIn(false), 1000);
+function schedulePendingCallbackFallback() {
+  clearSignInFallback();
+  signInFallbackTimeout = setTimeout(() => {
+    signInFallbackTimeout = undefined;
+    void checkSignIn(false);
+  }, 2_000);
 }
 
 function startSignInTimeout() {
   clearSignInTimeout();
   signInTimeout = setTimeout(() => {
     if (status.value !== "waiting") return;
-    clearSignInPolling();
+    clearSignInFallback();
     authStore.cancelDesktopSignIn();
     status.value = "failed";
     failureMessage.value =
@@ -285,6 +310,15 @@ function signInFailureMessage(error, fallback) {
     return "Could not start sign-in. Please try again.";
   if (code === "DESKTOP_OAUTH_CODE_EXCHANGE_FAILED")
     return "Authentication completed, but dSpeak could not verify the sign-in.";
+  if (code === "DESKTOP_EDGE_RATE_LIMITED") {
+    return mapped?.retryAfter
+      ? `Google sign-in completed, but dSpeak's app-session service was rate limited. Retry after ${mapped.retryAfter}.`
+      : "Google sign-in completed, but dSpeak's app-session service was blocked by its edge security layer.";
+  }
+  if (code === "DESKTOP_EDGE_REQUEST_REJECTED")
+    return "Google sign-in completed, but dSpeak's app-session service was rejected by its edge security layer.";
+  if (code === "DESKTOP_API_SESSION_TRANSPORT_ERROR")
+    return "Google sign-in completed, but dSpeak could not reach the app-session service.";
   if (
     code === "DESKTOP_API_SESSION_BRIDGE_FAILED" ||
     code === "DESKTOP_API_SESSION_RESTORE_FAILED" ||
@@ -317,6 +351,9 @@ function copyDiagnostics() {
     diag.viaHeader ? `Via: ${diag.viaHeader}` : "",
     diag.vercelRequestId ? `Vercel ID: ${diag.vercelRequestId}` : "",
     diag.cloudflareRay ? `CF-Ray: ${diag.cloudflareRay}` : "",
+    diag.provider ? `Provider: ${diag.provider}` : "",
+    diag.responseOrigin ? `Origin: ${diag.responseOrigin}` : "",
+    diag.vercelMitigated ? `Edge action: ${diag.vercelMitigated}` : "",
     diag.serverBuildCommit ? `Server build: ${diag.serverBuildCommit}` : "",
     diag.clientBuildCommit ? `Client build: ${diag.clientBuildCommit}` : "",
     diag.serverProjectRef ? `Server project: ${diag.serverProjectRef}` : "",
@@ -344,13 +381,14 @@ async function startSignIn() {
   showTerms.value = false;
   failureMessage.value = "";
   failureDiagnostic.value = null;
+  canRetryAppSession.value = false;
   try {
     const result = await authStore.beginExternalSignIn(termsAccepted.value);
     if (result.isDesktop) {
       loginUrl = result.loginUrl;
       status.value = "waiting";
       startSignInTimeout();
-      startSignInPolling();
+      schedulePendingCallbackFallback();
     }
   } catch (error) {
     console.error("[Auth] Could not start sign-in:", error);
@@ -389,7 +427,7 @@ async function checkSignIn(manual = true) {
       (manual && (await authStore.restoreSession()));
     if (completed) {
       clearSignInTimeout();
-      clearSignInPolling();
+      clearSignInFallback();
       await finishAuthentication();
       return;
     }
@@ -397,7 +435,7 @@ async function checkSignIn(manual = true) {
   } catch (error) {
     if (!manual) {
       console.warn("[Auth] Automatic desktop sign-in check failed:", error);
-      clearSignInPolling();
+      clearSignInFallback();
       status.value = "failed";
       failureMessage.value = signInFailureMessage(
         error,
@@ -406,7 +444,7 @@ async function checkSignIn(manual = true) {
       return;
     }
     console.error("[Auth] Could not complete desktop sign-in:", error);
-    clearSignInPolling();
+    clearSignInFallback();
     status.value = "failed";
     failureMessage.value = signInFailureMessage(
       error,
@@ -419,11 +457,35 @@ async function checkSignIn(manual = true) {
 
 function cancelSignIn() {
   clearSignInTimeout();
-  clearSignInPolling();
+  clearSignInFallback();
   authStore.cancelDesktopSignIn();
+  canRetryAppSession.value = false;
   loginUrl = "";
   status.value = "idle";
   showTerms.value = true;
+}
+
+function startOver() {
+  cancelSignIn();
+  failureMessage.value = "";
+  failureDiagnostic.value = null;
+  showTerms.value = true;
+}
+
+async function retryAppSession() {
+  status.value = "working";
+  try {
+    await authStore.retryDesktopSessionBridge();
+    canRetryAppSession.value = false;
+    await finishAuthentication();
+  } catch (error) {
+    status.value = "failed";
+    failureMessage.value = signInFailureMessage(
+      error,
+      "Your Supabase sign-in is still valid, but dSpeak could not create the app session.",
+    );
+    canRetryAppSession.value = await authStore.hasDesktopSupabaseSession();
+  }
 }
 
 async function finishAuthentication() {
@@ -466,15 +528,36 @@ onMounted(async () => {
   }
   if (await finishAuthentication()) return;
 
+  if (authStore.desktopAuthFailure) {
+    status.value = "failed";
+    failureMessage.value = signInFailureMessage(
+      authStore.desktopAuthFailure,
+      "Your Supabase sign-in is still valid, but dSpeak could not create the app session.",
+    );
+    canRetryAppSession.value = await authStore.hasDesktopSupabaseSession();
+    return;
+  }
+
   if (await authStore.restoreSession()) {
     await finishAuthentication();
+    return;
+  }
+
+  const hasSupabaseSession = await authStore.hasDesktopSupabaseSession();
+  if (authStore.desktopAuthFailure || hasSupabaseSession) {
+    status.value = "failed";
+    failureMessage.value = signInFailureMessage(
+      authStore.desktopAuthFailure,
+      "Your Supabase sign-in is still valid, but dSpeak could not create the app session.",
+    );
+    canRetryAppSession.value = hasSupabaseSession;
     return;
   }
 
   if (runtimeStore.isTauri && authStore.hasPendingDesktopOAuthAttempt()) {
     status.value = "waiting";
     startSignInTimeout();
-    startSignInPolling();
+    schedulePendingCallbackFallback();
     return;
   }
 
@@ -485,6 +568,29 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearSignInTimeout();
-  clearSignInPolling();
+  clearSignInFallback();
 });
+
+watch(
+  () => authStore.user,
+  (value) => {
+    if (!value || status.value === "idle") return;
+    void finishAuthentication();
+  },
+);
+
+watch(
+  () => authStore.desktopAuthFailure,
+  async (error) => {
+    if (!error) return;
+    clearSignInTimeout();
+    clearSignInFallback();
+    status.value = "failed";
+    failureMessage.value = signInFailureMessage(
+      error,
+      "The completed browser sign-in could not be transferred to dSpeak. Start sign-in again.",
+    );
+    canRetryAppSession.value = await authStore.hasDesktopSupabaseSession();
+  },
+);
 </script>

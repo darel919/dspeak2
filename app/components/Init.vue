@@ -216,6 +216,14 @@ async function checkAuth() {
     return;
   }
 
+  if (
+    authStore.desktopAuthFailure ||
+    (await authStore.hasDesktopSupabaseSession())
+  ) {
+    authChecked.value = true;
+    return;
+  }
+
   void authStore.clearAuth(false).catch((error) => {
     debugLog("[Init] Failed to clear an anonymous session:", error);
   });

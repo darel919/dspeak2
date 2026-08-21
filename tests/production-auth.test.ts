@@ -243,7 +243,7 @@ test("external authentication never puts access tokens in URLs", () => {
 
 test("failed SSO callbacks stop with an actionable error instead of looping", () => {
   assert.match(authPage, /Sign-in interrupted/);
-  assert.match(authPage, /Try sign-in again/);
+  assert.match(authPage, /Start sign-in over/);
   assert.doesNotMatch(authPage, /setTimeout\(resolve,\s*10000\)/);
 });
 

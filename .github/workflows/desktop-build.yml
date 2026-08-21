@@ -36,6 +36,7 @@ defaults:
 jobs:
   release-gate:
     name: Verify production release gate
+    environment: Production
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
@@ -72,6 +73,7 @@ jobs:
 
   detect-desktop-session-e2e:
     name: Detect authenticated desktop session E2E
+    environment: Production
     needs: release-gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -83,15 +85,20 @@ jobs:
         id: detect
         env:
           DSPEAK_TEST_TOKEN: ${{ secrets.DSPEAK_TEST_TOKEN }}
+          REQUIRE_DESKTOP_SESSION_E2E: ${{ github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v') }}
         run: |
           if [[ -n "$DSPEAK_TEST_TOKEN" ]]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$REQUIRE_DESKTOP_SESSION_E2E" == "true" ]]; then
+            echo "::error::Tagged desktop releases require the Production DSPEAK_TEST_TOKEN secret for the authenticated session bridge smoke." >&2
+            exit 1
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
   desktop-session-e2e:
     name: Authenticated desktop session E2E
+    environment: Production
     needs: detect-desktop-session-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -121,10 +128,15 @@ jobs:
   desktop:
     name: Build dSpeak Desktop (${{ matrix.platform }})
     environment: Production
-    needs: release-gate
+    needs: [release-gate, detect-desktop-session-e2e, desktop-session-e2e]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      always() &&
+      needs.release-gate.result == 'success' &&
+      needs.detect-desktop-session-e2e.result == 'success' &&
+      (needs.desktop-session-e2e.result == 'success' || needs.desktop-session-e2e.result == 'skipped') &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     strategy:
       fail-fast: false
       matrix:

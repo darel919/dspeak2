@@ -5,10 +5,11 @@ const endpointPath = "/api/auth/desktop-session";
 const expectedDiagnostic = "DESKTOP_SESSION_MISSING_BEARER";
 
 class SmokeFailure extends Error {
-  constructor(reason, status = null) {
+  constructor(reason, status = null, provenance = null) {
     super(reason);
     this.reason = reason;
     this.status = status;
+    this.provenance = provenance;
   }
 }
 
@@ -67,6 +68,22 @@ function printProvenance({
   console.log(`  Supabase project: ${projectRef || "(missing)"}`);
 }
 
+function responseProvenance(response, contentType = "") {
+  return {
+    responseUrl: response.url,
+    redirected: response.redirected,
+    status: response.status,
+    statusText: response.statusText,
+    contentType,
+    retryAfter: readHeader(response, "retry-after"),
+    server: readHeader(response, "server"),
+    via: readHeader(response, "via"),
+    vercelRequestId: readHeader(response, "x-vercel-id"),
+    vercelMitigated: readHeader(response, "x-vercel-mitigated"),
+    cloudflareRay: readHeader(response, "cf-ray"),
+  };
+}
+
 async function runSmoke() {
   const origin = readOrigin();
   const endpoint = `${origin}${endpointPath}`;
@@ -79,6 +96,7 @@ async function runSmoke() {
         Accept: "application/json",
         "Content-Type": "application/json",
         Origin: origin,
+        "X-Device-Id": "release-edge-smoke",
         "Sec-Fetch-Site": "same-origin",
       },
       body: "{}",
@@ -98,6 +116,7 @@ async function runSmoke() {
   ).toLowerCase();
   const hasChallengeHeader = response.headers.has("x-vercel-challenge-token");
   const hasRedirect = response.redirected || response.headers.has("location");
+  const provenance = responseProvenance(response, contentType);
   const body = await response.text();
   const bodyStart = body.trimStart().slice(0, 256).toLowerCase();
   const isHtml =
@@ -108,24 +127,36 @@ async function runSmoke() {
     bodyStart.startsWith("<body");
 
   if (hasRedirect)
-    throw new SmokeFailure("edge response redirected", response.status);
+    throw new SmokeFailure(
+      "edge response redirected",
+      response.status,
+      provenance,
+    );
   if (response.status === 429)
-    throw new SmokeFailure("edge response was rate limited", 429);
+    throw new SmokeFailure("edge response was rate limited", 429, provenance);
   if (vercelMitigation === "challenge" || hasChallengeHeader)
     throw new SmokeFailure(
       "edge response was a Vercel challenge",
       response.status,
+      provenance,
     );
-  if (isHtml) throw new SmokeFailure("edge response was HTML", response.status);
+  if (isHtml)
+    throw new SmokeFailure(
+      "edge response was HTML",
+      response.status,
+      provenance,
+    );
   if (response.status !== 401)
     throw new SmokeFailure(
       "edge response was not the application 401",
       response.status,
+      provenance,
     );
   if (!contentType.startsWith("application/json"))
     throw new SmokeFailure(
       "edge response was not application JSON",
       response.status,
+      provenance,
     );
 
   let payload;
@@ -135,6 +166,7 @@ async function runSmoke() {
     throw new SmokeFailure(
       "edge response was not valid application JSON",
       response.status,
+      provenance,
     );
   }
   const diagnosticValue = payload?.statusMessage;
@@ -146,16 +178,19 @@ async function runSmoke() {
     throw new SmokeFailure(
       "edge response had the wrong application diagnostic",
       response.status,
+      provenance,
     );
   if (!validBuildCommit(buildCommit))
     throw new SmokeFailure(
       "edge response omitted a valid build fingerprint",
       response.status,
+      provenance,
     );
   if (!validProjectRef(projectRef))
     throw new SmokeFailure(
       "edge response omitted a valid Supabase fingerprint",
       response.status,
+      provenance,
     );
 
   printProvenance({ origin, response, diagnostic, buildCommit, projectRef });
@@ -171,6 +206,9 @@ try {
         error.status === null ? "" : ` (HTTP ${error.status})`
       }`,
     );
+    if (error.provenance) {
+      console.error(`  provenance: ${JSON.stringify(error.provenance)}`);
+    }
   } else {
     console.error(
       "dSpeak desktop auth edge smoke failed: unexpected probe error",

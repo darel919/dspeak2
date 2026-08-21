@@ -43,6 +43,10 @@ test("desktop session diagnostics preserve the server category and build", async
     viaHeader: "1.1 edge",
     vercelRequestId: "sin1::request-123",
     cloudflareRay: "abc123-SIN",
+    contentType: "text/plain;charset=UTF-8",
+    vercelMitigated: "",
+    responseOrigin: "application",
+    provider: "dSpeak",
   });
 });
 
@@ -68,5 +72,9 @@ test("desktop session diagnostics fall back safely for non-JSON responses", asyn
     viaHeader: "",
     vercelRequestId: "",
     cloudflareRay: "",
+    contentType: "text/plain;charset=UTF-8",
+    vercelMitigated: "",
+    responseOrigin: "upstream-edge",
+    provider: "upstream",
   });
 });
