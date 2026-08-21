@@ -44,6 +44,19 @@ describe("native capture capability contract", () => {
     );
   });
 
+  it("preserves Windows camera and microphone startup error codes", async () => {
+    const source = await readFile(
+      new URL(
+        "../desktop/native-media/platform/windows/PlatformCaptureWindowsAudio.cpp",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    assert.match(source, /startup_result_ = -601/);
+    assert.match(source, /startup_result_ = -602/);
+    assert.match(source, /startup_result_ = SUCCEEDED\(result\) \? 0 : -611/);
+  });
+
   it("normalizes every platform backend to an explicit capability record", () => {
     const normalized = normalizeNativeCaptureCapabilities(unsupportedLinux);
 

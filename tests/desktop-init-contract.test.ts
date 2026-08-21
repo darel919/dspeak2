@@ -15,6 +15,7 @@ describe("desktop initialization contract", () => {
         read("app/components/Init.vue"),
         read("scripts/build-desktop-frontend.mjs"),
       ]);
+    const authStore = await read("app/stores/auth.ts");
     const rootConfig = await read("nuxt.config.ts");
 
     assert.match(tauriConfig, /"windows": \[\]/);
@@ -67,7 +68,19 @@ describe("desktop initialization contract", () => {
     assert.match(desktopConfig, /pwa: false/);
     assert.match(
       rootConfig,
+      /desktopApiBasePath =\s*\n\s*process\.env\.VITE_DSPEAK_API_PATH \|\| process\.env\.DSPEAK_PUBLIC_ORIGIN/,
+    );
+    assert.match(rootConfig, /isDesktop && desktopApiBasePath/);
+    assert.match(
+      rootConfig,
       /optimizeDeps: isDesktop \? \{ include: desktopOptimizeDeps \}/,
+    );
+    assert.match(authStore, /import\.meta\.dev/);
+    assert.match(authStore, /parsed\.protocol === "http:"/);
+    assert.match(authStore, /localhost.*127\.0\.0\.1.*\[::1\]/s);
+    assert.match(
+      authStore,
+      /parsed\.protocol !== "https:" && !localDevelopmentApi/,
     );
     for (const dependency of [
       "@supabase/supabase-js",
@@ -85,6 +98,14 @@ describe("desktop initialization contract", () => {
     await assert.rejects(
       () => read("desktop/.output/public/sw.js"),
       (error) => error?.code === "ENOENT",
+    );
+  });
+
+  it("builds the native media sidecar without a Windows console window", async () => {
+    const worker = await read("desktop/src-tauri/src/bin/dspeak-media.rs");
+    assert.match(
+      worker,
+      /#!\[cfg_attr\(windows, windows_subsystem = "windows"\)\]/,
     );
   });
 });
