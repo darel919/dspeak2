@@ -78,14 +78,8 @@ rate limits, redirects, and origin forwarding. Restore the edge path and rerun
 `node scripts/desktop-session-edge-smoke.mjs` before rebuilding. Do not fix an
 edge failure by weakening the bearer check or by adding a secret to the smoke.
 
-The authenticated workflow job runs when the GitHub Actions secret
-`DSPEAK_TEST_TOKEN` exists. Tagged releases fail before desktop builds when
-that Production secret is missing. Manual non-tagged builds may omit it and
-still run the no-secret edge gate. The job passes the token through its
-environment and runs exactly three session-bridge calls. It does not print the
-token, response bodies, authorization headers, or assertion data derived from
-them. `DSPEAK_TEST_TOKEN_OTHER_PROJECT` adds the cross-project rejection case;
-without it, the second call repeats the valid session with a new device id.
+The release workflow uses the no-secret edge gate before building desktop
+installers. It does not require an authenticated test user or a bearer token.
 
 When the client's configured Supabase project differs from the server's, the
 client reports `DESKTOP_SUPABASE_PROJECT_MISMATCH` instead of the generic

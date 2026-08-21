@@ -261,6 +261,7 @@ test("desktop releases publish signed updates and fail when the updater contract
     workflow,
     /DSPEAK_PUBLIC_ORIGIN: \$\{\{ vars\.DSPEAK_PUBLIC_ORIGIN \|\| 'https:\/\/dspeak\.darelisme\.my\.id' \}\}/,
   );
+  assert.doesNotMatch(workflow, /DSPEAK_TEST_TOKEN|desktop-session-e2e/);
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
   assert.match(workflow, /nsis\/\*\.exe\.sig/);
   assert.doesNotMatch(workflow, /\.nsis\.zip\.sig/);
