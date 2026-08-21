@@ -45,9 +45,10 @@ export const nativeCloudflareInitializationMethods: Partial<NativeCloudflareSess
       const result = await this.invoke("media_p2p_create", {
         offerer: false,
       });
+      const record = isExternalRecord(result) ? result : {};
       const handle =
-        isExternalString(result.handle) || isExternalNumber(result.handle)
-          ? result.handle
+        isExternalString(record.handle) || isExternalNumber(record.handle)
+          ? record.handle
           : null;
       if (handle === null)
         throw new Error("Native Cloudflare handle was not created");

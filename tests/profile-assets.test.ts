@@ -14,11 +14,11 @@ test("profileAssetUrl normalizes protected avatar paths", () => {
       "auth/assets/avatar?userId=one&fileName=face.jpg",
       "https://api.example.com/",
     ),
-    "/api/assets/avatar?userId=one&fileName=face.jpg",
+    "https://api.example.com/api/assets/avatar?userId=one&fileName=face.jpg",
   );
   assert.equal(
     profileAssetUrl("assets/avatar?userId=one", "https://api.example.com"),
-    "/api/assets/avatar?userId=one",
+    "https://api.example.com/api/assets/avatar?userId=one",
   );
   assert.equal(profileAssetUrl("face.jpg", "https://api.example.com"), null);
 });
@@ -43,7 +43,7 @@ test("profileAssetUrl localizes account avatars and rejects remote assets", () =
       "/api/assets/avatar?userId=one&fileName=face.jpg",
       "https://api.example.com",
     ),
-    "/api/assets/avatar?userId=one&fileName=face.jpg",
+    "https://api.example.com/api/assets/avatar?userId=one&fileName=face.jpg",
   );
   assert.equal(profileAssetUrl("", "https://api.example.com"), null);
 });

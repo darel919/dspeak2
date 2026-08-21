@@ -6,6 +6,7 @@ import type {
   ParticipantMediaCapabilities,
   VideoCodecName,
 } from "../app/shared/types/video-codec-capabilities.ts";
+import type { NativeSignalingSocket } from "../app/shared/types/native-mediasoup-session.ts";
 
 const serverHello = {
   protocolVersion: 919,
@@ -130,6 +131,73 @@ function createControlSignaling(session, messages, { stop } = {}) {
 }
 
 describe("NativeMediasoupSfuSession", () => {
+  it("passes raw native SDP results into Cloudflare negotiation", async () => {
+    const recordCommands = [];
+    const rawCommands = [];
+    let cloudflare;
+    const offer = [
+      "v=0",
+      "o=- 1 1 IN IP4 127.0.0.1",
+      "s=-",
+      "t=0 0",
+      "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+      "a=mid:0",
+      "a=sendrecv",
+      "a=msid:stream0 microphone_capture_audio",
+      "",
+    ].join("\r\n");
+    const session = new NativeMediasoupSfuSession({
+      invoke: async (command) => {
+        recordCommands.push(command);
+        return {};
+      },
+      invokeRaw: async (command) => {
+        rawCommands.push(command);
+        if (command === "media_p2p_create") return { handle: 7 };
+        if (command === "media_p2p_add_track")
+          return { trackId: "microphone_capture_audio" };
+        if (command === "media_p2p_create_offer") return offer;
+        return {};
+      },
+    });
+    cloudflare = session._createCloudflareSession();
+    const signaling: NativeSignalingSocket = {
+      open: async () => {},
+      waitForReady: async () => {},
+      stop: () => {},
+      send: (message) => {
+        if (message.type !== "cloudflare-request") return true;
+        const requestId = String(message.data?.requestId || "");
+        const operation = String(message.data?.operation || "");
+        const result =
+          operation === "new-session"
+            ? { sessionId: "cloudflare-session" }
+            : operation === "tracks-new"
+              ? { sessionDescription: { type: "answer", sdp: "answer" } }
+              : {};
+        queueMicrotask(() =>
+          cloudflare.handleMessage("cloudflare-response", {
+            requestId,
+            result,
+          }),
+        );
+        return true;
+      },
+      acknowledgeHeartbeat: () => {},
+      acceptServerHello: () => true,
+      getProtocolState: () => null,
+      markReady: () => {},
+    };
+    session.signaling = signaling;
+
+    await cloudflare.addSource({ source: "audio", kind: "audio" });
+
+    assert.equal(cloudflare.producers.get("audio").mid, "0");
+    assert.ok(rawCommands.includes("media_p2p_create_offer"));
+    assert.deepEqual(recordCommands, []);
+    await cloudflare.closeMedia();
+  });
+
   it("retains active Cloudflare publications for transport reconstruction", async () => {
     const forwarded = [];
     const session = new NativeMediasoupSfuSession({

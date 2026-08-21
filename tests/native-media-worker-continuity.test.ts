@@ -96,4 +96,15 @@ describe("native media worker continuity contract", () => {
     assert.match(session, /await stopScreenShareNow\(engine\)/);
     assert.match(session, /handleNativeCaptureErrorNow/);
   });
+
+  it("keeps primitive native SDP results available to Cloudflare", () => {
+    assert.match(
+      session,
+      /invokeRaw:[\s\S]*?=> engine\._invoke\(command, payload\)/,
+    );
+    assert.match(
+      session,
+      /invoke: async \(command: string[\s\S]*?isExternalRecord\(result\) \? result : \{\}/,
+    );
+  });
 });

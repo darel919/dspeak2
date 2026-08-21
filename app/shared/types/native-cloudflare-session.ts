@@ -1,5 +1,5 @@
 import type { OwnedErrorValue } from "./shared-utilities.ts";
-import type { ExternalObject } from "./boundary.ts";
+import type { ExternalObject, NativeMediaInvoke } from "./boundary.ts";
 
 import type { MediaCommandResult } from "./boundary.ts";
 
@@ -13,7 +13,7 @@ import type {
 import type { SignalingMessage } from "./media-signaling.ts";
 
 export interface NativeCloudflareSessionOptions {
-  invoke: NativeCloudflareSessionSurface["invoke"];
+  invoke: NativeMediaInvoke;
   send?: NativeCloudflareSessionSurface["send"];
   ensureControlReady?: NativeCloudflareSessionSurface["ensureControlReady"];
   onRemoteTrack?: NativeCloudflareSessionSurface["onRemoteTrack"];
@@ -44,7 +44,7 @@ export interface NativeCloudflareSessionSurface {
   invoke: (
     operation: string,
     payload?: Record<string, unknown>,
-  ) => Promise<Record<string, unknown>>;
+  ) => Promise<MediaCommandResult>;
   send?: (message: SignalingMessage) => MediaCommandResult;
   ensureControlReady?: () => Promise<MediaCommandResult>;
   onRemoteTrack?: (entry: Record<string, unknown>) => MediaCommandResult;

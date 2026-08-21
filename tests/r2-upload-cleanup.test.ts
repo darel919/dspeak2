@@ -48,6 +48,8 @@ test("prepared uploads expose authenticated cleanup and the client uses it on co
   assert.match(cleanup, /committedUploadExists/);
   assert.match(cleanup, /deleteObject\(key\)/);
   assert.match(client, /\/files\/cleanup/);
+  assert.match(client, /const putTransport = hasTauriRuntimeMarker\(\)/);
+  assert.match(client, /await cleanupPreparedUpload\(cleanupToken, path\)/);
 });
 
 test("legacy multipart chat uploads write the bytes to R2 before creating metadata", () => {
@@ -58,6 +60,7 @@ test("legacy multipart chat uploads write the bytes to R2 before creating metada
 
   assert.match(source, /putObject\(/);
   assert.match(source, /await putObject\(r2Key, file/);
+  assert.match(source, /await deleteObject\(record\[0\]\.r2Key\)/);
 });
 
 test("profile avatar PATCH persists the R2 key and avatar metadata", () => {

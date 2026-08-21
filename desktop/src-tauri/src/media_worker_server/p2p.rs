@@ -60,6 +60,24 @@ pub(super) fn p2p_create_offer(state: &mut WorkerState, payload: Value) -> Worke
     p2p_sdp_result(handle, result, output, "offer")
 }
 
+pub(super) fn p2p_get_track_mid(state: &mut WorkerState, payload: Value) -> WorkerResult {
+    state.ensure_initialized()?;
+    let handle = p2p_pointer(state, payload_u64(&payload, "p2pHandle")?)?;
+    let track_key = CString::new(payload_string(&payload, "trackKey")?)
+        .map_err(|error| json!(error.to_string()))?;
+    let mut output = ptr::null_mut();
+    let result = unsafe {
+        ffi::lib_dspeak_media_p2p_get_track_mid(handle, track_key.as_ptr(), &mut output)
+    };
+    if result != 0 || output.is_null() {
+        if !output.is_null() {
+            unsafe { ffi::lib_dspeak_media_free_string(output) };
+        }
+        return Err(json!("native P2P track MID is unavailable"));
+    }
+    native_text(output, "native P2P track MID").map(Value::String)
+}
+
 pub(super) fn p2p_create_answer(state: &mut WorkerState, payload: Value) -> WorkerResult {
     state.ensure_initialized()?;
     let handle = p2p_pointer(state, payload_u64(&payload, "p2pHandle")?)?;

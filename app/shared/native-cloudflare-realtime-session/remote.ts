@@ -6,6 +6,7 @@ import {
   isExternalRecord,
   isExternalString,
   type ExternalObject,
+  type MediaCommandResult,
 } from "../types/boundary.ts";
 import type { PresentableVideoFrame } from "../video-codec-migration.ts";
 import {
@@ -367,7 +368,7 @@ export const nativeCloudflareRemoteMethods: Partial<NativeCloudflareSessionSurfa
     const userId = String(userIdOrKey);
     const source = String(sourceOrReceiving || "");
     const receiving = Boolean(receivingValue);
-    const operations: Array<Promise<Record<string, unknown>>> = [];
+    const operations: Array<Promise<MediaCommandResult>> = [];
     this.remoteReceiving.set(`${userId}:${source}`, receiving);
     let changed = false;
     for (const entry of this.consumers.values()) {

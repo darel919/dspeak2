@@ -31,9 +31,9 @@ Rust listener binds only to `127.0.0.1`.
 
 Set `DSPEAK_PUBLIC_ORIGIN` and set `VITE_DSPEAK_API_PATH` when the API origin differs,
 and `SUPABASE_URL`/`SUPABASE_ANON_KEY` for the generated desktop runtime
-configuration. Desktop builds fail if the Supabase values are missing. The
-build generates a Tauri capability file scoped to the configured dSpeak API,
-legal URLs, and Supabase Auth URL. The checked-in default capability also keeps
+configuration and `CF_R2_ACCOUNT_ID` for the R2 endpoint used by presigned
+uploads. Desktop builds fail if these values are missing. The build generates a
+Tauri capability file scoped to the configured dSpeak API, R2 endpoint, legal URLs, and Supabase Auth URL. The checked-in default capability also keeps
 the production dSpeak API and legal URL scopes available when the generated
 capability has not yet been produced.
 

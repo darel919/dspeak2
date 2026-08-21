@@ -332,7 +332,9 @@ lib_dspeak_media_platform_device_capture_create(const char* device_id,
     auto* session = new(std::nothrow) lib_dspeak_media_device_capture_session();
     if (!session) return nullptr;
     session->microphone = std::strcmp(kind, "microphone") == 0;
-    session->device_id = utf8_to_wide(device_id);
+    session->device_id = std::strcmp(kind, "camera") == 0
+        ? camera_id_from_value(device_id)
+        : utf8_to_wide(device_id);
     session->video_width = video_width;
     session->video_height = video_height;
     session->video_frame_rate = video_frame_rate;

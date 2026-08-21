@@ -14,10 +14,10 @@
     <div class="metro-message-meta">
       <template v-if="!isOwnMessage">
         <span class="metro-message-avatar">
-          <img
+          <ProfileAvatar
             v-if="getAvatarUrl(identityStore.profileFor(message.sender).avatar)"
-            :src="getAvatarUrl(identityStore.profileFor(message.sender).avatar)"
-            :alt="identityStore.displayName(message.sender)"
+            :src="identityStore.profileFor(message.sender).avatar"
+            :name="identityStore.displayName(message.sender)"
             class="metro-message-avatar-img"
           />
           <span v-else class="metro-message-avatar-fallback">
@@ -133,7 +133,7 @@
           @click="openLightbox(index)"
         >
           <img
-            :src="att.url || att.preview"
+            :src="getAttachmentUrl(att, index)"
             :alt="att.name || 'Attachment'"
             class="metro-message-attachment-img"
           />
@@ -214,6 +214,7 @@ import { useAuthStore } from "../../stores/auth";
 import { useIdentityStore } from "../../stores/identity";
 import { useChatStore } from "../../stores/chat";
 import MessageActions from "./MessageActions.vue";
+import ProfileAvatar from "../ProfileAvatar.vue";
 import ChatMarkdownRenderer from "./MarkdownRenderer.vue";
 import InviteLinkCard from "./InviteLinkCard.vue";
 import LinkPreview from "./LinkPreview.vue";
@@ -231,8 +232,16 @@ import {
   isExternalRecord,
   isExternalString,
 } from "../../shared/types/boundary.ts";
+import {
+  loadApiResourceBlobUrl,
+  resolveApiResourceUrl,
+} from "../../shared/api-resource-url.ts";
+import { hasTauriRuntimeMarker } from "../../shared/desktop-capture.ts";
 
 const { formatChatDisplayTime, getAvatarUrl } = useChatUtils();
+const apiPath = useRuntimeConfig().public.apiPath;
+const desktopRuntime = hasTauriRuntimeMarker();
+const attachmentBlobUrls = ref(new Map());
 
 const props = defineProps({
   message: {
@@ -326,6 +335,11 @@ onMounted(() => {
 onUnmounted(() => {
   if (visibilityObserver) visibilityObserver.disconnect();
   if (readVisibilityTimer) clearTimeout(readVisibilityTimer);
+  for (const url of attachmentBlobUrls.value.values()) URL.revokeObjectURL(url);
+});
+
+onMounted(() => {
+  void loadDesktopAttachmentUrls();
 });
 
 function handleVisibility(entries) {
@@ -434,11 +448,42 @@ function toggleReaction(emoji) {
   emit("react", { messageId: props.message.id, emoji });
 }
 
-function openLightbox(index) {
+async function openLightbox(index) {
+  await loadDesktopAttachmentUrls();
   emit("open-lightbox", {
     message: props.message,
     attachmentIndex: index,
+    attachments: (props.message.attachments || []).map((attachment, index) => ({
+      ...attachment,
+      url: getAttachmentUrl(attachment, index),
+    })),
   });
+}
+
+function getAttachmentUrl(attachment, index) {
+  const key = String(attachment?.id || index);
+  if (desktopRuntime) return attachmentBlobUrls.value.get(key) || "";
+  return resolveApiResourceUrl(attachment?.url || attachment?.preview, apiPath);
+}
+
+async function loadDesktopAttachmentUrls() {
+  if (!desktopRuntime) return;
+  await Promise.all(
+    (props.message.attachments || []).map(async (attachment, index) => {
+      const key = String(attachment?.id || index);
+      if (attachmentBlobUrls.value.has(key)) return;
+      try {
+        const blobUrl = await loadApiResourceBlobUrl(
+          attachment?.url || attachment?.preview,
+          apiPath,
+        );
+        attachmentBlobUrls.value = new Map(attachmentBlobUrls.value).set(
+          key,
+          blobUrl,
+        );
+      } catch {}
+    }),
+  );
 }
 
 function isGif(attachment) {

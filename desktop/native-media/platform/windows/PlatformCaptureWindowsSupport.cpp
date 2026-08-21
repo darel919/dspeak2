@@ -160,6 +160,13 @@ std::wstring endpoint_id_from_value(const char* value) {
     return result;
 }
 
+std::wstring camera_id_from_value(const char* value) {
+    std::wstring result = utf8_to_wide(value);
+    const std::wstring prefix = L"windows:camera:";
+    if (result.rfind(prefix, 0) == 0) result.erase(0, prefix.size());
+    return result;
+}
+
 ComPtr<IMMDeviceEnumerator> create_device_enumerator() {
     ComPtr<IMMDeviceEnumerator> enumerator;
     if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr,

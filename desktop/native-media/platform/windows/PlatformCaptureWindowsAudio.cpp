@@ -348,7 +348,6 @@ private:
         ComScope com;
         ComPtr<IMFMediaSource> source;
         ComPtr<IMFSourceReader> reader;
-        IMFMediaType* output_type = nullptr;
         HRESULT result = com.usable() && ensure_media_foundation() ? S_OK : E_FAIL;
         std::vector<ComPtr<IMFActivate>> cameras;
         if (SUCCEEDED(result) && !enumerate_camera_activates(cameras)) result = E_FAIL;
@@ -378,22 +377,29 @@ private:
             source_ = source;
             reader_ = reader;
         }
-        if (SUCCEEDED(result)) result = MFCreateMediaType(&output_type);
-        if (SUCCEEDED(result)) result = output_type->SetGUID(
-            MF_MT_MAJOR_TYPE, MFMediaType_Video);
-        if (SUCCEEDED(result)) result = output_type->SetGUID(
-            MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
-        if (SUCCEEDED(result)) result = output_type->SetUINT32(
-            MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-        if (SUCCEEDED(result) && video_width_ > 0 && video_height_ > 0)
-            result = MFSetAttributeSize(
-                output_type, MF_MT_FRAME_SIZE, video_width_, video_height_);
-        if (SUCCEEDED(result) && video_frame_rate_ > 0)
-            result = MFSetAttributeRatio(
-                output_type, MF_MT_FRAME_RATE, video_frame_rate_, 1);
-        if (SUCCEEDED(result)) result = reader->SetCurrentMediaType(
-            MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, output_type);
-        if (output_type) output_type->Release();
+        auto set_output_type = [&](bool constrain_format) {
+            ComPtr<IMFMediaType> output_type;
+            HRESULT type_result = MFCreateMediaType(&output_type);
+            if (SUCCEEDED(type_result)) type_result = output_type->SetGUID(
+                MF_MT_MAJOR_TYPE, MFMediaType_Video);
+            if (SUCCEEDED(type_result)) type_result = output_type->SetGUID(
+                MF_MT_SUBTYPE, MFVideoFormat_ARGB32);
+            if (SUCCEEDED(type_result)) type_result = output_type->SetUINT32(
+                MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+            if (constrain_format && SUCCEEDED(type_result) &&
+                video_width_ > 0 && video_height_ > 0)
+                type_result = MFSetAttributeSize(
+                    output_type.Get(), MF_MT_FRAME_SIZE, video_width_, video_height_);
+            if (constrain_format && SUCCEEDED(type_result) && video_frame_rate_ > 0)
+                type_result = MFSetAttributeRatio(
+                    output_type.Get(), MF_MT_FRAME_RATE, video_frame_rate_, 1);
+            if (SUCCEEDED(type_result)) type_result = reader->SetCurrentMediaType(
+                MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, output_type.Get());
+            return type_result;
+        };
+        if (SUCCEEDED(result)) result = set_output_type(true);
+        if (FAILED(result) && (video_width_ > 0 || video_height_ > 0 || video_frame_rate_ > 0))
+            result = set_output_type(false);
         if (SUCCEEDED(result)) result = reader->SetStreamSelection(
             MF_SOURCE_READER_ALL_STREAMS, FALSE);
         if (SUCCEEDED(result)) result = reader->SetStreamSelection(

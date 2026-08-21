@@ -218,6 +218,10 @@ lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
     uint64_t event_handle);
 void              lib_dspeak_media_p2p_destroy(lib_dspeak_media_p2p_handle_t* h);
 int               lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* h, char** sdp_out);
+int               lib_dspeak_media_p2p_get_track_mid(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_key,
+    char** mid_out);
 int               lib_dspeak_media_p2p_create_answer(lib_dspeak_media_p2p_handle_t* h, const char* remote_sdp, char** sdp_out);
 int               lib_dspeak_media_p2p_set_remote_description(
     lib_dspeak_media_p2p_handle_t* h,

@@ -56,7 +56,7 @@ export class NativeMediasoupSignalingMethods {
   ): NativeCloudflareSessionLike {
     if (this.cloudflareSession) return this.cloudflareSession;
     this.cloudflareSession = new NativeCloudflareRealtimeSession({
-      invoke: this.invoke,
+      invoke: this.invokeRaw,
       send: (message: SignalingMessage) => this.signaling?.send?.(message),
       ensureControlReady: async () => {
         await this.signaling?.waitForReady?.();

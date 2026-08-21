@@ -16,7 +16,13 @@ import {
 } from "../types/video-codec-capabilities.ts";
 import { supportsCodecDirectionTarget } from "../video-codec-routing.ts";
 
-import { requestIdentifier, sourceKind, midForTrack } from "./helpers.ts";
+import {
+  mediaSections,
+  requestIdentifier,
+  sectionMid,
+  sourceKind,
+  midForTrack,
+} from "./helpers.ts";
 import type {
   NativeCloudflareNegotiationResponse,
   NativeCloudflarePublication,
@@ -854,10 +860,31 @@ export const nativeCloudflareSourcesMethods: Partial<NativeCloudflareSessionSurf
           .map((producer) => String(producer.mid || ""))
           .filter(Boolean),
       );
-      const mid = midForTrack(offer, trackId, kind, usedMids);
+      let mid = midForTrack(offer, trackId, kind, usedMids);
+      if (!mid) {
+        try {
+          const nativeMid = await this.invoke("media_p2p_get_track_mid", {
+            p2pHandle: this.handle,
+            trackKey,
+          });
+          const nativeMidValue = isExternalString(nativeMid)
+            ? nativeMid
+            : recordValue(nativeMid).mid;
+          if (
+            isExternalString(nativeMidValue) ||
+            isExternalNumber(nativeMidValue)
+          )
+            mid = String(nativeMidValue);
+        } catch {}
+      }
       if (!mid)
         throw new Error(
-          `Native Cloudflare ${source} transceiver MID is missing`,
+          `Native Cloudflare ${source} transceiver MID is missing (trackKey=${trackKey}; trackId=${trackId}; offerMids=${
+            mediaSections(offer, kind)
+              .map(sectionMid)
+              .filter((value): value is string => Boolean(value))
+              .join(",") || "none"
+          })`,
         );
       candidateMid = mid;
       const trackName = requestIdentifier();

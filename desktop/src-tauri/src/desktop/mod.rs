@@ -11,9 +11,13 @@ fn desktop_restart_app(app: tauri::AppHandle) {
     app.restart()
 }
 
+fn should_prevent_tray_exit(close_to_tray: bool, code: Option<i32>) -> bool {
+    close_to_tray && code.is_none()
+}
+
 use crate::media;
-use state::{BackgroundNotificationState, OAuthState};
-use std::sync::atomic::AtomicBool;
+use state::{BackgroundNotificationState, OAuthState, HIDE_ON_CLOSE};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 use tauri::Listener;
@@ -234,6 +238,15 @@ pub(crate) fn run() {
         .build(tauri::generate_context!())
         .map(|app| {
             app.run(|app_handle, event| {
+                #[cfg(not(target_os = "macos"))]
+                let _ = app_handle;
+
+                if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+                    if should_prevent_tray_exit(HIDE_ON_CLOSE.load(Ordering::Relaxed), *code) {
+                        api.prevent_exit();
+                    }
+                }
+
                 #[cfg(target_os = "macos")]
                 if let tauri::RunEvent::Reopen { .. } = event {
                     if let Err(error) = window::open_main_window(app_handle) {
@@ -293,5 +306,17 @@ fn show_native_fatal_dialog(title: &str, detail: &str) {
         let _ = std::process::Command::new("osascript")
             .args(["-e", message.as_str()])
             .status();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_prevent_tray_exit;
+
+    #[test]
+    fn tray_close_prevents_only_implicit_exit() {
+        assert!(should_prevent_tray_exit(true, None));
+        assert!(!should_prevent_tray_exit(false, None));
+        assert!(!should_prevent_tray_exit(true, Some(0)));
     }
 }

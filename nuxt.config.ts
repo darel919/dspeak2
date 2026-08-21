@@ -63,6 +63,9 @@ const buildIdentity = resolveBuildIdentity();
 const connectSources = [
   process.env.CF_MEDIA_CONTROL_URL,
   process.env.SUPABASE_URL,
+  process.env.CF_R2_ACCOUNT_ID
+    ? `https://${process.env.CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+    : null,
 ]
   .filter((value): value is string => Boolean(value))
   .flatMap((value) => {

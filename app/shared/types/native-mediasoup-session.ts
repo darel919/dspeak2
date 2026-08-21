@@ -182,6 +182,7 @@ export interface NativeCloudflareSessionLike {
 
 export interface NativeMediasoupConstructorOptions extends Partial<NativeMediasoupSfuSessionSurface> {
   invoke: NativeMediasoupSfuSessionSurface["invoke"];
+  invokeRaw?: import("./boundary.ts").NativeMediaInvoke;
   mediaProfile?: NativeMediaProfile;
   buildUrl?: (channelId: string | null) => string;
   location?: Location;
