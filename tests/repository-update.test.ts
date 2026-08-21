@@ -241,11 +241,13 @@ test("desktop releases publish signed updates and fail when the updater contract
   assert.match(workflow, /release:check/);
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
-  assert.match(workflow, /repository: darel919\/dspeak-media-control/);
-  assert.match(workflow, /path: dspeak-media-control/);
   assert.match(
     workflow,
-    /DSPEAK_MEDIA_CONTROL_PATH: \$\{\{ github\.workspace \}\}\/dspeak-media-control/,
+    /DSPEAK_MEDIA_CONTROL_PATH: \$\{\{ github\.workspace \}\}\/\.\.\/dspeak-media-control/,
+  );
+  assert.match(
+    workflow,
+    /git clone --depth 1 --branch main --single-branch https:\/\/github\.com\/darel919\/dspeak-media-control\.git "\$DSPEAK_MEDIA_CONTROL_PATH"/,
   );
   assert.match(
     workflow,

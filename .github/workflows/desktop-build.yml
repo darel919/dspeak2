@@ -47,11 +47,9 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
       - name: Checkout media control source
-        uses: actions/checkout@v4
-        with:
-          repository: darel919/dspeak-media-control
-          ref: main
-          path: dspeak-media-control
+        env:
+          DSPEAK_MEDIA_CONTROL_PATH: ${{ github.workspace }}/../dspeak-media-control
+        run: git clone --depth 1 --branch main --single-branch https://github.com/darel919/dspeak-media-control.git "$DSPEAK_MEDIA_CONTROL_PATH"
 
       - name: Install root test tools
         run: |
@@ -82,7 +80,7 @@ jobs:
 
       - name: Run root tests
         env:
-          DSPEAK_MEDIA_CONTROL_PATH: ${{ github.workspace }}/dspeak-media-control
+          DSPEAK_MEDIA_CONTROL_PATH: ${{ github.workspace }}/../dspeak-media-control
         run: bun run test
 
   detect-desktop-session-e2e:
