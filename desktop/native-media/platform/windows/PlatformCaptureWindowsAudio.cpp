@@ -176,7 +176,7 @@ private:
         if (FAILED(result)) {
             {
                 std::lock_guard<std::mutex> lock(state_mutex_);
-                startup_result_ = -1;
+                startup_result_ = -601;
                 initialized_ = true;
                 running_ = false;
             }
@@ -194,7 +194,7 @@ private:
         if (FAILED(result)) {
             {
                 std::lock_guard<std::mutex> lock(state_mutex_);
-                startup_result_ = -1;
+                startup_result_ = -602;
                 initialized_ = true;
                 running_ = false;
             }
@@ -400,7 +400,7 @@ private:
             MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE);
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
-            startup_result_ = SUCCEEDED(result) ? 0 : -1;
+            startup_result_ = SUCCEEDED(result) ? 0 : -611;
             initialized_ = true;
             running_ = SUCCEEDED(result);
         }

@@ -52,7 +52,12 @@ function validateDesktopApiConfig(
   }
   try {
     const parsed = new URL(apiPath);
-    if (parsed.protocol !== "https:") {
+    const localDevelopmentHost = ["localhost", "127.0.0.1", "[::1]"].includes(
+      parsed.hostname,
+    );
+    const localDevelopmentApi =
+      import.meta.dev && parsed.protocol === "http:" && localDevelopmentHost;
+    if (parsed.protocol !== "https:" && !localDevelopmentApi) {
       throw createDesktopAuthError(
         "DESKTOP_API_CONFIGURATION_INVALID",
         "Desktop API must use HTTPS in production.",

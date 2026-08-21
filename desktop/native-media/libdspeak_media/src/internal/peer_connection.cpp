@@ -599,11 +599,9 @@ extern "C" int lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* 
             h->last_error = "preferred video codec is absent from generated offer";
             return -1;
         }
-        const auto& sdp = generated_sdp;
-        *sdp_out = lib_dspeak_media_strdup(sdp.c_str());
         webrtc::SdpParseError parse_error;
         auto desc = webrtc::CreateSessionDescription(
-            webrtc::SdpType::kOffer, sdp, &parse_error);
+            webrtc::SdpType::kOffer, generated_sdp, &parse_error);
         if (!desc) {
             h->last_error = sdp_parse_error_message(parse_error);
             return -1;
@@ -614,6 +612,21 @@ extern "C" int lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* 
             h->pc->SetLocalDescription(set_obs, description);
         });
         set_fut.get();
+        std::string local_sdp;
+        h->signaling_thread->BlockingCall([h, &local_sdp] {
+            const auto* description = h->pc->local_description();
+            if (!description) {
+                throw std::runtime_error("native local offer is unavailable");
+            }
+            description->ToString(&local_sdp);
+            if (local_sdp.empty())
+                throw std::runtime_error("native local offer is empty");
+        });
+        if (!preferred_video_codecs_are_in_sdp(h, local_sdp)) {
+            h->last_error = "preferred video codec is absent from local offer";
+            return -1;
+        }
+        *sdp_out = lib_dspeak_media_strdup(local_sdp.c_str());
         return 0;
     } catch (const std::exception& error) {
         h->last_error = error.what();

@@ -15,7 +15,8 @@ declare module "nuxt/schema" {
 
 const isProduction = process.env.NODE_ENV === "production";
 const isDesktop = process.env.DSPEAK_DESKTOP === "1";
-const desktopApiBasePath = process.env.VITE_DSPEAK_API_PATH || "";
+const desktopApiBasePath =
+  process.env.VITE_DSPEAK_API_PATH || process.env.DSPEAK_PUBLIC_ORIGIN || "";
 const desktopOptimizeDeps = [
   "@supabase/supabase-js",
   "@tauri-apps/api/core",
@@ -316,8 +317,8 @@ export default defineNuxtConfig({
 
       mediaControlUrl: process.env.CF_MEDIA_CONTROL_URL || "",
       apiPath:
-        isDesktop && process.env.VITE_DSPEAK_API_PATH
-          ? `${process.env.VITE_DSPEAK_API_PATH.replace(/\/$/, "")}/api`
+        isDesktop && desktopApiBasePath
+          ? `${desktopApiBasePath.replace(/\/$/, "")}/api`
           : "/api",
       appVersion: buildIdentity.version,
       appBuild: {

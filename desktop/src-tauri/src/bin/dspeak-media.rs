@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 #[path = "../media/ffi.rs"]
 mod ffi;
 #[path = "../media_worker_server.rs"]
