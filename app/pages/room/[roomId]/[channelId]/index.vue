@@ -108,6 +108,22 @@ const selectedChannel = computed(() =>
 );
 let channelSelectionGeneration = 0;
 let roomAccessGeneration = 0;
+let autoJoinAttemptedChannelId = null;
+
+async function autoJoinMediaChannel(channelId, failureMessage) {
+  const normalizedChannelId = String(channelId || "");
+  if (
+    !normalizedChannelId ||
+    autoJoinAttemptedChannelId === normalizedChannelId
+  )
+    return;
+  autoJoinAttemptedChannelId = normalizedChannelId;
+  try {
+    await voiceStore.joinVoiceChannel(normalizedChannelId);
+  } catch (error) {
+    console.error(failureMessage, error);
+  }
+}
 
 async function resolveRoomAccess() {
   const requestedRoomId = String(roomId.value || "");
@@ -163,11 +179,11 @@ async function onChannelSelected(channel) {
   });
 
   if (channel.isMedia) {
-    try {
-      await voiceStore.joinVoiceChannel(channel.id);
-    } catch (error) {
-      console.error("Failed to auto-join voice channel:", error);
-    }
+    autoJoinAttemptedChannelId = null;
+    await autoJoinMediaChannel(
+      channel.id,
+      "Failed to auto-join voice channel:",
+    );
   }
 }
 
@@ -192,11 +208,10 @@ watch(
         );
 
         if (selectedChannel.value?.isMedia) {
-          try {
-            await voiceStore.joinVoiceChannel(selectedChannel.value.id);
-          } catch (error) {
-            console.error("Failed to restore voice channel from URL:", error);
-          }
+          await autoJoinMediaChannel(
+            selectedChannel.value.id,
+            "Failed to restore voice channel from URL:",
+          );
         }
 
         if (!selectedChannelId.value) {
@@ -242,11 +257,10 @@ watch(
 
       const channel = channelsStore.getChannelById(newChannelId);
       if (channel && channel.isMedia) {
-        try {
-          await voiceStore.joinVoiceChannel(channel.id);
-        } catch (error) {
-          console.error("Failed to auto-join voice channel via URL:", error);
-        }
+        await autoJoinMediaChannel(
+          channel.id,
+          "Failed to auto-join voice channel via URL:",
+        );
       }
     }
   },

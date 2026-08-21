@@ -85,6 +85,51 @@ static bool preferred_video_codecs_are_in_sdp(
     return true;
 }
 
+static std::optional<std::string> sdp_mid_for_track(
+    const std::string& sdp,
+    const std::string& kind,
+    const std::string& track_id) {
+    const std::string media_prefix = "m=" + kind + " ";
+    auto section_start = sdp.find(media_prefix);
+    while (section_start != std::string::npos) {
+        const auto section_end = sdp.find("\nm=", section_start + 1);
+        const auto section = sdp.substr(
+            section_start,
+            section_end == std::string::npos ? std::string::npos : section_end - section_start);
+        bool contains_track = false;
+        auto msid_start = section.find("a=msid:");
+        while (msid_start != std::string::npos) {
+            const auto line_end = section.find('\n', msid_start);
+            const auto line = section.substr(
+                msid_start + std::strlen("a=msid:"),
+                line_end == std::string::npos ? std::string::npos : line_end - msid_start - std::strlen("a=msid:"));
+            std::istringstream values(line);
+            std::string stream_id;
+            std::string media_track_id;
+            values >> stream_id >> media_track_id;
+            if (media_track_id == track_id) {
+                contains_track = true;
+                break;
+            }
+            msid_start = section.find("a=msid:", line_end == std::string::npos ? section.size() : line_end + 1);
+        }
+        if (contains_track) {
+            const auto mid_start = section.find("a=mid:");
+            if (mid_start != std::string::npos) {
+                const auto line_end = section.find('\n', mid_start);
+                auto mid = section.substr(
+                    mid_start + std::strlen("a=mid:"),
+                    line_end == std::string::npos ? std::string::npos : line_end - mid_start - std::strlen("a=mid:"));
+                while (!mid.empty() && (mid.back() == '\r' || mid.back() == '\n')) mid.pop_back();
+                if (!mid.empty()) return mid;
+            }
+        }
+        if (section_end == std::string::npos) break;
+        section_start = sdp.find(media_prefix, section_end + 1);
+    }
+    return std::nullopt;
+}
+
 static std::string sdp_parse_error_message(const webrtc::SdpParseError& error) {
     if (error.description.empty() && error.line.empty())
         return "SDP description could not be parsed";
@@ -626,7 +671,7 @@ extern "C" int lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* 
             h->last_error = "preferred video codec is absent from local offer";
             return -1;
         }
-        *sdp_out = lib_dspeak_media_strdup(local_sdp.c_str());
+        *sdp_out = lib_dspeak_media_strdup(generated_sdp.c_str());
         return 0;
     } catch (const std::exception& error) {
         h->last_error = error.what();
@@ -661,12 +706,22 @@ extern "C" int lib_dspeak_media_p2p_get_track_mid(
             for (const auto& transceiver : h->pc->GetTransceivers()) {
                 if (!transceiver || transceiver->sender() != sender) continue;
                 const auto mid = transceiver->mid();
-                if (!mid || mid->empty()) {
-                    h->last_error = "native P2P track transceiver MID is unavailable";
-                    return -1;
+                if (mid && !mid->empty()) {
+                    *mid_out = lib_dspeak_media_strdup(mid->c_str());
+                    return *mid_out ? 0 : -1;
                 }
-                *mid_out = lib_dspeak_media_strdup(mid->c_str());
-                return *mid_out ? 0 : -1;
+                break;
+            }
+            const auto track = sender->track();
+            const auto* local_description = h->pc->local_description();
+            if (track && local_description) {
+                std::string local_sdp;
+                local_description->ToString(&local_sdp);
+                const auto mid = sdp_mid_for_track(local_sdp, track->kind(), track->id());
+                if (mid) {
+                    *mid_out = lib_dspeak_media_strdup(mid->c_str());
+                    return *mid_out ? 0 : -1;
+                }
             }
             h->last_error = "native P2P track transceiver is unavailable";
             return -1;

@@ -26,6 +26,10 @@ describe("desktop initialization contract", () => {
     );
     assert.match(
       tauriConfig,
+      /"beforeDevCommand": "cd \.\. && DSPEAK_DESKTOP=1 npm run dev -- --port 3000"/,
+    );
+    assert.match(
+      tauriConfig,
       /"externalBin":\s*\[\s*"binaries\/dspeak-media"\s*\]/,
     );
     assert.doesNotMatch(tauriConfig, /NITRO_PRESET=|rm -rf|cp -R/);

@@ -480,6 +480,8 @@ describe("NativeCloudflareRealtimeSession", () => {
       if (command === "media_p2p_add_track") return { trackId: "native-audio" };
       if (command === "media_p2p_create_offer")
         return localOffer("native-audio", "audio", false);
+      if (command === "media_p2p_get_track_mid")
+        throw new Error("native P2P track transceiver MID is unavailable");
       return {};
     };
     const send = (message) => {
@@ -508,7 +510,7 @@ describe("NativeCloudflareRealtimeSession", () => {
 
     assert.equal(session.producers.get("audio").mid, "0");
     assert.ok(calls.includes("media_p2p_create_offer"));
-    assert.ok(calls.includes("media_p2p_get_track_mid"));
+    assert.ok(!calls.includes("media_p2p_get_track_mid"));
     await session.closeMedia();
   });
 

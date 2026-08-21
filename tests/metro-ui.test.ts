@@ -987,8 +987,11 @@ test("room switching prepares the destination before one direct navigation", asy
   );
   assert.match(
     channelPage,
-    /await voiceStore\.joinVoiceChannel\(selectedChannel\.value\.id\)/,
+    /await autoJoinMediaChannel\(\s*selectedChannel\.value\.id,/,
   );
+  assert.match(channelPage, /autoJoinAttemptedChannelId/);
+  assert.match(channelPage, /async function autoJoinMediaChannel/);
+  assert.match(channelPage, /autoJoinAttemptedChannelId = normalizedChannelId/);
 
   const channelList = await readFile("app/components/ChannelList.vue", "utf8");
   const mobileChannelList = await readFile(

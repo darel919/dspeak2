@@ -19,7 +19,10 @@ import type {
   NativeReceiveEvent,
 } from "./types/native-mediasoup.ts";
 import type { CodecRoutingPlan } from "./video-codec-routing.ts";
-import type { MediaCommandResult } from "./types/boundary.ts";
+import type {
+  MediaCommandResult,
+  NativeMediaInvoke,
+} from "./types/boundary.ts";
 import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 import type { SignalingMessage } from "./types/media-signaling.ts";
 export class NativeMediasoupSfuSession {
@@ -59,6 +62,7 @@ export class NativeMediasoupSfuSession {
   declare codecRoutingEvaluationOperation: Promise<MediaCommandResult> | null;
   declare setJitterBufferConfig: NativeMediasoupSfuSessionSurface["setJitterBufferConfig"];
   declare invoke: NativeMediasoupSfuSessionSurface["invoke"];
+  declare invokeRaw: NativeMediaInvoke;
   declare buildUrl: NativeMediasoupSfuSessionSurface["buildUrl"];
   declare signalingPath?: string;
   declare signalingToken?: string;
@@ -312,6 +316,7 @@ export class NativeMediasoupSfuSession {
   declare evaluateCodecRoutingPlans: () => Promise<MediaCommandResult>;
   constructor({
     invoke,
+    invokeRaw,
     buildUrl,
     signalingPath,
     signalingToken,
@@ -339,6 +344,7 @@ export class NativeMediasoupSfuSession {
     if (!(invoke instanceof Function))
       throw new TypeError("NativeMediasoupSfuSession requires invoke");
     this.invoke = invoke;
+    this.invokeRaw = invokeRaw || invoke;
     this.buildUrl =
       buildUrl ||
       ((channelId: string | null) =>

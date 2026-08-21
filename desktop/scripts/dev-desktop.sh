@@ -64,31 +64,81 @@ export NATIVE_MEDIA_TARGET_TRIPLE
 DSPEAK_DESKTOP_SHOW="${DSPEAK_DESKTOP_SHOW:-1}"
 export DSPEAK_DESKTOP_SHOW
 
+if node -e 'const net = require("node:net"); const socket = net.createConnection({ host: "127.0.0.1", port: 3000 }); socket.setTimeout(250, () => { socket.destroy(); process.exit(1); }); socket.once("connect", () => { socket.destroy(); process.exit(0); }); socket.once("error", () => process.exit(1));'; then
+  echo "Desktop development port 3000 is already in use; stop the existing Nuxt/Tauri development process before running dev:desktop." >&2
+  exit 1
+fi
+
 bash "$ROOT_DIR/scripts/provision-native-media.sh"
 
 LOCAL_MEDIA_BUILD="$ROOT_DIR/native-media/libdspeak_media/build"
-LOCAL_MEDIA_LIBRARY="$LOCAL_MEDIA_BUILD/libdspeak_media.a"
-ARTIFACT_MEDIA_LIBRARY="$NATIVE_MEDIA_ARTIFACT_DIR/lib/libdspeak_media.a"
+native_library_exists() {
+  local directory="$1"
+  local stem="$2"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      [[ -f "$directory/${stem}.lib" || -f "$directory/lib${stem}.lib" ]]
+      ;;
+    *)
+      [[ -f "$directory/lib${stem}.a" ]]
+      ;;
+  esac
+}
+
+find_native_shim_library() {
+  local directory="$1"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      find "$directory" -type f \( -name "dspeak_media.lib" -o -name "libdspeak_media.lib" \) -print -quit
+      ;;
+    *)
+      find "$directory" -type f -name "libdspeak_media.a" -print -quit
+      ;;
+  esac
+}
+
+LOCAL_MEDIA_LIBRARY="$(find_native_shim_library "$LOCAL_MEDIA_BUILD")"
+ARTIFACT_MEDIA_LIBRARY="$(find_native_shim_library "$NATIVE_MEDIA_ARTIFACT_DIR/lib")"
 LOCAL_MEDIA_WITH_MEDIASOUP="$NATIVE_MEDIA_WITH_MEDIASOUP"
 if [[ "$LOCAL_MEDIA_WITH_MEDIASOUP" == "auto" ]]; then
-  if [[ -f "$NATIVE_MEDIA_ARTIFACT_DIR/lib/libmediasoupclient.a" &&
-    -f "$NATIVE_MEDIA_ARTIFACT_DIR/lib/libsdptransform.a" ]]; then
+  if native_library_exists "$NATIVE_MEDIA_ARTIFACT_DIR/lib" mediasoupclient &&
+    native_library_exists "$NATIVE_MEDIA_ARTIFACT_DIR/lib" sdptransform; then
     LOCAL_MEDIA_WITH_MEDIASOUP=ON
   else
     LOCAL_MEDIA_WITH_MEDIASOUP=OFF
   fi
 fi
-if [[ -f "$LOCAL_MEDIA_LIBRARY" && -f "$ARTIFACT_MEDIA_LIBRARY" ]] && \
-  find "$ROOT_DIR/native-media/libdspeak_media" "$ROOT_DIR/native-media/platform" -type f \
-    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
-    -newer "$ARTIFACT_MEDIA_LIBRARY" -print -quit | grep -q .; then
+NATIVE_MEDIA_NEEDS_REBUILD=false
+if [[ -z "$ARTIFACT_MEDIA_LIBRARY" ]]; then
+  NATIVE_MEDIA_NEEDS_REBUILD=true
+elif find "$ROOT_DIR/native-media/libdspeak_media" "$ROOT_DIR/native-media/platform" -type f \
+  \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
+  -newer "$ARTIFACT_MEDIA_LIBRARY" -print -quit | grep -q .; then
+  NATIVE_MEDIA_NEEDS_REBUILD=true
+fi
+if [[ "$NATIVE_MEDIA_NEEDS_REBUILD" == true ]]; then
   env NATIVE_MEDIA_ARTIFACT_DIR="$NATIVE_MEDIA_ARTIFACT_DIR" \
     NATIVE_MEDIA_WITH_MEDIASOUP="$LOCAL_MEDIA_WITH_MEDIASOUP" \
     cmake -S "$ROOT_DIR/native-media/libdspeak_media" -B "$LOCAL_MEDIA_BUILD" \
       -DCMAKE_BUILD_TYPE=Release \
       -DDSPEAK_MEDIA_WITH_MEDIASOUP="$LOCAL_MEDIA_WITH_MEDIASOUP"
-  cmake --build "$LOCAL_MEDIA_BUILD" -j2
-    cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
+  cmake --build "$LOCAL_MEDIA_BUILD" --config Release -j2
+  LOCAL_MEDIA_LIBRARY="$(find_native_shim_library "$LOCAL_MEDIA_BUILD")"
+  if [[ -z "$LOCAL_MEDIA_LIBRARY" ]]; then
+    echo "Native media shim build did not produce a usable library" >&2
+    exit 1
+  fi
+  if [[ -z "$ARTIFACT_MEDIA_LIBRARY" ]]; then
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        ARTIFACT_MEDIA_LIBRARY="$NATIVE_MEDIA_ARTIFACT_DIR/lib/libdspeak_media.lib"
+        ;;
+      *)
+        ARTIFACT_MEDIA_LIBRARY="$NATIVE_MEDIA_ARTIFACT_DIR/lib/libdspeak_media.a"
+        ;;
+    esac
+  fi
+  cp "$LOCAL_MEDIA_LIBRARY" "$ARTIFACT_MEDIA_LIBRARY"
 fi
 
 WORKER_CARGO_ARGS=(

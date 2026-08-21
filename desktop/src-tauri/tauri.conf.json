@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../.output/public",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "cd .. && DSPEAK_DESKTOP=1 npm run dev",
+    "beforeDevCommand": "cd .. && DSPEAK_DESKTOP=1 npm run dev -- --port 3000",
     "beforeBuildCommand": "node ../scripts/build-desktop-frontend.mjs && node ../scripts/build-desktop-worker.mjs"
   },
   "app": {

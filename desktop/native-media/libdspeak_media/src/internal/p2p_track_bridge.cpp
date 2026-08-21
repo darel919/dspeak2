@@ -169,18 +169,16 @@ extern "C" int lib_dspeak_media_p2p_add_video_track_with_key(
         const std::string preferred = preferred_codec ? preferred_codec : "";
         const std::string key = p2p_sender_key(track_key, track->track->id());
         return handle->signaling_thread->BlockingCall([handle, track, preferred, key] {
-            auto result = handle->pc->AddTrack(track->track, {"stream0"});
+            webrtc::RtpTransceiverInit init;
+            init.direction = webrtc::RtpTransceiverDirection::kSendRecv;
+            init.stream_ids = {"stream0"};
+            auto result = handle->pc->AddTransceiver(track->track, init);
             if (!result.ok()) return -1;
-            const auto sender = result.value();
-            bool preferences_applied = false;
-            for (const auto& transceiver : handle->pc->GetTransceivers()) {
-                if (transceiver->sender() == sender) {
-                    preferences_applied = apply_video_codec_preferences(
-                        handle->factory.get(), transceiver, preferred);
-                    break;
-                }
-            }
-            if (!preferences_applied) {
+            const auto transceiver = result.value();
+            if (!transceiver || !transceiver->sender()) return -1;
+            const auto sender = transceiver->sender();
+            if (!apply_video_codec_preferences(
+                    handle->factory.get(), transceiver, preferred)) {
                 handle->pc->RemoveTrackOrError(sender);
                 return -1;
             }
@@ -213,9 +211,14 @@ extern "C" int lib_dspeak_media_p2p_add_audio_track_with_key(
             return -1;
         const std::string key = p2p_sender_key(track_key, track->track->id());
         return handle->signaling_thread->BlockingCall([handle, track, key] {
-            auto result = handle->pc->AddTrack(track->track, {"stream0"});
+            webrtc::RtpTransceiverInit init;
+            init.direction = webrtc::RtpTransceiverDirection::kSendRecv;
+            init.stream_ids = {"stream0"};
+            auto result = handle->pc->AddTransceiver(track->track, init);
             if (!result.ok()) return -1;
-            handle->audio_senders[key] = result.value();
+            const auto transceiver = result.value();
+            if (!transceiver || !transceiver->sender()) return -1;
+            handle->audio_senders[key] = transceiver->sender();
             return 0;
         });
     } catch (...) {

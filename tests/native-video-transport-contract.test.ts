@@ -125,6 +125,10 @@ describe("native video transport contract", () => {
     assert.match(devScript, /--features media-worker/);
     assert.match(devScript, /--bin dspeak-media/);
     assert.match(devScript, /native-media\/platform/);
+    assert.match(devScript, /MINGW\*\|MSYS\*\|CYGWIN\*/);
+    assert.match(devScript, /libdspeak_media\.lib/);
+    assert.match(devScript, /find_native_shim_library/);
+    assert.match(devScript, /Desktop development port 3000 is already in use/);
     assert.match(config, /externalBin/);
   });
 
@@ -283,6 +287,10 @@ describe("native video transport contract", () => {
     assert.match(bridge, /preference_changed/);
     assert.match(peer, /preferred_video_codecs_are_in_sdp/);
     assert.match(peer, /const auto& sdp = generated_sdp/);
+    assert.match(
+      peer,
+      /preferred_video_codecs_are_in_sdp\(h, local_sdp\)[\s\S]*\*sdp_out = lib_dspeak_media_strdup\(generated_sdp\.c_str\(\)\)/,
+    );
     assert.match(codecs, /profile-level-id.*42e01f/);
     assert.doesNotMatch(
       peer,
@@ -292,6 +300,21 @@ describe("native video transport contract", () => {
     assert.match(videoToolbox, /if \(next \+ 3 >= size\) next = size;/);
     assert.match(build, /rustc-link-arg-bin=dspeak-media=-Wl,-sectcreate/);
     assert.match(workerInfo, /NSCameraUsageDescription/);
+  });
+
+  it("creates local media with explicit Unified Plan transceivers", async () => {
+    const bridge = await read(
+      "desktop/native-media/libdspeak_media/src/internal/p2p_track_bridge.cpp",
+    );
+    assert.match(
+      bridge,
+      /init\.direction = webrtc::RtpTransceiverDirection::kSendRecv/,
+    );
+    assert.equal(
+      (bridge.match(/AddTransceiver\(track->track, init\)/g) ?? []).length,
+      2,
+    );
+    assert.doesNotMatch(bridge, /AddTrack\(track->track/);
   });
 
   it("hardens the macOS hardware encoder callback boundary", async () => {

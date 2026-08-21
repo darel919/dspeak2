@@ -68,6 +68,10 @@ export async function initialize(
           const result = await engine._invoke(command, payload);
           return isExternalRecord(result) ? result : {};
         },
+        invokeRaw: async (
+          command: string,
+          payload: NativeCaptureRequest = {},
+        ) => engine._invoke(command, payload),
         getAudioBitrate: engine.getAudioBitrate,
         getAudioStereo: engine.getAudioStereo,
         getVideoSettings: engine.getVideoSettings,

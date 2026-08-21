@@ -6,6 +6,11 @@ export type ExternalValue =
 export type MediaCommandResult = void | ExternalValue;
 export type ExternalFunction = (...args: never[]) => ExternalValue;
 
+export type NativeMediaInvoke = (
+  operation: string,
+  payload?: Record<string, unknown>,
+) => Promise<MediaCommandResult>;
+
 export function isExternalNumber<T>(value: T): value is T & number {
   try {
     const number = Number.prototype.valueOf.call(value);
