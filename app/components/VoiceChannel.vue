@@ -23,6 +23,45 @@
       </div>
 
       <div class="flex shrink-0 items-center gap-2" aria-live="polite">
+        <div
+          v-if="
+            voiceStore.connected &&
+            voiceStore.currentChannelId === props.channel.id &&
+            videoFeeds.length
+          "
+          class="voice-layout-toggle"
+          role="group"
+          aria-label="Video layout"
+        >
+          <button
+            type="button"
+            class="voice-layout-toggle-button"
+            :class="{
+              'voice-layout-toggle-button-active': videoLayoutMode === 'stage',
+            }"
+            :aria-pressed="videoLayoutMode === 'stage'"
+            aria-label="Centered stage layout"
+            title="Centered stage layout"
+            @click="setVideoLayoutMode('stage')"
+          >
+            <Icon name="lucide:panel-top" class="size-4" />
+            <span class="voice-layout-toggle-label">Stage</span>
+          </button>
+          <button
+            type="button"
+            class="voice-layout-toggle-button"
+            :class="{
+              'voice-layout-toggle-button-active': videoLayoutMode === 'tiles',
+            }"
+            :aria-pressed="videoLayoutMode === 'tiles'"
+            aria-label="Regular video tile layout"
+            title="Regular video tile layout"
+            @click="setVideoLayoutMode('tiles')"
+          >
+            <Icon name="lucide:layout-grid" class="size-4" />
+            <span class="voice-layout-toggle-label">Tiles</span>
+          </button>
+        </div>
         <button
           v-if="voiceStore.protocolUpdateRequired"
           type="button"
@@ -224,7 +263,17 @@
         <div
           ref="videoStage"
           class="voice-room-grid h-full min-h-0 w-full"
-          :class="{ 'voice-room-grid-focused': viewMode === 'focused' }"
+          :class="{
+            'voice-room-grid-focused': viewMode === 'focused',
+            'voice-room-grid-stage':
+              viewMode !== 'focused' && videoLayoutMode === 'stage',
+            'voice-room-grid-tiles':
+              viewMode !== 'focused' && videoLayoutMode === 'tiles',
+            'voice-room-grid-smart':
+              viewMode !== 'focused' &&
+              videoLayoutMode === 'stage' &&
+              smartVideoStageLayout.mode === 'spotlight',
+          }"
           :style="
             viewMode === 'overview'
               ? {
@@ -242,6 +291,16 @@
             :class="{
               'voice-room-tile-focused':
                 viewMode === 'focused' && tile.key === focusedTileKey,
+              'voice-room-tile-smart-hero':
+                viewMode !== 'focused' &&
+                videoLayoutMode === 'stage' &&
+                smartVideoStageLayout.mode === 'spotlight' &&
+                tile.key === smartVideoStageLayout.heroKey,
+              'voice-room-tile-smart-support':
+                viewMode !== 'focused' &&
+                videoLayoutMode === 'stage' &&
+                smartVideoStageLayout.mode === 'spotlight' &&
+                tile.key !== smartVideoStageLayout.heroKey,
               'participant-tile-speaking': tile.user?.speaking,
             }"
             :role="tile.type !== 'participant' ? 'button' : undefined"
@@ -840,6 +899,11 @@ import { getDesktopCaptureApi } from "../shared/desktop-capture";
 import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 import { useDesktopMediaPopouts } from "../composables/useDesktopMediaPopouts";
 import { useAdaptiveVideoGrid } from "../composables/useAdaptiveVideoGrid";
+import { getSmartVideoStageLayout } from "../shared/smart-video-stage.ts";
+import {
+  mergeLocalVoiceParticipant,
+  shouldRenderVoiceParticipant,
+} from "../shared/voice-room-participants.ts";
 import {
   isExternalRecord,
   isExternalString,
@@ -873,6 +937,7 @@ const { openPopout, closePopout, focusPopout, isPoppedOut, syncPopoutFeeds } =
 const router = useRouter();
 const config = useRuntimeConfig();
 const viewMode = ref("overview");
+const videoLayoutMode = ref("stage");
 const videoStage = ref(null);
 const { layout: adaptiveLayout } = useAdaptiveVideoGrid(
   videoStage,
@@ -886,7 +951,17 @@ const focusedTileKey = ref(null);
 let tileFocusTimer = null;
 
 const connectedUsers = computed(() => {
-  return voiceStore.getDisplayUsersArray();
+  const currentUser = authStore.getUserData?.();
+  return mergeLocalVoiceParticipant(voiceStore.getDisplayUsersArray(), {
+    channelMatches:
+      voiceStore.connected && voiceStore.currentChannelId === props.channel.id,
+    connected: voiceStore.connected,
+    currentUser: currentUser || null,
+    muted: Boolean(voiceStore.micMuted),
+    deafened: Boolean(voiceStore.deafened),
+    cameraEnabled: Boolean(voiceStore.cameraEnabled),
+    screenSharing: Boolean(voiceStore.screenSharing),
+  });
 });
 const mediaFeedRevision = ref(0);
 watch(
@@ -947,6 +1022,7 @@ const roomTiles = computed(() => {
   const representedUsers = new Set(
     videoFeeds.value.map((feed) => String(feed.userId)),
   );
+  const currentUserId = String(authStore.getUserData?.()?.id || "");
   const feeds = videoFeeds.value.map((feed) => ({
     key: `feed-${feed.logicalStreamId || feed.key}`,
     type: "feed",
@@ -958,7 +1034,13 @@ const roomTiles = computed(() => {
     broadcast,
   }));
   const participants = connectedUsers.value
-    .filter((user) => !representedUsers.has(String(user.id)))
+    .filter((user) =>
+      shouldRenderVoiceParticipant(
+        String(user.id),
+        representedUsers,
+        currentUserId,
+      ),
+    )
     .map((user) => ({
       key: `participant-${user.id}`,
       type: "participant",
@@ -978,6 +1060,15 @@ const ownCameraFeed = computed(
   () =>
     videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
     null,
+);
+const smartVideoStageLayout = computed(() =>
+  getSmartVideoStageLayout(
+    roomTiles.value.map((tile) =>
+      tile.type === "feed"
+        ? { key: tile.key, type: "feed", source: tile.feed.source }
+        : { key: tile.key, type: tile.type },
+    ),
+  ),
 );
 
 watch(mediaFeedRevision, () => syncPopoutFeeds(videoFeeds.value), {
@@ -1022,6 +1113,13 @@ function focusTile(key) {
   }
   focusedTileKey.value = key;
   viewMode.value = "focused";
+}
+
+function setVideoLayoutMode(mode) {
+  videoLayoutMode.value = mode;
+  cancelTileFocus();
+  focusedTileKey.value = null;
+  viewMode.value = "overview";
 }
 
 function cancelTileFocus() {
@@ -1398,12 +1496,83 @@ onUnmounted(() => {
   min-height: 0;
 }
 
+.voice-layout-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  border: 1px solid rgb(255 255 255 / 16%);
+  background: #151619;
+  padding: 0.125rem;
+}
+
+.voice-layout-toggle-button {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  color: rgb(242 243 245 / 68%);
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.voice-layout-toggle-button:hover {
+  background: #35373c;
+  color: #f2f3f5;
+}
+
+.voice-layout-toggle-button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.voice-layout-toggle-button-active {
+  background: var(--color-primary);
+  color: var(--color-primary-content);
+}
+
 .voice-room-grid.voice-room-grid-focused {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(10rem, 14rem));
   grid-template-rows: minmax(0, 1fr) 8rem;
   justify-content: center;
   gap: 0.75rem;
+}
+
+.voice-room-grid.voice-room-grid-smart {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  --stage-support-width: min(16rem, 28vw);
+}
+
+.voice-room-grid.voice-room-grid-smart .voice-room-tile {
+  flex: 0 1 auto;
+}
+
+.voice-room-grid.voice-room-grid-smart .voice-room-tile-smart-hero {
+  width: auto;
+  max-width: 72rem;
+  height: min(calc(100% - 10rem), 40rem);
+  max-height: 100%;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
+  margin-inline: auto;
+}
+
+.voice-room-grid.voice-room-grid-smart .voice-room-tile-smart-support {
+  flex: 0 0 auto;
+  width: var(--stage-support-width);
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
 }
 
 .voice-room-tile {
@@ -1622,6 +1791,10 @@ onUnmounted(() => {
 }
 
 @media (max-width: 30rem) {
+  .voice-layout-toggle-label {
+    display: none;
+  }
+
   .voice-dock-button-leave {
     margin-left: 0;
   }

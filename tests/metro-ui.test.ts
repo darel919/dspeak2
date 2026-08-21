@@ -124,14 +124,32 @@ test("authenticated page copy consistently calls shared spaces rooms", async () 
   );
 });
 
-test("home workspace uses a content-led Metro room composition", async () => {
+test("home workspace puts personal attention before the room directory", async () => {
   const source = await readFile("app/pages/index.vue", "utf8");
   assert.match(source, /class="home-workspace flex-1 overflow-y-auto"/);
+  assert.match(source, /Welcome, \{\{ homeUserName \}\}\./);
+  assert.match(source, /aria-labelledby="home-notifications-title"/);
   assert.match(source, /aria-labelledby="home-rooms-title"/);
+  assert.match(source, /class="home-feed-section mt-8 lg:mt-10"/);
+  assert.match(source, /useNotificationsStore/);
   assert.match(source, /v-for="room in roomsStore\.rooms"/);
-  assert.match(source, /class="home-room-tile metro-transition/);
+  assert.match(source, /class="home-room-row metro-transition/);
+  assert.match(source, /:to="`\/room\/\$\{room\.id\}`"/);
+  assert.match(source, /@pointerenter="prefetchRoom\(room\.id\)"/);
+  assert.match(source, /@focus="prefetchRoom\(room\.id\)"/);
+  assert.match(source, /@click\.prevent="openRoom\(room\)"/);
+  assert.match(source, /<NuxtLink to="\/room\/create"/);
   assert.match(source, /v-if="roomsStore\.loading/);
   assert.match(source, /v-else-if="roomsStore\.error/);
+  assert.ok(
+    source.indexOf('aria-labelledby="home-notifications-title"') <
+      source.indexOf('aria-labelledby="home-rooms-title"'),
+  );
+  assert.doesNotMatch(source, /home-direct-messages-title/);
+  assert.doesNotMatch(source, /useDirectMessagesStore/);
+  assert.doesNotMatch(source, /home-feed-grid/);
+  assert.doesNotMatch(source, /homeFeatures/);
+  assert.doesNotMatch(source, /dSpeak capabilities/);
   assert.doesNotMatch(source, /Welcome to dSpeak/);
   assert.doesNotMatch(source, /text-center max-w-md/);
 });
@@ -520,6 +538,51 @@ test("voice video offers equal overview tiles and viewer-selected focus", async 
   assert.doesNotMatch(source, /aria-label="Voice channel view"/);
 });
 
+test("voice video spotlights screen sharing without changing feed ownership", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /getSmartVideoStageLayout/);
+  assert.match(source, /voice-room-grid-smart/);
+  assert.match(source, /smartVideoStageLayout\.heroKey/);
+  assert.match(source, /voice-room-tile-smart-support/);
+  assert.match(source, /:popped-out=/);
+  assert.match(source, /:receiver-incarnation-id=/);
+  assert.match(source, /@pop-out=/);
+  assert.match(source, /@first-frame=/);
+});
+
+test("voice video exposes centered stage and regular tile layouts", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /const videoLayoutMode = ref\("stage"\)/);
+  assert.match(source, /aria-label="Video layout"/);
+  assert.match(source, /setVideoLayoutMode\('stage'\)/);
+  assert.match(source, /setVideoLayoutMode\('tiles'\)/);
+  assert.match(source, /'voice-room-grid-stage'/);
+  assert.match(source, /'voice-room-grid-tiles'/);
+  assert.match(source, /voice-layout-toggle-button-active/);
+  assert.match(
+    source,
+    /voiceStore\.currentChannelId === props\.channel\.id[\s\S]*videoFeeds\.length/,
+  );
+  assert.match(source, /justify-content: center/);
+  assert.match(source, /max-width: 72rem/);
+  assert.match(source, /aspect-ratio: 16 \/ 9/);
+  assert.match(source, /margin-inline: auto/);
+  assert.match(source, /height: min\(calc\(100% - 10rem\), 40rem\)/);
+  assert.match(source, /--stage-support-width: min\(16rem, 28vw\)/);
+  assert.doesNotMatch(
+    source,
+    /voice-room-tile-smart-support \{[\s\S]*margin-inline: auto/,
+  );
+});
+
+test("voice stage keeps a connected local participant beside local media", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /mergeLocalVoiceParticipant/);
+  assert.match(source, /shouldRenderVoiceParticipant/);
+  assert.match(source, /voiceStore\.connected/);
+  assert.match(source, /voiceStore\.currentChannelId === props\.channel\.id/);
+});
+
 test("participant volume controls render outside the scrolling participant strip", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   assert.match(source, /<Teleport to="body">/);
@@ -608,6 +671,21 @@ test("room rail tooltips preview connected voice participants", async () => {
     channels,
     /function syncVoicePresenceRooms\(roomIds: ExternalField\)/,
   );
+});
+
+test("direct messages use the room rail tile treatment", async () => {
+  const rail = await readFile("app/components/MetroRoomRail.vue", "utf8");
+  const messagesLink = rail.match(
+    /<NuxtLink\s+to="\/messages"[\s\S]*?<\/NuxtLink>/,
+  )?.[0];
+
+  assert.ok(messagesLink);
+  assert.match(
+    messagesLink,
+    /class="metro-transition relative mx-2 grid aspect-square place-items-center overflow-hidden bg-base-200 text-sm font-semibold hover:bg-base-300"/,
+  );
+  assert.doesNotMatch(messagesLink, /metro-icon-btn/);
+  assert.match(messagesLink, /directMessagesStore\.unreadCount/);
 });
 
 test("voice channel participant rows own a channel-specific context menu", async () => {
@@ -816,6 +894,17 @@ test("room rail join action opens the join dialog", async () => {
     dialog,
     /router\.push\(`\/join\/\$\{encodeURIComponent\(inviteToken\)\}`\)/,
   );
+});
+
+test("join room dialog keeps its panel and backdrop geometry isolated", async () => {
+  const dialog = await readFile("app/components/JoinRoomDialog.vue", "utf8");
+  assert.match(
+    dialog,
+    /class="metro-flyout[^\"]*\bw-full\b[^\"]*\bmax-w-lg\b[^\"]*\bp-5\b/,
+  );
+  assert.match(dialog, /class="mt-6 flex justify-end gap-3"/);
+  assert.match(dialog, /class="fixed inset-0 z-0 border-0 bg-black\/50 p-0"/);
+  assert.doesNotMatch(dialog, /class="modal-backdrop"/);
 });
 
 test("room switching prepares the destination before one direct navigation", async () => {
