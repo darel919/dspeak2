@@ -20,6 +20,7 @@ If you modify dSpeak and run a modified version on a publicly accessible network
 - **Auto routing:** direct P2P, P2P via TURN relay, Cloudflare Realtime SFU
 - IPv6-first media with Cloudflare TURN and optional self-hosted Coturn/Playit fallbacks
 - RTC diagnostics, health checks, and Prometheus-compatible metrics
+- DJ mode for shared audio broadcasting with room-level attenuation
 
 ### Self-hosted media fallback
 
@@ -62,9 +63,7 @@ Participant limits:
 | Direct P2P with video    | 4                |
 | Auto (P2P, TURN, or SFU) | 100              |
 
-Auto mode uses direct P2P only when the current media mix is eligible for a
-mesh; otherwise it moves to TURN or an SFU within the 100-participant channel
-ceiling.
+Auto mode uses direct P2P only when the current media mix is eligible for a mesh; otherwise it moves to TURN or an SFU route within the 100-participant channel ceiling.
 
 The authoritative media topology coordinator is a **Cloudflare Durable Object per channel** (`MediaRoomDO`). It owns live participant membership, active route/epoch, P2P signaling relay, provider health, and route commit state. Supabase Realtime handles normal app events (chat, typing, notifications) only — never media topology.
 
@@ -78,7 +77,6 @@ The authoritative media topology coordinator is a **Cloudflare Durable Object pe
 - Cloudflare account (Workers, Durable Objects, R2, Realtime SFU/TURN)
 - The sibling [`dspeak-media-control`](https://github.com/darel919/dspeak-media-control) checkout for media control WebSockets and Durable Objects
 - FFmpeg and ffprobe when running outside Docker
-- A public IPv4 or IPv6 route for production WebRTC traffic (for self-hosted mediasoup)
 
 Docker includes FFmpeg and ffprobe. A non-container host must provide both tools on `PATH` for soundboard conversion.
 
@@ -122,6 +120,17 @@ CF_R2_ACCOUNT_ID=your-account-id
 CF_R2_ACCESS_KEY_ID=your-r2-access-key
 CF_R2_SECRET_ACCESS_KEY=your-r2-secret-key
 CF_R2_BUCKET_NAME=dspeak
+
+# TURN
+DSPEAK_RTC_DOMAIN=rtc.example.com
+TURN_PORT=3478
+TURN_TLS_PORT=5349
+TURN_SHARED_SECRET=long-random-secret
+TURN_CREDENTIAL_TTL_SECONDS=900
+
+CF_TURN_APP_ID=cloudflare-turn-app-id
+CF_TURN_API_KEY=cloudflare-turn-api-key
+CF_TURN_CREDENTIAL_TTL_SECONDS=86400
 ```
 
 `DATABASE_URL` uses Supavisor transaction mode (port 6543) for Vercel/serverless. `DIRECT_DATABASE_URL` is for migrations/admin (port 5432).
@@ -132,9 +141,7 @@ See `dspeak-sfu/.env.example` in the sibling project.
 
 ### Related service checkouts
 
-The main `bun install` does not install or run the media control Worker. Voice
-sessions require `dspeak-media-control` to be checked out and deployed
-separately. The optional self-hosted provider is a third independent checkout.
+The main `bun install` does not install or run the media control Worker. Voice sessions require `dspeak-media-control` to be checked out and deployed separately. The optional self-hosted provider is a third independent checkout.
 
 ```bash
 cd ..
@@ -149,10 +156,7 @@ npm test
 npm run dev
 ```
 
-For production, deploy the Worker with `npm run deploy` after setting its
-Durable Object bindings and secrets. Deploy `dspeak-sfu` separately only when
-self-hosted mediasoup fallback is enabled; its setup is documented in that
-checkout's `README.md` and `docs/deployment.md`.
+For production, deploy the Worker with `npm run deploy` after setting its Durable Object bindings and secrets. Deploy `dspeak-sfu` separately only when self-hosted mediasoup fallback is enabled; its setup is documented in that checkout's `README.md` and `docs/deployment.md`.
 
 ## Production build
 
@@ -195,13 +199,7 @@ bun run build:desktop
 
 Builds the Tauri app for the host platform. Version-tagged releases are built for macOS, Linux, and Windows by the [desktop CI build](docs/native-media/ci-desktop-build.md), which publishes the installers to a GitHub Release; installed clients update through the updater endpoint configured in `desktop/src-tauri/tauri.conf.json`.
 
-Every web and desktop build embeds its package version, source commit, source
-branch, repository, and build time. The public `/api/update` endpoint compares
-that identity with `DSPEAK_UPDATE_BRANCH` and returns the pending commits and
-changed files. Set `DSPEAK_UPDATE_REPOSITORY` and `DSPEAK_UPDATE_BRANCH` when
-the deployed app tracks a repository or branch other than the defaults in
-`.env.example`. `DSPEAK_GITHUB_TOKEN` is optional and must remain server-only;
-it raises the GitHub API quota for private or high-traffic deployments.
+Every web and desktop build embeds its package version, source commit, source branch, repository, and build time. The public `/api/update` endpoint compares that identity with `DSPEAK_UPDATE_BRANCH` and returns the pending commits and changed files. Set `DSPEAK_UPDATE_REPOSITORY` and `DSPEAK_UPDATE_BRANCH` when the deployed app tracks a repository or branch other than the defaults in `.env.example`. `DSPEAK_GITHUB_TOKEN` is optional and must remain server-only; it raises the GitHub API quota for private or high-traffic deployments.
 
 ## Operational endpoints
 
@@ -218,15 +216,9 @@ it raises the GitHub API quota for private or high-traffic deployments.
 | `/api/room/*`          | Room management                                     |
 | `/api/channel/*`       | Text and media channels                             |
 | `/api/soundboard/*`    | Protected room soundboard operations and media      |
+| `/api/dj/*`            | DJ session management                               |
 
-Realtime application events (chat messages, presence, voice presence, room and
-profile updates, notifications) are delivered over Supabase Realtime, not Nitro
-WebSockets. Clients subscribe to reserved topics `global`, `chat:<channelId>`,
-`room:<roomId>`, and `notify:<userId>` with their Supabase access token; the
-server publishes with the service role. Client writes are limited to the
-`chat:%` topic by row-level security. Presence status and channel join/leave
-are persisted through the `/api/presence` and `/api/channel/join|leave`
-endpoints.
+Realtime application events (chat messages, presence, voice presence, room and profile updates, notifications) are delivered over Supabase Realtime, not Nitro WebSockets. Clients subscribe to reserved topics `global`, `chat:<channelId>`, `room:<roomId>`, and `notify:<userId>` with their Supabase access token; the server publishes with the service role. Client writes are limited to the `chat:%` topic by row-level security. Presence status and channel join/leave are persisted through the `/api/presence` and `/api/channel/join|leave` endpoints.
 
 Media control WebSocket: `wss://media-control.example.com/media-control/<channelId>` (per-channel Durable Object)
 
@@ -279,3 +271,13 @@ Media releases also require the real-browser and external-network checks in [Hyb
 - [Voice controls](docs/voice-controls.md)
 - [Screen-share audio](docs/screen-share-audio.md)
 - [Backend migration](docs/backend-migration.md)
+- [DJ mode](docs/dj-mode.md)
+- [Production readiness](docs/production-readiness.md)
+- [Content security policy](docs/content-security-policy.md)
+- [Desktop auth](docs/desktop-auth.md)
+- [Direct messages](docs/direct-messages.md)
+- [Web threat mitigation](docs/web-threat-mitigation.md)
+- [Client performance](docs/client-performance.md)
+- [Media tickets](docs/media-tickets.md)
+- [Native worker fatal recovery](docs/native-media/native-worker-fatal-recovery.md)
+- [Media entry points inventory](docs/native-media/media-entry-points-inventory.md)

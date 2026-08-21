@@ -54,6 +54,7 @@ auth.users
 | `user_presence`                                                              | Latest presence status, last activity time, platform, and manual override       |
 | `push_subscriptions`, `push_jobs`                                            | Device Web Push subscriptions and retryable delivery work                       |
 | `room_soundboards`, `soundboards`, `chat_files`                              | R2 object metadata and ownership; file bytes are not stored in PostgreSQL       |
+| `dj_sessions`                                                                | DJ broadcast session state and metadata                                         |
 
 ## Ownership and deletion
 

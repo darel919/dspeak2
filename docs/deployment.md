@@ -42,8 +42,8 @@ Set these Worker secrets with Wrangler before deployment:
 ```bash
 wrangler secret put MEDIA_TICKET_PUBLIC_KEY
 wrangler secret put PROVIDER_TICKET_PRIVATE_KEY
-wrangler secret put PROVIDER_TICKET_PUBLIC_KEY
 wrangler secret put MEDIA_CONTROL_ADMIN_TOKEN
+wrangler secret put CLOUDFLARE_REALTIME_APP_SECRET
 ```
 
 The main app and Worker share the media-ticket keypair: the app keeps the
@@ -122,7 +122,7 @@ The browser flow is:
 
 1. Call `POST /api/media/bootstrap` with a Supabase bearer token.
 2. Receive a two-minute media ticket and the media-control URL.
-3. Connect to `wss://media-control.example.com/room/<channelId>`.
+3. Connect to `wss://media-control.example.com/media-control/<channelId>`.
 4. Let the Durable Object select direct P2P, Cloudflare TURN, Cloudflare Realtime SFU, or the optional standalone provider.
 
 Configure Cloudflare Realtime and TURN credentials only in the services that need them. Verify direct, relay, and managed-SFU paths from external networks; unit tests cannot prove ICE reachability or hardware media behavior.
