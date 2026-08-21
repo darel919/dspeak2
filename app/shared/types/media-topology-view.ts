@@ -1,6 +1,10 @@
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { VoiceUserRecord } from "./voice-media-actions.ts";
-import type { TopologyPeer, TopologyState } from "./topology-controller.ts";
+import type { TopologyState } from "./topology-controller.ts";
 
 export interface MediaTopologyParticipant {
   id?: string | number | null;
@@ -54,32 +58,32 @@ export interface MediaTopologyProvider {
 }
 
 export interface MediaTopologyVoiceStore {
-  upsertUserProfile: (profile: VoiceUserRecord) => unknown;
+  upsertUserProfile: (profile: VoiceUserRecord) => MediaCommandResult;
   isUserConnected: (userId: string) => boolean;
   addConnectedUser: (
     userId: string | number,
     userInfo: VoiceUserRecord,
-  ) => unknown;
+  ) => MediaCommandResult;
   updateUserVoiceState?: (
     userId: string,
     state: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   getConnectedUsersArray: () => Array<Record<string, unknown>>;
-  removeConnectedUser: (userId: string | number) => unknown;
+  removeConnectedUser: (userId: string | number) => MediaCommandResult;
 }
 
 export interface MediaTopologyViewContext {
   activeProvider: () => string | null;
-  addressFamily: (address: unknown) => string;
+  addressFamily: (address: ExternalValue) => string;
   buildTopologyGraph: unknown;
   consumers: Ref<Map<string, unknown>>;
   getParticipantProfile?: (
     userId: string,
   ) => Record<string, unknown> | null | undefined;
   getLocalPeerId: () => string | null;
-  getP2pEdges: () => unknown[];
-  getP2pMesh: () => unknown;
-  getSfu: () => unknown;
+  getP2pEdges: () => MediaCommandResult[];
+  getP2pMesh: () => MediaCommandResult;
+  getSfu: () => MediaCommandResult;
   mapPeerConnectionMetrics: unknown;
   mapPeerRoundTripTimes: unknown;
   mediaPathMetrics: Ref<unknown[]>;
@@ -87,7 +91,7 @@ export interface MediaTopologyViewContext {
   peerConnectionMetrics: Ref<Record<string, unknown>>;
   peerRoundTripTimes: Ref<Record<string, unknown>>;
   producers: Ref<Map<string, unknown>>;
-  setP2pEdges: (edges: unknown[]) => unknown;
+  setP2pEdges: (edges: unknown[]) => MediaCommandResult;
   topologyGraph: Ref<Record<string, unknown>>;
   topologyState: Ref<TopologyState>;
   voiceStore: MediaTopologyVoiceStore;

@@ -4,6 +4,11 @@ import {
   type CodecAcceleration,
   type VideoCodecName,
 } from "./types/video-codec-capabilities.ts";
+import {
+  isExternalBoolean,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
 
 type StatsRecord = Record<string, unknown>;
 
@@ -20,33 +25,37 @@ type NativeCodecEntry = {
   trackIdentifier?: string | null;
 };
 
-function finite(value: unknown) {
-  return Number.isFinite(Number(value)) ? Number(value) : null;
+function finite<T>(value: T) {
+  try {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  } catch {
+    return null;
+  }
 }
 
-function toMilliseconds(value: unknown) {
+function toMilliseconds<T>(value: T) {
   const number = finite(value);
   if (number == null) return null;
   return Math.abs(number) < 1 ? number * 1000 : number;
 }
 
-function asStatObjects(value: unknown): StatsRecord[] {
+function asStatObjects<T>(value: T): StatsRecord[] {
   if (Array.isArray(value))
     return value.flatMap((candidate) => asStatObjects(candidate));
-  if (!value || typeof value !== "object") return [];
-  const record = value as StatsRecord;
+  if (!isExternalRecord(value)) return [];
+  const record = value;
   if (record.type) return [record];
   if (Array.isArray(record.stats)) return asStatObjects(record.stats);
-  if (record.stats && typeof record.stats === "object")
-    return asStatObjects(record.stats);
+  if (isExternalRecord(record.stats)) return asStatObjects(record.stats);
   return Object.values(record).flatMap((candidate) => asStatObjects(candidate));
 }
 
-export function nativeStatsObjects(value: unknown) {
+export function nativeStatsObjects<T>(value: T) {
   return asStatObjects(value);
 }
 
-export function nativeRtpStat(value: unknown, type: string, kind?: string) {
+export function nativeRtpStat<T>(value: T, type: string, kind?: string) {
   return asStatObjects(value).find((stat) => {
     if (stat.type !== type || stat.isRemote) return false;
     const statKind = stat.kind || stat.mediaType;
@@ -54,8 +63,8 @@ export function nativeRtpStat(value: unknown, type: string, kind?: string) {
   });
 }
 
-export function nativeRtpStatForTrack(
-  value: unknown,
+export function nativeRtpStatForTrack<T>(
+  value: T,
   type: string,
   entry: NativeCodecEntry = {},
 ) {
@@ -78,13 +87,22 @@ export function nativeRtpStatForTrack(
     .trim()
     .toLowerCase();
   if (source) {
-    const sourceAliases: Record<string, string[]> = {
+    const sourceAliases = {
       audio: ["microphone_capture_audio"],
       camera: ["camera_capture_video"],
       screen: ["desktop_capture_video"],
       "screen-audio": ["desktop_capture_audio"],
-    };
-    for (const alias of sourceAliases[source] || []) identifiers.add(alias);
+    } satisfies Record<
+      "audio" | "camera" | "screen" | "screen-audio",
+      readonly string[]
+    >;
+    if (
+      source === "audio" ||
+      source === "camera" ||
+      source === "screen" ||
+      source === "screen-audio"
+    )
+      for (const alias of sourceAliases[source]) identifiers.add(alias);
   }
   const byId = new Map(
     stats
@@ -136,13 +154,13 @@ function codecStatForRtp(stats: StatsRecord[], rtpStat: StatsRecord | null) {
   );
 }
 
-function implementationString(value: unknown) {
-  return typeof value === "string" && value.trim() ? value.trim() : null;
+function implementationString<T>(value: T) {
+  return isExternalString(value) && value.trim() ? value.trim() : null;
 }
 
-function actualAcceleration(
+function actualAcceleration<T>(
   implementation: string | null,
-  powerEfficient: unknown,
+  powerEfficient: T,
 ): CodecAcceleration | null {
   const normalized = String(implementation || "").toLowerCase();
   if (
@@ -169,8 +187,24 @@ function actualAcceleration(
   return null;
 }
 
-function nativeCodecMetadata(
-  value: unknown,
+interface NativeCodecMetadata {
+  codec: VideoCodecName | null;
+  codecAcceleration: CodecAcceleration | null;
+  codecImplementation: string | null;
+  plannedCodec: VideoCodecName | null;
+  plannedCodecAcceleration: CodecAcceleration | null;
+  plannedCodecImplementation: string | null;
+  actualCodec: VideoCodecName | null;
+  actualCodecAcceleration: CodecAcceleration | null;
+  actualCodecImplementation: string | null;
+  codecSource: string;
+  codecMismatch: boolean;
+  stats: StatsRecord | null;
+  codecStats: StatsRecord | null;
+}
+
+function nativeCodecMetadata<T>(
+  value: T,
   type: string,
   entry: NativeCodecEntry,
 ) {
@@ -202,10 +236,10 @@ function nativeCodecMetadata(
     : null;
   const powerEfficient = isVideo
     ? type === "outbound-rtp"
-      ? typeof rtpStat?.powerEfficientEncoder === "boolean"
+      ? isExternalBoolean(rtpStat?.powerEfficientEncoder)
         ? rtpStat.powerEfficientEncoder
         : null
-      : typeof rtpStat?.powerEfficientDecoder === "boolean"
+      : isExternalBoolean(rtpStat?.powerEfficientDecoder)
         ? rtpStat.powerEfficientDecoder
         : null
     : null;
@@ -221,7 +255,7 @@ function nativeCodecMetadata(
         ? "routing-plan"
         : "unknown";
   const codec = actualCodec || (hasRtpStat ? null : plannedCodec);
-  return {
+  const metadata: NativeCodecMetadata = {
     codec,
     codecAcceleration:
       acceleration || (hasRtpStat ? null : plannedCodecAcceleration),
@@ -239,25 +273,12 @@ function nativeCodecMetadata(
     ),
     stats: rtpStat || null,
     codecStats: codecStat,
-  } as {
-    codec: VideoCodecName | null;
-    codecAcceleration: CodecAcceleration | null;
-    codecImplementation: string | null;
-    plannedCodec: VideoCodecName | null;
-    plannedCodecAcceleration: CodecAcceleration | null;
-    plannedCodecImplementation: string | null;
-    actualCodec: VideoCodecName | null;
-    actualCodecAcceleration: CodecAcceleration | null;
-    actualCodecImplementation: string | null;
-    codecSource: string;
-    codecMismatch: boolean;
-    stats: StatsRecord | null;
-    codecStats: StatsRecord | null;
   };
+  return metadata;
 }
 
-export function nativeRtpCodecMetadata(
-  value: unknown,
+export function nativeRtpCodecMetadata<T>(
+  value: T,
   type: string,
   entry: NativeCodecEntry,
 ) {
@@ -291,7 +312,7 @@ function findCandidatePair(stats: StatsRecord[]) {
   );
 }
 
-function findCandidate(stats: StatsRecord[], id: unknown) {
+function findCandidate<T>(stats: StatsRecord[], id: T) {
   if (!id) return null;
   return stats.find((stat) => stat.id === id) || null;
 }
@@ -316,23 +337,19 @@ function normalizeCandidatePair(
     packetsSent: finite(pair.packetsSent),
     packetsReceived: finite(pair.packetsReceived),
     packetLoss: finite(pair.packetLoss),
-    local: candidateDetails(
-      local || (pair.local as StatsRecord | null | undefined) || null,
-    ),
-    remote: candidateDetails(
-      remote || (pair.remote as StatsRecord | null | undefined) || null,
-    ),
+    local: candidateDetails(local || asRecord(pair.local)),
+    remote: candidateDetails(remote || asRecord(pair.remote)),
   };
 }
 
-function averageJitterDelay(value: unknown, emitted: number | null) {
+function averageJitterDelay<T>(value: T, emitted: number | null) {
   return emitted != null && emitted > 0 && finite(value) != null
     ? (Number(value) * 1000) / emitted
     : null;
 }
 
-export function normalizeNativeTransportStats(
-  value: unknown,
+export function normalizeNativeTransportStats<T>(
+  value: T,
   kind: string,
   transportState = "unknown",
 ) {
@@ -423,9 +440,9 @@ export function normalizeNativeTransportStats(
   };
 }
 
-export function normalizeNativeStatsSnapshot(snapshot: unknown) {
-  if (!snapshot || typeof snapshot !== "object") return snapshot;
-  const record = snapshot as StatsRecord;
+export function normalizeNativeStatsSnapshot<T>(snapshot: T) {
+  const record = asRecord(snapshot);
+  if (!record) return snapshot;
   const transports = Array.isArray(record.transports)
     ? record.transports.map((transport) =>
         transport?.stats || transport?.raw
@@ -440,13 +457,11 @@ export function normalizeNativeStatsSnapshot(snapshot: unknown) {
   return { ...record, transports };
 }
 
-function asRecord(value: unknown): StatsRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as StatsRecord)
-    : null;
+function asRecord<T>(value: T): StatsRecord | null {
+  return isExternalRecord(value) ? value : null;
 }
 
-function milliseconds(value: unknown) {
+function milliseconds<T>(value: T) {
   const number = finite(value);
   return number == null ? null : Math.abs(number) < 1 ? number * 1000 : number;
 }
@@ -502,7 +517,7 @@ export function buildNativeTopologyGraph({
   topology?: StatsRecord | null;
   provider: string;
   localPeerId?: string | null;
-  transports?: unknown;
+  transports?: unknown[];
 }) {
   const topologyRecord = topology || {};
   const localPeerId = String(
@@ -578,7 +593,7 @@ export function buildNativeTopologyGraph({
   });
 }
 
-export function nativeFlowing(value: unknown, type: string) {
+export function nativeFlowing<T>(value: T, type: string) {
   const stat = nativeRtpStat(value, type);
   if (!stat) return null;
   return {

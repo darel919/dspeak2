@@ -370,7 +370,7 @@ const voiceChannels = computed(() => channelsStore.getMediaChannels());
 
 const isMobile = ref(false);
 let resizeHandler = null;
-if (typeof window !== "undefined") {
+if (import.meta.client) {
   const checkMobile = () => {
     isMobile.value = window.innerWidth < MOBILE_BREAKPOINT_PX;
   };
@@ -380,7 +380,7 @@ if (typeof window !== "undefined") {
 }
 
 onUnmounted(() => {
-  if (typeof window !== "undefined" && resizeHandler) {
+  if (import.meta.client && resizeHandler) {
     window.removeEventListener("resize", resizeHandler);
   }
 });

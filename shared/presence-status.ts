@@ -25,7 +25,9 @@ export const MAX_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 export const DEFAULT_IDLE_TIMEOUT_KEY = "dspeak:idleTimeout";
 export const DEFAULT_PRESENCE_KEY = "dspeak:presenceOverride";
 
-export function normalizePresenceStatus(value: unknown): PresenceStatus {
+import { parseExternalNumber, type ExternalField } from "./types/external.ts";
+
+export function normalizePresenceStatus(value: ExternalField): PresenceStatus {
   return value === "online" ||
     value === "idle" ||
     value === "dnd" ||
@@ -35,22 +37,22 @@ export function normalizePresenceStatus(value: unknown): PresenceStatus {
 }
 
 export function resolveAutomaticPresence(
-  manualStatus: unknown,
-  automaticStatus: unknown,
+  manualStatus: ExternalField,
+  automaticStatus: ExternalField,
 ) {
   return manualStatus
     ? normalizePresenceStatus(manualStatus)
     : normalizePresenceStatus(automaticStatus);
 }
 
-export function normalizeIdleTimeout(value: unknown) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric)
+export function normalizeIdleTimeout(value: ExternalField) {
+  const numeric = parseExternalNumber(value);
+  return numeric !== null
     ? Math.min(MAX_IDLE_TIMEOUT_MS, Math.max(MIN_IDLE_TIMEOUT_MS, numeric))
     : DEFAULT_IDLE_TIMEOUT_MS;
 }
 
-export function presenceSortKey(status: unknown) {
+export function presenceSortKey(status: ExternalField) {
   return PRESENCE_ORDER[normalizePresenceStatus(status)] ?? 99;
 }
 import type { PresenceStatus } from "./types/presence.ts";

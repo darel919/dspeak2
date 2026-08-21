@@ -1,15 +1,19 @@
 const stateKey = Symbol.for("dspeak.rate-limit");
 import type { H3Event } from "h3";
-import type {
-  RateLimitEntry,
-  RateLimitErrorData,
-  RateLimitState,
-} from "../types/rate-limit.ts";
+import type { RateLimitEntry, RateLimitState } from "../types/rate-limit.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+} from "../../shared/types/external.ts";
 const maximumEntries = 10_000;
 const pruneIntervalMs = 30_000;
 let nextPruneAt = 0;
 
 function getState(): RateLimitState {
+  /*
+   * SAFETY: This symbol is private to the rate-limit module, and every write
+   * stores a RateLimitState before the value is returned.
+   */
   const globalState = globalThis as typeof globalThis & {
     [key: symbol]: RateLimitState;
   };
@@ -63,13 +67,10 @@ export function enforceRateLimit(
       windowMs,
     );
     setHeader(event, "RateLimit-Reset", String(resetSeconds));
-  } catch (error: unknown) {
-    const data =
-      error && typeof error === "object" && "data" in error
-        ? (error.data as RateLimitErrorData | undefined)
-        : undefined;
-    if (data?.retryAfter)
-      setHeader(event, "Retry-After", Number(data.retryAfter));
+  } catch (error) {
+    const errorData = parseExternalRecord(parseExternalRecord(error)?.data);
+    const retryAfter = parseExternalNumber(errorData?.retryAfter);
+    if (retryAfter !== null) setHeader(event, "Retry-After", retryAfter);
     throw error;
   }
 }

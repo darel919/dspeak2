@@ -4,7 +4,10 @@ import { apiErrorMessage } from "../shared/api-errors.ts";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
-import type { RealtimeChannelLike } from "../shared/realtime-channel.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 import {
   normalizeChannelPolicy,
   normalizeSlowMode,
@@ -17,9 +20,49 @@ import type {
   VoicePresenceConnection,
   VoicePresenceSnapshot,
 } from "../shared/types/channels.ts";
+import {
+  parseExternalNumber,
+  type ExternalField,
+} from "~~/shared/types/external.ts";
 
-function errorMessage(error: unknown) {
+function parseVoicePresenceMessage(
+  value: ExternalField,
+): Record<string, unknown> | null {
+  if (!isExternalRecord(value)) return null;
+  return value;
+}
+
+function errorMessage(error: ExternalField) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseChannelRecord(value: ExternalField): ChannelRecord | null {
+  if (!isExternalRecord(value) || !isExternalString(value.id)) return null;
+  const inRoom = Array.isArray(value.inRoom)
+    ? value.inRoom.map((entry) => String(entry))
+    : [];
+  return { ...value, id: value.id, inRoom };
+}
+
+function parseVoicePresenceSnapshot(
+  value: ExternalField,
+): VoicePresenceSnapshot | null {
+  if (!isExternalRecord(value) || !isExternalString(value.channelId))
+    return null;
+  const inRoom = Array.isArray(value.inRoom)
+    ? value.inRoom.map((entry) => String(entry))
+    : [];
+  return { ...value, channelId: value.channelId, inRoom };
+}
+
+function parseChannelMediaPolicy(
+  value: ExternalField,
+): ChannelRecord["mediaPolicy"] {
+  if (!isExternalRecord(value)) return null;
+  const revision = isExternalString(value.revision)
+    ? value.revision
+    : (parseExternalNumber(value.revision) ?? undefined);
+  return { ...value, revision };
 }
 
 export const useChannelsStore = defineStore("channels", () => {
@@ -123,7 +166,11 @@ export const useChannelsStore = defineStore("channels", () => {
       }
 
       const data: unknown = await response.json();
-      const nextChannels = (Array.isArray(data) ? data : []) as ChannelRecord[];
+      const nextChannels = Array.isArray(data)
+        ? data
+            .map(parseChannelRecord)
+            .filter((channel): channel is ChannelRecord => channel !== null)
+        : [];
       roomChannels.set(String(roomId), nextChannels);
       applyStoredVoicePresence(roomId);
       debugLog("[ChannelsStore] Fetched channels:", nextChannels);
@@ -618,7 +665,7 @@ export const useChannelsStore = defineStore("channels", () => {
     for (const profile of snapshot.profiles || []) {
       if (profile?.id)
         voiceProfiles.value.set(String(profile.id), {
-          ...(voiceProfiles.value.get(String(profile.id)) || {}),
+          ...voiceProfiles.value.get(String(profile.id)),
           ...profile,
           id: String(profile.id),
         });
@@ -709,13 +756,11 @@ export const useChannelsStore = defineStore("channels", () => {
     connection.connecting = true;
     voicePresenceConnections.set(normalizedRoomId, connection);
     openRealtimeChannel<Record<string, unknown>>(`room:${normalizedRoomId}`, {
+      decodePayload: parseVoicePresenceMessage,
       onMessage: (message) => {
         if (message?.type === "voice-presence") {
-          if (message.data && typeof message.data === "object")
-            applyVoicePresence(
-              message.data as VoicePresenceSnapshot,
-              normalizedRoomId,
-            );
+          const snapshot = parseVoicePresenceSnapshot(message.data);
+          if (snapshot) applyVoicePresence(snapshot, normalizedRoomId);
         }
       },
       onSubscribe: () => {
@@ -757,7 +802,7 @@ export const useChannelsStore = defineStore("channels", () => {
       });
   }
 
-  function syncVoicePresenceRooms(roomIds: unknown) {
+  function syncVoicePresenceRooms(roomIds: ExternalField) {
     if (!import.meta.client) return;
     const desiredRoomIds = new Set(
       (Array.isArray(roomIds) ? roomIds : [])
@@ -777,8 +822,9 @@ export const useChannelsStore = defineStore("channels", () => {
     channelId: string,
     data: Record<string, unknown>,
   ) {
-    if (data.mediaPolicy && typeof data.mediaPolicy === "object") {
-      const nextMediaPolicy = data.mediaPolicy as ChannelRecord["mediaPolicy"];
+    if (data.mediaPolicy) {
+      const nextMediaPolicy = parseChannelMediaPolicy(data.mediaPolicy);
+      if (!nextMediaPolicy) return false;
       const channel = channels.value.find((item) => item.id === channelId);
       if (!channel) return false;
       if (

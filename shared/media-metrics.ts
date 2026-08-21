@@ -129,7 +129,7 @@ export function getRtcSignalMetrics(transports: readonly PeerMetric[] = []) {
   };
 }
 
-export function getTransportRecoveryDelayMs(state: unknown) {
+export function getTransportRecoveryDelayMs(state: ExternalField) {
   if (state === "failed") return 0;
   if (state === "disconnected") return 3000;
   return null;
@@ -161,3 +161,4 @@ import type {
   JitterBufferStat,
   PeerMetric,
 } from "./types/media.ts";
+import type { ExternalField } from "./types/external.ts";

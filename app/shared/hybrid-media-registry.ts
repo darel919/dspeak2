@@ -3,10 +3,10 @@ import type { Ref } from "vue";
 import type { AttenuationReportInput } from "./media-attenuation-reporter.ts";
 import type {
   RegistryAttenuation,
-  RegistryEntry,
   RemoteMediaEntry,
 } from "./types/hybrid-media-registry.ts";
 import type { RemoteReceiverStats } from "./remote-source-convergence.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
 
 export function createHybridMediaRegistry({
   audioFeeds,
@@ -48,18 +48,18 @@ export function createHybridMediaRegistry({
       userId: string | undefined,
       source: string,
       receiving: boolean,
-    ) => unknown;
+    ) => MediaCommandResult;
     connectionState?: () => { ready?: boolean };
-    getInboundRtpStats?: () => Promise<unknown>;
-    requestConsumer?: (producerId: string) => unknown;
-    closeConsumerByProducer?: (producerId: string) => unknown;
+    getInboundRtpStats?: () => Promise<RemoteReceiverStats | null>;
+    requestConsumer?: (producerId: string) => MediaCommandResult;
+    closeConsumerByProducer?: (producerId: string) => MediaCommandResult;
   } | null;
   getP2pMesh: () => {
     setRemoteReceiving?: (
       userId: string | undefined,
       source: string,
       receiving: boolean,
-    ) => unknown;
+    ) => MediaCommandResult;
     isMediaReady?: () => boolean;
   } | null;
   error: Ref<string | null>;
@@ -81,7 +81,7 @@ export function createHybridMediaRegistry({
     attempt: number,
     signal: AbortSignal,
   ) => Promise<boolean> | boolean;
-  onReceiverFailed?: (entry: RemoteMediaEntry) => unknown;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => MediaCommandResult;
 }) {
   return new RemoteMediaRegistry({
     audioFeeds,
@@ -106,7 +106,7 @@ export function createHybridMediaRegistry({
             entry.source,
             receiving,
           ),
-        ).catch((receivingError: unknown) => {
+        ).catch((receivingError) => {
           error.value =
             receivingError instanceof Error
               ? receivingError.message

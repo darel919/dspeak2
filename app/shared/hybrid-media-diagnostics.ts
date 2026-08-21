@@ -1,64 +1,64 @@
 import type {
-  DiagnosticProvider,
   DiagnosticSourceEntry,
   HybridMediaDiagnosticsContext,
   MediaReadinessContext,
 } from "./types/hybrid-media-diagnostics.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
 import { getSharedStatsSnapshot } from "./rtc-stats-sampler.ts";
 import type {
   RtcStatsSnapshot,
   RtcTransportSnapshot,
 } from "./types/rtc-stats.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+function finiteNumber<T>(value: T): number | undefined {
+  return isExternalNumber(value) && Number.isFinite(value) ? value : undefined;
 }
 
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function normalizeDiagnosticParameters(value: unknown): {
+interface NormalizedDiagnosticParameters {
   encodings?: Array<Record<string, unknown>>;
   degradationPreference?: string;
-} | null {
-  if (!isRecord(value)) return null;
+}
+
+function normalizeDiagnosticParameters<T>(
+  value: T,
+): NormalizedDiagnosticParameters | null {
+  if (!isExternalRecord(value)) return null;
   const encodings = Array.isArray(value.encodings)
-    ? value.encodings.filter(isRecord)
+    ? value.encodings.filter(isExternalRecord)
     : undefined;
-  const degradationPreference =
-    typeof value.degradationPreference === "string"
-      ? value.degradationPreference
-      : undefined;
+  const degradationPreference = isExternalString(value.degradationPreference)
+    ? value.degradationPreference
+    : undefined;
   return { encodings, degradationPreference };
 }
 
-function isDiagnosticSourceEntry(
-  value: unknown,
-): value is DiagnosticSourceEntry {
+function isDiagnosticSourceEntry<T>(
+  value: T,
+): value is T & DiagnosticSourceEntry {
   return (
-    isRecord(value) &&
-    typeof value.source === "string" &&
+    isExternalRecord(value) &&
+    isExternalString(value.source) &&
     value.track instanceof MediaStreamTrack
   );
 }
 
-export function normalizeRtcTransport(
-  value: Record<string, unknown>,
-): RtcTransportSnapshot {
-  const candidatePair = isRecord(value.candidatePair)
+export function normalizeRtcTransport<T>(value: T): RtcTransportSnapshot {
+  if (!isExternalRecord(value)) return {};
+  const candidatePair = isExternalRecord(value.candidatePair)
     ? {
         currentRoundTripTime: value.candidatePair.currentRoundTripTime,
         packetLoss: value.candidatePair.packetLoss,
-        local: isRecord(value.candidatePair.local)
+        local: isExternalRecord(value.candidatePair.local)
           ? {
               candidateType: value.candidatePair.local.candidateType,
               protocol: value.candidatePair.local.protocol,
             }
           : undefined,
-        remote: isRecord(value.candidatePair.remote)
+        remote: isExternalRecord(value.candidatePair.remote)
           ? { address: value.candidatePair.remote.address }
           : undefined,
         availableOutgoingBitrate: finiteNumber(
@@ -79,11 +79,11 @@ export function normalizeRtcTransport(
     packetLossPercent: value.packetLossPercent,
     jitter: value.jitter,
     jitterMs: value.jitterMs,
-    pcStates: isRecord(value.pcStates)
+    pcStates: isExternalRecord(value.pcStates)
       ? { iceConnectionState: value.pcStates.iceConnectionState }
       : undefined,
     candidatePair,
-    inboundAudio: isRecord(value.inboundAudio)
+    inboundAudio: isExternalRecord(value.inboundAudio)
       ? {
           jitter: value.inboundAudio.jitter,
           jitterBufferDelay: value.inboundAudio.jitterBufferDelay,
@@ -98,10 +98,10 @@ export function normalizeRtcTransport(
           jitterBufferEmittedCount: value.inboundAudio.jitterBufferEmittedCount,
         }
       : undefined,
-    outboundAudio: isRecord(value.outboundAudio)
+    outboundAudio: isExternalRecord(value.outboundAudio)
       ? { packetsSent: value.outboundAudio.packetsSent }
       : undefined,
-    remoteInboundAudio: isRecord(value.remoteInboundAudio)
+    remoteInboundAudio: isExternalRecord(value.remoteInboundAudio)
       ? { fractionLost: value.remoteInboundAudio.fractionLost }
       : undefined,
     availableOutgoingBitrate: value.availableOutgoingBitrate,
@@ -145,7 +145,7 @@ export function createHybridMediaDiagnostics({
     return sfu?.producers
       ? [...sfu.producers.values()]
           .map((entry) => entry.producer?.id)
-          .filter((id): id is string => typeof id === "string")
+          .filter((id): id is string => isExternalString(id))
       : [];
   }
 
@@ -157,7 +157,7 @@ export function createHybridMediaDiagnostics({
     if (activeProvider === "p2p" && p2pMesh) {
       const edges = await p2pMesh.getSnapshot?.()?.catch(() => null);
       if (edges) {
-        p2pEdges = Array.isArray(edges) ? edges.filter(isRecord) : [];
+        p2pEdges = Array.isArray(edges) ? edges.filter(isExternalRecord) : [];
         if (Array.isArray(edges)) updateP2pStats(edges);
       }
     }
@@ -166,10 +166,10 @@ export function createHybridMediaDiagnostics({
         ? (await sfu?.stats?.()) || []
         : (await p2pMesh?.stats?.()) || [];
     const transports = (Array.isArray(rawTransports) ? rawTransports : [])
-      .filter(isRecord)
+      .filter(isExternalRecord)
       .map((transport) => {
         const normalized = normalizeRtcTransport(transport);
-        const rawPcStates = isRecord(transport.pcStates)
+        const rawPcStates = isExternalRecord(transport.pcStates)
           ? transport.pcStates
           : {};
         return {
@@ -208,7 +208,8 @@ export function createHybridMediaDiagnostics({
             packetLossPercent: edge.packetLoss,
             availableOutgoingBitrate: edge.bitrate,
             candidateType:
-              isRecord(edge.candidatePair) && isRecord(edge.candidatePair.local)
+              isExternalRecord(edge.candidatePair) &&
+              isExternalRecord(edge.candidatePair.local)
                 ? edge.candidatePair.local.candidateType || null
                 : null,
             protocol: edge.network,
@@ -283,7 +284,7 @@ export function createHybridMediaDiagnostics({
         ? Math.max(
             ...Object.values(peerRoundTripTimes.value).filter(
               (value): value is number =>
-                typeof value === "number" && Number.isFinite(value),
+                isExternalNumber(value) && Number.isFinite(value),
             ),
           )
         : null,
@@ -404,7 +405,7 @@ export function createHybridMediaDiagnostics({
 
   async function getWebRTCDiagnosticStats() {
     const provider = getActiveProvider() === "sfu" ? getSfu() : getP2pMesh();
-    if (typeof provider?.diagnosticStats !== "function") return [];
+    if (!(provider?.diagnosticStats instanceof Function)) return [];
     return (await provider.diagnosticStats()) || [];
   }
 

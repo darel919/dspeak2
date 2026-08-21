@@ -2,7 +2,7 @@ const oauthExchangeTimeoutMs = 20_000;
 
 export async function exchangeOAuthCode(client: SupabaseClient, code: string) {
   let timeoutId;
-  const timeout = new Promise((resolve, reject) => {
+  const timeout = new Promise<never>((resolve, reject) => {
     timeoutId = setTimeout(
       () => reject(new Error("OAuth provider did not respond in time")),
       oauthExchangeTimeoutMs,

@@ -1,3 +1,10 @@
+import {
+  isExternalBoolean,
+  isExternalRecord,
+  type ExternalObject,
+  type ExternalValue,
+} from "./types/boundary.ts";
+
 export const MEDIA_POPUP_EVENTS = Object.freeze({
   feed: "desktop:media-popup-feed",
   volume: "desktop:media-popup-volume",
@@ -34,7 +41,16 @@ interface MediaFeedLike extends Record<string, unknown> {
   receiving?: boolean;
 }
 
-export function clampMediaPopupVolume(value: unknown) {
+type MediaPopupTauriApi = {
+  invoke: (command: string, payload?: ExternalObject) => Promise<ExternalValue>;
+  emit: (event: string, payload?: ExternalValue) => Promise<void>;
+  listen: <T>(
+    event: string,
+    handler: (event: { payload: T }) => void,
+  ) => Promise<() => void>;
+};
+
+export function clampMediaPopupVolume<T>(value: T) {
   const normalized = Number(value);
   if (!Number.isFinite(normalized)) return 1;
   return Math.max(0, Math.min(2, normalized));
@@ -54,9 +70,9 @@ export function mediaPopupEventIdForFeed(feed: MediaFeedLike) {
   return value == null || String(value).length === 0 ? null : String(value);
 }
 
-export function createMediaPopupFeed(
+export function createMediaPopupFeed<T>(
   feed: MediaFeedLike,
-  volume: unknown = 1,
+  volume?: T,
 ): MediaPopupFeed | null {
   const participantId = String(feed.userId ?? "");
   const source = String(feed.source || "");
@@ -75,7 +91,7 @@ export function createMediaPopupFeed(
     eventId: mediaPopupEventIdForFeed(feed),
     online: feed.closed !== true && feed.visible !== false,
     receiving: feed.receiving !== false,
-    volume: clampMediaPopupVolume(volume),
+    volume: clampMediaPopupVolume(volume ?? 1),
   };
 }
 
@@ -95,9 +111,9 @@ export function mediaPopupFeedSignature(feed: MediaPopupFeed) {
   ].join("|");
 }
 
-export function normalizeMediaPopupFeed(value: unknown): MediaPopupFeed | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
+export function normalizeMediaPopupFeed<T>(value: T): MediaPopupFeed | null {
+  if (!isExternalRecord(value)) return null;
+  const record = value;
   const popupId = String(record.popupId || "");
   const participantId = String(record.participantId || "");
   const source = String(record.source || "");
@@ -114,7 +130,7 @@ export function normalizeMediaPopupFeed(value: unknown): MediaPopupFeed | null {
     logicalStreamId,
     label: String(record.label || participantId),
     avatar: String(record.avatar || ""),
-    native: record.native === true,
+    native: isExternalBoolean(record.native) ? record.native : false,
     eventId,
     online: record.online === true,
     receiving: record.receiving !== false,
@@ -122,21 +138,16 @@ export function normalizeMediaPopupFeed(value: unknown): MediaPopupFeed | null {
   };
 }
 
-export async function getMediaPopupTauriApi() {
+export async function getMediaPopupTauriApi(): Promise<MediaPopupTauriApi | null> {
   if (!import.meta.client) return null;
   const [{ invoke }, { emit, listen }] = await Promise.all([
     import("@tauri-apps/api/core"),
     import("@tauri-apps/api/event"),
   ]);
   return {
-    invoke: (command: string, payload?: unknown) =>
-      invoke<unknown>(
-        command,
-        payload && typeof payload === "object"
-          ? (payload as Record<string, unknown>)
-          : undefined,
-      ),
-    emit: (event: string, payload?: unknown) => emit(event, payload),
+    invoke: (command: string, payload?: ExternalObject) =>
+      invoke<ExternalValue>(command, payload),
+    emit: (event: string, payload?: ExternalValue) => emit(event, payload),
     listen: <T = unknown>(
       event: string,
       handler: (event: { payload: T }) => void,

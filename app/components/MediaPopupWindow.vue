@@ -131,6 +131,7 @@ import {
   getMediaPopupTauriApi,
   normalizeMediaPopupFeed,
 } from "~/shared/media-popouts.ts";
+import { isExternalRecord, isExternalString } from "~/shared/types/boundary.ts";
 
 const popupId = import.meta.client
   ? new URLSearchParams(window.location.search).get("mediaPopupId") || ""
@@ -167,19 +168,17 @@ function applyFeedUpdate(value) {
 function eventMatchesCurrent(event) {
   const current = descriptor.value;
   if (!current) return false;
-  const payload =
-    event?.payload && typeof event.payload === "object" ? event.payload : {};
+  const payload = isExternalRecord(event?.payload) ? event.payload : {};
   const eventId = event?.id ?? payload.consumerId ?? payload.trackId;
   return eventId != null && String(eventId) === String(current.eventId);
 }
 
 function handleNativeReceiveEvent({ payload }) {
-  const event = payload && typeof payload === "object" ? payload : {};
+  const event = isExternalRecord(payload) ? payload : {};
   const kind = Number(event.kind);
   if (kind === 2 && eventMatchesCurrent(event)) {
-    if (typeof event.data !== "string" || !event.data) return;
-    const eventPayload =
-      event.payload && typeof event.payload === "object" ? event.payload : {};
+    if (!isExternalString(event.data) || !event.data) return;
+    const eventPayload = isExternalRecord(event.payload) ? event.payload : {};
     frame.value = {
       ...eventPayload,
       data: event.data,
@@ -193,8 +192,7 @@ function handleNativeReceiveEvent({ payload }) {
     return;
   }
   if (kind !== 4 || !eventMatchesCurrent(event)) return;
-  const eventPayload =
-    event.payload && typeof event.payload === "object" ? event.payload : {};
+  const eventPayload = isExternalRecord(event.payload) ? event.payload : {};
   if (eventPayload.event === "track-removed") {
     descriptor.value = { ...descriptor.value, online: false };
     frame.value = null;
@@ -202,8 +200,7 @@ function handleNativeReceiveEvent({ payload }) {
 }
 
 function handleVolumeEvent({ payload }) {
-  const record =
-    payload && typeof payload === "object" ? payload : { popupId: "" };
+  const record = isExternalRecord(payload) ? payload : { popupId: "" };
   if (String(record.popupId || "") !== popupId) return;
   const nextVolume = clampMediaPopupVolume(record.volume);
   volume.value = nextVolume;

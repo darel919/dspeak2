@@ -84,7 +84,7 @@ describe("voice audio UI state", () => {
           speaking: speaking.value,
           connected: connected.value,
           sessionAvailable:
-            typeof session.value.setSharedAudioAttenuation === "function",
+            session.value.setSharedAudioAttenuation !== undefined,
         }),
       () => {
         runs += 1;

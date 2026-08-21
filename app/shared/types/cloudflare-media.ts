@@ -1,3 +1,8 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+import type { ExternalObject } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 export interface CloudflarePublication extends Record<string, unknown> {
   trackName?: string;
   peerId?: string;
@@ -75,31 +80,31 @@ export interface CloudflareSubscriptionBatchOptions {
   onTrackBound?: (binding: CloudflareRemoteTrackBinding) => void;
   compensateStale?: (
     bindings: CloudflareRemoteTrackBinding[],
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
 }
 export interface CloudflarePeerConnectionLike {
   iceGatheringState?: string;
   localDescription?: { type?: string; sdp?: string | null } | null;
   addEventListener?: (type: string, listener: () => void) => void;
   removeEventListener?: (type: string, listener: () => void) => void;
-  getStats?: (track?: MediaStreamTrack) => Promise<unknown>;
+  getStats?: (track?: MediaStreamTrack) => Promise<MediaCommandResult>;
 }
 export interface DeferredPromise<T> extends Promise<T> {
   resolve: (value: T) => void;
-  reject: (error: unknown) => void;
+  reject: (error: OwnedErrorValue) => void;
 }
 export interface CloudflareSessionOptions {
   send: (message: Record<string, unknown>) => boolean;
   iceServers: RTCIceServer[];
-  onRemoteTrack: (entry: CloudflareConsumerEntry) => unknown;
+  onRemoteTrack: (entry: CloudflareConsumerEntry) => MediaCommandResult;
   onRemoteTrackEnded: (
     entry: CloudflarePublication | CloudflareConsumerEntry,
-  ) => unknown;
+  ) => MediaCommandResult;
   onStateChange: (
     direction: string,
     state: string,
     summary: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   getVideoSettings: (source: string) => Record<string, unknown>;
   getControlConnectionEpoch?: () => number;
 }
@@ -121,11 +126,11 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   pendingRemoteTracks: Map<string, CloudflareTrackEvent[]>;
   remoteCompensationOwners: Map<string, CloudflareCompensationOwner>;
   rtpSamples: Map<string, { bytes: number; timestamp: number }>;
-  subscriptionTasks: Map<string, Promise<unknown>>;
+  subscriptionTasks: Map<string, Promise<MediaCommandResult>>;
   subscribedTrackNames: Set<string>;
   subscriptionsStarted: boolean;
-  negotiationQueue: Promise<unknown>;
-  sourceOperations: Map<string, Promise<unknown>>;
+  negotiationQueue: Promise<MediaCommandResult>;
+  sourceOperations: Map<string, Promise<MediaCommandResult>>;
   sessionGeneration: number;
   connectionEpoch: number;
   controlConnectionEpoch: number;
@@ -133,8 +138,15 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   localPeerId: string | null;
   lastSentClientRtpCapabilities: unknown;
   lastReceivedConsumerParams: CloudflareRequestResult | null;
-  connectionState: () => Record<string, unknown>;
-  getMetrics: () => Promise<unknown>;
+  connectionState: () => {
+    ready: boolean;
+    sendRequired: boolean;
+    receiveRequired: boolean;
+    send: string;
+    recv: string;
+    [key: string]: unknown;
+  };
+  getMetrics: () => Promise<MediaCommandResult>;
   currentSession: () => {
     generation: number;
     peerConnection: RTCPeerConnection;
@@ -145,35 +157,40 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   ) => void;
   request: (
     operation: string,
-    body?: unknown,
+    body?: ExternalObject,
   ) => Promise<CloudflareRequestResult>;
   initialize: () => Promise<void>;
   closeMedia: () => void;
-  addSource: (entry: CloudflareSourceRequest) => Promise<unknown>;
-  handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
+  addSource: (entry: CloudflareSourceRequest) => Promise<MediaCommandResult>;
+  handle: (
+    type: string,
+    data: Record<string, unknown>,
+  ) => Promise<MediaCommandResult>;
   setJitterBufferConfig: (config?: {
     minDelayMs?: number;
     targetDelayMs?: number;
-  }) => unknown;
-  enqueueNegotiation: (operation: () => Promise<unknown>) => Promise<unknown>;
+  }) => MediaCommandResult;
+  enqueueNegotiation: (
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
   enqueueSourceOperation: (
     source: string,
-    operation: () => Promise<unknown>,
-  ) => Promise<unknown>;
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
   addSourceInternal: (entry: CloudflareSourceInput) => Promise<void>;
   subscribe: (
     publication: CloudflarePublication,
     generation?: number,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   subscribePublicationBatch: (
     publications: CloudflarePublication[],
     generation: number,
     options?: CloudflareSubscriptionBatchOptions,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   subscribePublications: (
     publications: CloudflarePublication[],
     generation?: number,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   recoverRemotePublication: (
     trackName: string,
     expectedReceiverIncarnation?: string,
@@ -205,7 +222,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   configureVideoSender: (
     sender: RTCRtpSender,
     entry: CloudflareSourceInput,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   updateSenderParameters: (
     entry: CloudflareSourceEntry,
     updates: Record<string, unknown>,
@@ -216,9 +233,9 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
     isStale?: () => boolean,
     getLatestCanonical?: () => CloudflarePublication[],
     getLatestRevision?: () => string | null,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   reconcilePublicationsOnce?: (
     publications: CloudflarePublication[],
     isStale: () => boolean,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
 }

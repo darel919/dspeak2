@@ -30,10 +30,15 @@ import type {
   PushJob,
   PushMessage,
   PushNotificationInput,
-  PushProfile,
   PushRoom,
   PushSubscriptionRow,
 } from "../types/push-delivery.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 const dispatcherKey = Symbol.for("dspeak.push.dispatcher");
 const retryDelays = [5_000, 30_000, 120_000, 600_000, 1_800_000];
@@ -48,6 +53,10 @@ const pushAllowedHosts = configuredOutboundHosts(
 const pushAgent = createPublicHttpsAgent();
 
 function getState(): PushDispatcherState {
+  /*
+   * SAFETY: This symbol is private to the push dispatcher, and initialization
+   * below stores a complete PushDispatcherState before any read returns.
+   */
   const globalState = globalThis as typeof globalThis & {
     [key: symbol]: PushDispatcherState;
   };
@@ -87,9 +96,14 @@ function configureWebPush() {
   return true;
 }
 
-function handleMissingRelation(error: unknown): boolean {
-  const value = error as { message?: string; cause?: { message?: string } };
-  const message = [value.message, value.cause?.message, String(error)]
+function handleMissingRelation(error: ExternalField): boolean {
+  const value = parseExternalRecord(error);
+  const cause = parseExternalRecord(value?.cause);
+  const message = [
+    parseExternalString(value?.message),
+    parseExternalString(cause?.message),
+    String(error),
+  ]
     .filter(Boolean)
     .join(" ");
   if (!/relation ".+" does not exist/.test(message)) return false;
@@ -345,11 +359,9 @@ async function deliverJob(job: PushJob): Promise<void> {
         .where(eq(pushSubscriptions.id, subscription[0].id)),
     ]);
     state.metrics.delivered += 1;
-  } catch (error: unknown) {
+  } catch (error) {
     const statusCode =
-      error && typeof error === "object" && "statusCode" in error
-        ? Number(error.statusCode)
-        : 0;
+      parseExternalNumber(parseExternalRecord(error)?.statusCode) || 0;
     if (
       statusCode === 404 ||
       statusCode === 410 ||

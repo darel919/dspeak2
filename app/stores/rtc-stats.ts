@@ -11,6 +11,7 @@ import type {
   RtcTrafficSample,
   RtcTransportPair,
 } from "../shared/types/rtc-stats.ts";
+import type { MediaCommandResult } from "../shared/types/boundary.ts";
 
 const HISTORY_LIMIT = 30;
 const SUMMARY_INTERVAL_MS = 5000;
@@ -41,9 +42,12 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
   let previousTrafficSample: RtcTrafficSample | null = null;
   let detailedConsumers = 0;
 
-  function sumFinite(pairs: RtcTransportPair[], field: string): number | null {
+  function sumFinite(
+    pairs: RtcTransportPair[],
+    field: keyof RtcTransportPair,
+  ): number | null {
     const values = pairs
-      .map((pair) => Number(pair?.[field as keyof RtcTransportPair]))
+      .map((pair) => Number(pair?.[field]))
       .filter(Number.isFinite);
     return values.length
       ? values.reduce((total, value) => total + value, 0)
@@ -108,13 +112,13 @@ export const useRtcStatsStore = defineStore("rtc-stats", () => {
     const diagnosticErrors: Array<{ label: string; message: string }> = [];
     const collectOptional = async (
       label: string,
-      operation: (() => Promise<unknown> | undefined) | undefined,
-    ): Promise<unknown[]> => {
-      if (typeof operation !== "function") return [];
+      operation: (() => Promise<MediaCommandResult> | undefined) | undefined,
+    ): Promise<MediaCommandResult[]> => {
+      if (!(operation instanceof Function)) return [];
       try {
         const result = await operation();
         return Array.isArray(result) ? result : [];
-      } catch (error: unknown) {
+      } catch (error) {
         diagnosticErrors.push({
           label,
           message: error instanceof Error ? error.message : String(error),

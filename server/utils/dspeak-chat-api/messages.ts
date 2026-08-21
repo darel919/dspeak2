@@ -24,6 +24,7 @@ import type {
   ChatRouteHandler,
 } from "../../types/chat-api.ts";
 import type { H3Event } from "h3";
+import { parseExternalString } from "../../../shared/types/external.ts";
 
 export function createChatMessagesHandler(
   dependencies: ChatRouteDependencies,
@@ -133,9 +134,9 @@ export function createChatMessagesHandler(
     if (suffix === "message" && event.method === "POST") {
       enforceRateLimit(event, "chat-message", userId, 120, 60 * 1000);
       const channelId = requireValue(body.channelId, "Channel ID is required");
-      const contentValue = body.content;
-      const hasContent = typeof contentValue === "string";
-      const content = hasContent ? contentValue.trim() : "";
+      const contentValue = parseExternalString(body.content);
+      const content = contentValue?.trim() || "";
+      const hasContent = contentValue !== null;
       const hasAttachments =
         Array.isArray(body.attachments) && body.attachments.length > 0;
       if (!content && !hasAttachments)
@@ -195,9 +196,7 @@ export function createChatMessagesHandler(
           statusCode: 403,
           statusMessage: "Missing permission to mention everyone or here",
         });
-      const slowModeSeconds = normalizeSlowMode(
-        typeof channel.slowMode === "number" ? channel.slowMode : 0,
-      );
+      const slowModeSeconds = normalizeSlowMode(channel.slowMode ?? 0);
       const slowModeApplies =
         slowModeSeconds > 0 &&
         !access.isOwner &&
@@ -231,8 +230,7 @@ export function createChatMessagesHandler(
         userId,
         clientId,
       );
-      const replyToValue =
-        typeof body.replyTo === "string" ? body.replyTo : null;
+      const replyToValue = parseExternalString(body.replyTo);
       const replyTo = await validateReplyTarget(replyToValue, channel.id);
       if (slowModeApplies)
         enforceRateLimit(
@@ -365,7 +363,7 @@ export function createChatMessagesHandler(
           body.content,
           "Message content is required",
         );
-        if (typeof content !== "string" || content.length > 4000)
+        if (content.length > 4000)
           throw createError({
             statusCode: 400,
             statusMessage: "Message content must be at most 4000 characters",
@@ -434,8 +432,10 @@ export function createChatMessagesHandler(
       const ids = [
         ...new Set(
           submittedIds
-            .filter((messageId) => typeof messageId === "string")
-            .map((messageId) => messageId.trim())
+            .flatMap((messageId) => {
+              const value = parseExternalString(messageId);
+              return value === null ? [] : [value.trim()];
+            })
             .filter(Boolean),
         ),
       ];
@@ -491,7 +491,7 @@ export function createChatMessagesHandler(
             })
             .where(eq(messages.id, messageId));
           results.push({ messageId, status: "marked_as_read" });
-        } catch (error) {
+        } catch {
           results.push({
             messageId,
             status: "error",

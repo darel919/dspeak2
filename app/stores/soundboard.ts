@@ -2,6 +2,16 @@ import { defineStore } from "pinia";
 import { useAuthStore } from "./auth";
 import { useSettingsStore } from "./settings";
 import { useVoiceStore } from "./voice";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
+import {
+  parseExternalRecord,
+  parseExternalValue,
+} from "../utils/external-values.ts";
 import type {
   SoundboardClip,
   SoundboardEventDetail,
@@ -13,18 +23,80 @@ interface SoundboardRequestOptions extends RequestInit {
   headers?: Record<string, string>;
 }
 
-function isSoundboardListResponse(
-  value: unknown,
-): value is SoundboardListResponse {
-  if (!value || typeof value !== "object") return false;
-  const record = value as { clips?: unknown; canManageRoom?: unknown };
-  return (
-    Array.isArray(record.clips) && typeof record.canManageRoom === "boolean"
-  );
+function parseSoundboardClip(value: ExternalField): SoundboardClip | null {
+  const record = parseExternalRecord(value);
+  if (
+    !record ||
+    !isExternalString(record.id) ||
+    !isExternalString(record.roomId)
+  )
+    return null;
+  if (record.title !== undefined && !isExternalString(record.title))
+    return null;
+  if (record.name !== undefined && !isExternalString(record.name)) return null;
+  if (
+    record.canManage !== undefined &&
+    record.canManage !== true &&
+    record.canManage !== false
+  )
+    return null;
+
+  const clip: SoundboardClip = {
+    id: record.id,
+    roomId: record.roomId,
+  };
+  if (isExternalString(record.title)) clip.title = record.title;
+  if (isExternalString(record.name)) clip.name = record.name;
+  if (record.canManage === true || record.canManage === false)
+    clip.canManage = record.canManage;
+  for (const [key, rawValue] of Object.entries(record)) {
+    if (
+      key === "id" ||
+      key === "roomId" ||
+      key === "title" ||
+      key === "name" ||
+      key === "canManage"
+    )
+      continue;
+    Object.assign(clip, { [key]: parseExternalValue(rawValue) });
+  }
+  return clip;
 }
 
-function errorMessage(error: unknown): string {
+function parseSoundboardListResponse(
+  value: ExternalField,
+): SoundboardListResponse | null {
+  const record = parseExternalRecord(value);
+  if (!record || !Array.isArray(record.clips)) return null;
+  if (record.canManageRoom !== true && record.canManageRoom !== false)
+    return null;
+  const clips = record.clips
+    .map(parseSoundboardClip)
+    .filter((clip): clip is SoundboardClip => clip !== null);
+  if (clips.length !== record.clips.length) return null;
+  return { clips, canManageRoom: record.canManageRoom };
+}
+
+function errorMessage(error: ExternalField): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseSoundboardEventDetail(
+  value: ExternalField,
+): SoundboardEventDetail | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  const detail: SoundboardEventDetail = {};
+  if (isExternalString(record.roomId)) detail.roomId = record.roomId;
+  if (isExternalString(record.activityId))
+    detail.activityId = record.activityId;
+  if (isExternalString(record.triggeredBy))
+    detail.triggeredBy = record.triggeredBy;
+  if (isExternalString(record.clipId)) detail.clipId = record.clipId;
+  if (isExternalString(record.clipTitle)) detail.clipTitle = record.clipTitle;
+  if (isExternalString(record.clipIcon)) detail.clipIcon = record.clipIcon;
+  if (isExternalNumber(record.duration)) detail.duration = record.duration;
+  return detail;
 }
 
 export const useSoundboardStore = defineStore("soundboard", () => {
@@ -49,7 +121,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
   async function request(
     path: string,
     options: SoundboardRequestOptions = {},
-  ): Promise<unknown> {
+  ): Promise<ExternalField> {
     const requestHeaders = new Headers(options.headers);
     const authHeaders = headers(Object.fromEntries(requestHeaders.entries()));
     const response = await fetch(`${config.public.apiPath}/soundboard${path}`, {
@@ -61,9 +133,17 @@ export const useSoundboardStore = defineStore("soundboard", () => {
       const text = await response.text();
       let payload: { statusMessage?: string; message?: string } | null = null;
       try {
-        const parsed: unknown = JSON.parse(text);
-        if (parsed && typeof parsed === "object")
-          payload = parsed as { statusMessage?: string; message?: string };
+        const parsed = JSON.parse(text);
+        if (isExternalRecord(parsed)) {
+          payload = {
+            statusMessage: isExternalString(parsed.statusMessage)
+              ? parsed.statusMessage
+              : undefined,
+            message: isExternalString(parsed.message)
+              ? parsed.message
+              : undefined,
+          };
+        }
       } catch {
         payload = null;
       }
@@ -74,7 +154,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
           "Soundboard request failed",
       );
     }
-    return response.json();
+    return parseExternalValue(await response.json());
   }
 
   async function load(roomId: string): Promise<void> {
@@ -85,10 +165,10 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     try {
       const result = await request(`?roomId=${encodeURIComponent(roomId)}`);
       if (currentRoomId.value !== normalizedRoomId) return;
-      if (!isSoundboardListResponse(result))
-        throw new Error("Invalid soundboard response");
-      clips.value = result.clips;
-      canManageRoom.value = result.canManageRoom;
+      const parsed = parseSoundboardListResponse(result);
+      if (!parsed) throw new Error("Invalid soundboard response");
+      clips.value = parsed.clips;
+      canManageRoom.value = parsed.canManageRoom;
       loadedRoomId.value = normalizedRoomId;
     } catch (cause: unknown) {
       if (currentRoomId.value === normalizedRoomId)
@@ -111,7 +191,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     try {
       const form = new FormData();
       form.set("roomId", roomId);
-      form.set("media", file as Blob, file.name);
+      form.set("media", file, file.name);
       Object.entries(metadata).forEach(([key, value]) =>
         form.set(key, String(value)),
       );
@@ -184,7 +264,7 @@ export const useSoundboardStore = defineStore("soundboard", () => {
     audio: HTMLAudioElement,
     output: string | null,
   ): Promise<boolean> {
-    if (!output || typeof audio.setSinkId !== "function") return true;
+    if (!output || !(audio.setSinkId instanceof Function)) return true;
     try {
       await audio.setSinkId(output);
       return true;
@@ -248,9 +328,9 @@ export const useSoundboardStore = defineStore("soundboard", () => {
 
   async function onTriggered(event: Event): Promise<void> {
     if (!(event instanceof CustomEvent)) return;
-    const data = (event.detail || {}) as SoundboardEventDetail;
-    if (String(data.roomId) !== String(currentRoomId.value)) return;
-    if (!data.triggeredBy) return;
+    const data = parseSoundboardEventDetail(event.detail);
+    if (!data || data.roomId !== currentRoomId.value) return;
+    if (!data.triggeredBy || !data.clipTitle) return;
     const activity = voiceStore.showSoundboardActivity(data.triggeredBy, {
       activityId: data.activityId,
       title: data.clipTitle,
@@ -258,14 +338,14 @@ export const useSoundboardStore = defineStore("soundboard", () => {
       duration: data.duration,
     });
     if (data.clipId && data.roomId) await play(data.clipId, data.roomId);
-    if (data.triggeredBy)
+    if (activity && data.triggeredBy)
       voiceStore.clearSoundboardActivity(data.triggeredBy, activity);
   }
 
   function onLibraryUpdated(event: Event): void {
     if (!(event instanceof CustomEvent)) return;
-    const detail = event.detail as SoundboardEventDetail;
-    const roomId = String(detail.roomId || "");
+    const detail = parseSoundboardEventDetail(event.detail);
+    const roomId = detail?.roomId || "";
     if (roomId === loadedRoomId.value && roomId === String(currentRoomId.value))
       load(roomId);
   }

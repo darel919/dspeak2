@@ -2,6 +2,7 @@ import type {
   ChatMessage,
   ChatStoreContext,
 } from "../../shared/types/chat-store.ts";
+import type { MediaCommandResult } from "../../shared/types/boundary.ts";
 
 export function createChatExtraActions(context: ChatStoreContext) {
   const { error } = context;
@@ -134,7 +135,7 @@ export function createChatExtraActions(context: ChatStoreContext) {
     }
   }
 
-  async function fetchPinned(channelId: string): Promise<unknown> {
+  async function fetchPinned(channelId: string): Promise<MediaCommandResult> {
     try {
       const apiPath = context.config.public.apiPath;
       const response = await fetch(
@@ -158,7 +159,7 @@ export function createChatExtraActions(context: ChatStoreContext) {
       before?: string;
       after?: string;
     } = {},
-  ): Promise<unknown> {
+  ): Promise<MediaCommandResult> {
     try {
       const apiPath = context.config.public.apiPath;
       const params = new URLSearchParams({ channelId, q: query });
@@ -177,7 +178,7 @@ export function createChatExtraActions(context: ChatStoreContext) {
     }
   }
 
-  async function undoMessage(messageId: string): Promise<unknown> {
+  async function undoMessage(messageId: string): Promise<MediaCommandResult> {
     try {
       const apiPath = context.config.public.apiPath;
       const response = await fetch(`${apiPath}/chat/message/undo`, {

@@ -1,4 +1,6 @@
 <script setup>
+import { isExternalString } from "../../shared/types/boundary.ts";
+
 const props = defineProps({
   content: { type: String, default: "" },
 });
@@ -216,9 +218,9 @@ const renderInline = (text) => {
 const tokens = computed(() => parseMarkdown(props.content));
 
 function safeHref(value) {
-  if (typeof value !== "string" || !value.trim()) return "";
+  if (!isExternalString(value) || !value.trim()) return "";
   const href = value.trim();
-  if (/[\u0000-\u001f\u007f]/.test(href)) return "";
+  if (/\p{Cc}/u.test(href)) return "";
   try {
     const url = new URL(href, "https://dspeak.invalid");
     return ["http:", "https:", "mailto:"].includes(url.protocol) ? href : "";

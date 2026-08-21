@@ -1,21 +1,22 @@
 import type { ReaderValue } from "./types/shared-utilities.ts";
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
 
-export function readerId(reader: ReaderValue): string | null {
-  if (typeof reader === "string") return reader;
-  if (reader && typeof reader === "object" && reader.id) {
+export function readerId<T>(reader: T): string | null {
+  if (isExternalString(reader)) return reader;
+  if (isExternalRecord(reader) && reader.id) {
     return String(reader.id);
   }
   return null;
 }
 
-export function readerIds(readers: unknown): string[] {
+export function readerIds<T>(readers: T): string[] {
   if (!Array.isArray(readers)) return [];
   return [
     ...new Set(readers.map(readerId).filter((id): id is string => Boolean(id))),
   ];
 }
 
-export function hasReader(readers: unknown, userId: string | number | null) {
+export function hasReader<T>(readers: T, userId: string | number | null) {
   if (!userId) return false;
   return readerIds(readers).includes(String(userId));
 }

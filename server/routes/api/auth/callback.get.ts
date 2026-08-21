@@ -1,10 +1,11 @@
 import { createOAuthSupabaseClient } from "../../../auth/supabase.ts";
 import { createPendingOAuthSession } from "../../../auth/pending-oauth-session.ts";
 import { exchangeOAuthCode } from "../../../auth/oauth-exchange.ts";
+import { parseExternalString } from "../../../../shared/types/external.ts";
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
-  const code = String(query.code || "");
+  const code = parseExternalString(query.code) || "";
 
   if (!code) {
     throw createError({
@@ -14,13 +15,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const { client, clearStorage } = createOAuthSupabaseClient(event);
-  let data: { session: import("@supabase/supabase-js").Session | null };
-  let error: { message: string } | null;
+  let data: Awaited<ReturnType<typeof exchangeOAuthCode>>["data"];
+  let error: Awaited<ReturnType<typeof exchangeOAuthCode>>["error"];
   try {
-    ({ data, error } = (await exchangeOAuthCode(client, code)) as {
-      data: { session: import("@supabase/supabase-js").Session | null };
-      error: { message: string } | null;
-    });
+    ({ data, error } = await exchangeOAuthCode(client, code));
   } finally {
     await clearStorage();
   }

@@ -9,8 +9,9 @@ import {
 import { requireAuthenticatedUser } from "./auth.ts";
 import { desc, eq } from "drizzle-orm";
 import type { DSpeakEvent } from "../types/dspeak-api.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
-function requireValue(value: unknown, message: string): string {
+function requireValue(value: ExternalField, message: string): string {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
   return String(value);
 }

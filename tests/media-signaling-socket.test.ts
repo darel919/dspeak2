@@ -157,6 +157,7 @@ test("media signaling reaches ready after a compatible 919 handshake", async () 
   try {
     const signaling = harness();
     const opening = signaling.open();
+    /* SAFETY: open() synchronously constructs the single fake socket before the first candidate is read. */
     const candidate = FakeWebSocket.instances[0] as {
       readyState: number;
       lastMessage: string;
@@ -189,6 +190,7 @@ test("media signaling rejects a mismatched contract revision", async () => {
   try {
     const signaling = harness();
     const opening = signaling.open();
+    /* SAFETY: open() synchronously constructs the single fake socket before the first candidate is read. */
     const candidate = FakeWebSocket.instances[0] as {
       readyState: number;
       closeRequest?: { code: number; reason: string };

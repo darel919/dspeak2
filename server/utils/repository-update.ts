@@ -9,6 +9,12 @@ import type {
   RepositoryUpdateSnapshot,
   UnknownRecord,
 } from "../types/repository-update.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 const DEFAULT_UPDATE_REPOSITORY = "darel919/dspeak2";
 const DEFAULT_UPDATE_BRANCH = "next";
@@ -22,36 +28,32 @@ const cache = new Map<
 >();
 const inFlight = new Map<string, Promise<RepositoryUpdateSnapshot>>();
 
-function asRecord(value: unknown): UnknownRecord {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as UnknownRecord)
-    : {};
+function asRecord(value: ExternalField | undefined): UnknownRecord {
+  return parseExternalRecord(value) ?? {};
 }
 
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" || typeof value === "number"
-    ? String(value)
-    : null;
+function stringValue(value: ExternalField | undefined): string | null {
+  const text = parseExternalString(value);
+  if (text !== null) return text;
+  const number = parseExternalNumber(value);
+  return number === null ? null : String(number);
 }
 
-function numberValue(value: unknown): number | null {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) ? number : null;
+function numberValue(value: ExternalField | undefined): number | null {
+  return parseExternalNumber(value);
 }
 
 function normalizeCommit(
-  value: unknown,
+  value: ExternalField | undefined,
   { short = false }: CommitNormalizationOptions = {},
 ): string | null {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
+  const normalized = (parseExternalString(value) || "").trim().toLowerCase();
   const pattern = short ? /^[0-9a-f]{7,40}$/ : /^[0-9a-f]{40}$/;
   return pattern.test(normalized) ? normalized : null;
 }
 
-function normalizeRepository(value: unknown): string {
-  const normalized = String(value || "")
+function normalizeRepository(value: ExternalField | undefined): string {
+  const normalized = (stringValue(value) || "")
     .trim()
     .replace(/^https?:\/\/github\.com\//i, "")
     .replace(/\.git$/i, "")
@@ -62,10 +64,10 @@ function normalizeRepository(value: unknown): string {
 }
 
 function normalizeBranch(
-  value: unknown,
+  value: ExternalField | undefined,
   fallback: string = DEFAULT_UPDATE_BRANCH,
 ): string {
-  const normalized = String(value || "").trim();
+  const normalized = (stringValue(value) || "").trim();
   return /^[A-Za-z0-9._/-]{1,200}$/.test(normalized) ? normalized : fallback;
 }
 
@@ -74,8 +76,11 @@ function sameCommit(left: string | null, right: string | null): boolean {
   return left === right || left.startsWith(right) || right.startsWith(left);
 }
 
-function boundedString(value: unknown, limit: number): string | null {
-  const normalized = String(value || "").trim();
+function boundedString(
+  value: ExternalField | undefined,
+  limit: number,
+): string | null {
+  const normalized = (stringValue(value) || "").trim();
   return normalized ? normalized.slice(0, limit) : null;
 }
 
@@ -83,22 +88,22 @@ function githubUrl(repository: string, resource: string): string {
   return `https://api.github.com/repos/${repository}/${resource}`;
 }
 
-function safeGithubUrl(value: unknown): string | null {
-  const normalized = String(value || "");
+function safeGithubUrl(value: ExternalField | undefined): string | null {
+  const normalized = stringValue(value) || "";
   return normalized.startsWith("https://github.com/") ? normalized : null;
 }
 
 async function githubJson(
   repository: string,
   resource: string,
-): Promise<unknown> {
-  const headers: Record<string, string> = {
+): Promise<ExternalField> {
+  const headers = new Headers({
     Accept: "application/vnd.github+json",
     "User-Agent": "dSpeak-update-check",
     "X-GitHub-Api-Version": "2022-11-28",
-  };
+  });
   if (process.env.DSPEAK_GITHUB_TOKEN)
-    headers.Authorization = `Bearer ${process.env.DSPEAK_GITHUB_TOKEN}`;
+    headers.set("Authorization", `Bearer ${process.env.DSPEAK_GITHUB_TOKEN}`);
 
   const response = await fetch(githubUrl(repository, resource), {
     headers,
@@ -136,7 +141,7 @@ function pullRequestFromMessage(
 }
 
 function summarizeCommit(
-  value: unknown,
+  value: ExternalField,
   repository: string,
 ): CommitSummary | null {
   const commit = asRecord(value);
@@ -163,21 +168,23 @@ function summarizeCommit(
 }
 
 function summarizeLatest(
-  value: unknown,
+  value: ExternalField,
   repository: string,
 ): CommitSummary | null {
   return summarizeCommit(value, repository);
 }
 
 function summarizeComparison(
-  value: unknown,
+  value: ExternalField,
   repository: string,
 ): ComparisonSummary {
   const comparison = asRecord(value);
   const commits = Array.isArray(comparison.commits)
     ? comparison.commits
-        .map((commit) => summarizeCommit(commit, repository))
-        .filter((commit): commit is CommitSummary => Boolean(commit))
+        .flatMap((commit) => {
+          const summary = summarizeCommit(commit, repository);
+          return summary ? [summary] : [];
+        })
         .slice(0, MAX_COMMITS)
     : [];
   return {

@@ -3,6 +3,10 @@ import test from "node:test";
 import { createMediaSourceController } from "../app/shared/media-source-controller.ts";
 import { FakeMediaStreamTrack } from "./helpers/fake-media.ts";
 import type { TopologySourceEntry } from "../app/shared/types/topology-controller.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 function sourceEntry(source: string, id: string): TopologySourceEntry {
   return {
@@ -42,11 +46,13 @@ function controller(overrides: Record<string, unknown> = {}) {
       if (
         autoAck &&
         message.type === "media-sources" &&
-        (message.data as { operationId?: unknown })?.operationId
+        parseExternalString(parseExternalRecord(message.data)?.operationId)
       ) {
-        pendingOperationIds.push(
-          (message.data as { operationId: string }).operationId,
+        const operationId = parseExternalString(
+          parseExternalRecord(message.data)?.operationId,
         );
+        if (!operationId) return;
+        pendingOperationIds.push(operationId);
         setTimeout(() => {
           while (pendingOperationIds.length > 0) {
             const opId = pendingOperationIds.shift()!;
@@ -188,7 +194,7 @@ test("unexpected microphone capture loss marks the local participant muted", asy
   )?.data;
   assert.equal(voiceMessage?.muted, true);
   assert.equal(voiceMessage?.deafened, false);
-  assert.equal(typeof voiceMessage?.operationId, "string");
+  assert.ok(parseExternalString(voiceMessage?.operationId));
   assert.match(harness.error.value, /capture ended/i);
 });
 
@@ -219,7 +225,7 @@ test("a muted microphone source is published with its track disabled", async () 
   assert.equal(publishedTrack.enabled, false);
 });
 
-test("microphone start clears stale disabled transmission before capture", async () => {
+test("microphone start clears stale disabled transmission after capture", async () => {
   const calls = [];
   const entry = {
     source: "audio",
@@ -248,10 +254,37 @@ test("microphone start clears stale disabled transmission before capture", async
   await harness.instance.startAudioProduction();
 
   assert.deepEqual(calls, [
+    ["capture"],
     ["p2p", "audio", true],
     ["sfu", "audio", true],
-    ["capture"],
   ]);
+});
+
+test("microphone stop waits for provider source cleanup", async () => {
+  let releaseProviderRemoval = () => {};
+  const providerRemoval = new Promise<void>((resolve) => {
+    releaseProviderRemoval = resolve;
+  });
+  const harness = controller({
+    getSfu: () => ({
+      removeSource: () => providerRemoval,
+    }),
+  });
+  const entry = sourceEntry("audio", "microphone-track");
+  harness.localSources.set(entry.source, entry);
+
+  const completed = Promise.resolve(harness.instance.removeSource(entry));
+  let settled = false;
+  void completed.then(() => {
+    settled = true;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(settled, false);
+  releaseProviderRemoval();
+  await completed;
+  assert.equal(settled, true);
 });
 
 test("failed SFU publication never advertises a local source", async () => {
@@ -394,11 +427,6 @@ test("failed processed shared audio publication closes its processing graph", as
     }),
   });
   const captureTrack = { id: "capture", readyState: "live" };
-  const processedTrack = {
-    id: "processed",
-    readyState: "live",
-    addEventListener() {},
-  };
 
   await assert.rejects(
     harness.instance.publishSource({
@@ -452,7 +480,7 @@ test("leave sends a clean leave mutation with operationId and epoch", async () =
   const leaveMessage = harness.sent.find(
     (message) => message.type === "leave",
   )?.data;
-  assert.equal(typeof leaveMessage?.operationId, "string");
+  assert.ok(parseExternalString(leaveMessage?.operationId));
   assert.equal(leaveMessage?.requestId, leaveMessage?.operationId);
   assert.equal(leaveMessage?.connectionEpoch, 1);
   harness.instance.resolveOperationAck(leaveMessage.operationId);
@@ -465,7 +493,7 @@ test("source-state mutation carries the connection envelope and FSM digest", asy
   const sourceMessage = harness.sent.find(
     (message) => message.type === "media-sources",
   )?.data;
-  assert.equal(typeof sourceMessage?.operationId, "string");
+  assert.ok(parseExternalString(sourceMessage?.operationId));
   assert.equal(sourceMessage?.connectionEpoch, 1);
   assert.ok(sourceMessage?.sourceStates);
 });
@@ -613,7 +641,7 @@ test("stale-generation STOP: NACK adopts canonical generation, retries inactive,
   const harness = controller({
     autoAck: false,
     getSfu: () => ({
-      async removeSource(source: string) {
+      async removeSource(_source: string) {
         sfuRemoveCalls += 1;
         if (sfuRemoveCalls === 1) {
           throw new Error("premature remove");

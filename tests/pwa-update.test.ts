@@ -141,7 +141,7 @@ test("service worker source and registration consistently use modules", () => {
   assert.doesNotMatch(serviceWorkerRegistration, /sw\.js\?build=/);
   assert.match(
     serviceWorkerRegistration,
-    /registrationRequest[\s\S]*null as Promise<ServiceWorkerRegistration \| null> \| null/,
+    /registrationRequest[\s\S]*Promise<ServiceWorkerRegistration \| null> \| null[\s\S]*=\s*null/,
   );
   assert.match(
     serviceWorkerRegistration,

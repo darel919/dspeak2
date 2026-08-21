@@ -1,3 +1,7 @@
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { RealtimeChannelLike } from "../realtime-channel.ts";
 import type { ChatMessageInput } from "./composables.ts";
@@ -132,13 +136,13 @@ export interface ChatActionSet {
     invalidateGeneration?: boolean,
     expectedChannelId?: string | null,
   ) => boolean | undefined;
-  handleWebSocketMessage: (event: { data: unknown }) => Promise<void>;
+  handleWebSocketMessage: (event: { data: ExternalValue }) => Promise<void>;
   handleParticipantChange: () => Promise<void>;
   sendMessage: (
     channelId: string,
     content: string,
     options?: ChatSendOptions,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   updateMessageReadBy: (
     messageId: string,
     readBy: string[] | undefined,
@@ -147,7 +151,7 @@ export interface ChatActionSet {
   chatResponseError: (response: Response) => Promise<ChatDeliveryError>;
   editMessage: (messageId: string, content: string) => Promise<ChatMessage>;
   deleteMessage: (messageId: string) => Promise<void>;
-  fetchMessageHistory: (messageId: string) => Promise<unknown>;
+  fetchMessageHistory: (messageId: string) => Promise<MediaCommandResult>;
   removeMessage: (messageId: string, clientId?: string) => void;
   updateTypingStatus: (userId: string, isTyping: boolean) => void;
   markMessageAsRead: (messageId: string) => void;
@@ -158,8 +162,8 @@ export interface ChatActionSet {
   sendTypingIndicator: (isTyping: boolean) => void;
   clearChat: () => Promise<void>;
   handleNewMessageNotification: (message: ChatMessage) => Promise<void>;
-  fetchBookmarks: () => Promise<unknown>;
-  fetchPinned: (channelId: string) => Promise<unknown>;
+  fetchBookmarks: () => Promise<MediaCommandResult>;
+  fetchPinned: (channelId: string) => Promise<MediaCommandResult>;
   searchMessages: (
     channelId: string,
     query: string,
@@ -169,8 +173,8 @@ export interface ChatActionSet {
       before?: string;
       after?: string;
     },
-  ) => Promise<unknown>;
-  undoMessage: (messageId: string) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
+  undoMessage: (messageId: string) => Promise<MediaCommandResult>;
   legacyReadStorageKey: (userId: string) => string;
 }
 

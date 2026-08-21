@@ -4,6 +4,15 @@ import {
   findRtpStat,
 } from "./rtc-media-stats.ts";
 import type { MediasoupClientSessionLike } from "./types/mediasoup-client.ts";
+import {
+  isExternalRecord,
+  type ExternalValue,
+  type MediaCommandResult,
+} from "./types/boundary.ts";
+
+function externalStats(value: MediaCommandResult): ExternalValue {
+  return value === undefined ? null : value;
+}
 
 export async function collectMediasoupStats(
   session: MediasoupClientSessionLike,
@@ -15,7 +24,12 @@ export async function collectMediasoupStats(
   ] as const) {
     if (!transport?.getStats) continue;
     transports.push(
-      await collectPeerConnectionStats({ getStats: transport.getStats }, kind),
+      await collectPeerConnectionStats(
+        {
+          getStats: async () => externalStats(await transport.getStats?.()),
+        },
+        kind,
+      ),
     );
   }
   return transports;
@@ -32,7 +46,9 @@ export async function collectMediasoupDiagnosticStats(
     if (!transport?.getStats) continue;
     transports.push(
       await collectPeerConnectionDiagnosticStats(
-        { getStats: transport.getStats },
+        {
+          getStats: async () => externalStats(await transport.getStats?.()),
+        },
         kind,
       ),
     );
@@ -68,7 +84,7 @@ export async function mediasoupMediaReadiness(
   }
   const sampleFlow = (
     key: string,
-    report: unknown,
+    report: Record<string, unknown>,
     type: string,
     field: string,
     track: MediaStreamTrack,
@@ -94,7 +110,7 @@ export async function mediasoupMediaReadiness(
     const report = await entry.producer.getStats().catch(() => null);
     return sampleFlow(
       `out:${entry.producer.id}`,
-      report,
+      isExternalRecord(report) ? report : {},
       "outbound-rtp",
       "bytesSent",
       entry.track,
@@ -107,7 +123,7 @@ export async function mediasoupMediaReadiness(
       entry.receiving === true &&
       sampleFlow(
         `in:${entry.consumer.id}`,
-        report,
+        isExternalRecord(report) ? report : {},
         "inbound-rtp",
         "bytesReceived",
         entry.track,

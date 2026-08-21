@@ -41,6 +41,7 @@ function capabilities(
   const videoCodecs = emptyVideoCodecCapabilities();
   for (const [codec, value] of Object.entries(codecs)) {
     if (!(codec in videoCodecs)) continue;
+    /* SAFETY: The preceding membership check proves this runtime key belongs to the complete codec capability object. */
     const name = codec as keyof typeof videoCodecs;
     videoCodecs[name] = {
       encode: value.encode || videoCodecs[name].encode,

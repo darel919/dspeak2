@@ -1,4 +1,5 @@
 import type { DesktopCaptureSelection } from "../desktop-capture.ts";
+import type { ExternalObject } from "./boundary.ts";
 import type { VideoSettingsInput } from "../types/video-settings.ts";
 import type { TopologySourceEntry } from "./topology-controller.ts";
 
@@ -37,11 +38,11 @@ export interface MediaCaptureManagerOptions {
   getSettings: () => MediaCaptureSettings;
   getAudioStereo: (source: string) => boolean;
   mediaDevices?: MediaDevices;
-  onMicrophoneFallback?: (details: unknown) => unknown;
-  onMicrophoneRestored?: (details: unknown) => unknown;
-  onSource?: (entry: MediaCaptureEntry) => unknown;
+  onMicrophoneFallback?: (details: ExternalObject) => void;
+  onMicrophoneRestored?: (details: ExternalObject) => void;
+  onSource?: (entry: MediaCaptureEntry) => void;
   onSourceEnded?: (
     entry: MediaCaptureEntry,
     details?: Record<string, unknown>,
-  ) => unknown;
+  ) => void;
 }

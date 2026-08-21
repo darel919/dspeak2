@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CloudflareRealtimeSession } from "../app/shared/cloudflare-realtime-session.ts";
 import { createCloudflarePublicationRegistry } from "../app/shared/cloudflare-publication-registry.ts";
-import { setupMediaMessageHandlers } from "../app/shared/media-message-handlers.ts";
 import type { CloudflarePublication } from "../app/shared/types/cloudflare-media.ts";
+import {
+  parseExternalBoolean,
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../shared/types/external.ts";
 
 function registry() {
   return createCloudflarePublicationRegistry();
@@ -36,9 +42,32 @@ interface ClientHandlers {
   queueCloudflarePublication: (publication: Record<string, unknown>) => boolean;
   lastAppliedPublicationRevision: { value: string };
   handlePublicationsDigest: (
-    digest: unknown[],
+    digest: ExternalField[],
     publicationRevision?: number | string | null,
-  ) => Promise<unknown>;
+  ) => Promise<ExternalField>;
+}
+
+function parsePublication(value: ExternalField): CloudflarePublication | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  const publication: CloudflarePublication = {};
+  const strings = [
+    ["trackName", parseExternalString(record.trackName)],
+    ["peerId", parseExternalString(record.peerId)],
+    ["userId", parseExternalString(record.userId)],
+    ["sessionId", parseExternalString(record.sessionId)],
+    ["source", parseExternalString(record.source)],
+    ["ownerSource", parseExternalString(record.ownerSource)],
+  ] as const;
+  for (const [key, stringValue] of strings)
+    if (stringValue !== null) publication[key] = stringValue;
+  const closed = parseExternalBoolean(record.closed);
+  const generation = parseExternalNumber(record.generation);
+  const connectionEpoch = parseExternalNumber(record.connectionEpoch);
+  if (closed !== null) publication.closed = closed;
+  if (generation !== null) publication.generation = generation;
+  if (connectionEpoch !== null) publication.connectionEpoch = connectionEpoch;
+  return publication;
 }
 
 function clientHandlers(reg: PublicationRegistryHandle): ClientHandlers {
@@ -49,15 +78,14 @@ function clientHandlers(reg: PublicationRegistryHandle): ClientHandlers {
     queueCloudflarePublication,
     lastAppliedPublicationRevision: lastApplied,
     handlePublicationsDigest: async (
-      digest: unknown[],
+      digest: ExternalField[],
       publicationRevision?: number | string | null,
     ) => {
       if (!Array.isArray(digest)) return;
-      const serverPublications: CloudflarePublication[] = [];
-      for (const entry of digest) {
-        if (!entry || typeof entry !== "object") continue;
-        serverPublications.push(entry as CloudflarePublication);
-      }
+      const serverPublications = digest.flatMap((entry) => {
+        const publication = parsePublication(entry);
+        return publication ? [publication] : [];
+      });
       const envelopeRevision = publicationRevision
         ? String(publicationRevision)
         : "0";

@@ -189,6 +189,7 @@
 </template>
 
 <script setup>
+import { nextTick } from "vue";
 import { useSettingsStore } from "~/stores/settings";
 import { playSystemSound } from "~/shared/system-sounds.ts";
 import {
@@ -261,7 +262,7 @@ const localScreenPreviewPaused = computed(
 );
 
 function currentFullscreenElement() {
-  if (typeof document === "undefined") return null;
+  if (!import.meta.client) return null;
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
 
@@ -286,7 +287,7 @@ function syncFullscreenState() {
 }
 
 async function exitFullscreen() {
-  if (typeof document === "undefined" || !currentFullscreenElement()) return;
+  if (!import.meta.client || !currentFullscreenElement()) return;
   const exit = document.exitFullscreen || document.webkitExitFullscreen;
   if (exit) await exit.call(document);
 }
@@ -327,7 +328,7 @@ function handleTouchEnd(event) {
 }
 
 function playVideoElement(element, label) {
-  if (!element?.srcObject || typeof element.play !== "function") return;
+  if (!element?.srcObject || !(element.play instanceof Function)) return;
   const playback = element.play();
   playback?.catch?.((error) =>
     console.warn(`[VideoFeed] ${label} playback failed`, error),
@@ -340,7 +341,7 @@ function drawNativeFrame(
   receiverIncarnationId = nativePendingReceiverId,
 ) {
   const canvas = nativeCanvasElement.value;
-  if (!frame || !canvas || typeof atob !== "function") return;
+  if (!frame || !canvas || !(globalThis.atob instanceof Function)) return;
   if (
     !isCurrentVideoFrame(
       { feedKey, receiverIncarnationId },
@@ -406,7 +407,10 @@ function drawNativeFrame(
 }
 
 function cancelNativeFrameAnimation() {
-  if (nativeFrameAnimation && typeof cancelAnimationFrame === "function")
+  if (
+    nativeFrameAnimation &&
+    globalThis.cancelAnimationFrame instanceof Function
+  )
     cancelAnimationFrame(nativeFrameAnimation);
   nativeFrameAnimation = 0;
 }
@@ -429,7 +433,7 @@ function scheduleNativeFrame() {
     nativeFrameAnimation
   )
     return;
-  if (typeof requestAnimationFrame !== "function") {
+  if (!(globalThis.requestAnimationFrame instanceof Function)) {
     drawNativeFrame();
     nativePendingFrame = null;
     nativePendingFeedKey = null;
@@ -484,12 +488,13 @@ function emitFirstFrame(fallback = false, observationMode) {
   if (!props.feedKey || !props.receiverIncarnationId || videoFirstFrameEmitted)
     return;
   videoFirstFrameEmitted = true;
-  emit("first-frame", {
+  const evidence = {
     feedKey: props.feedKey,
     receiverIncarnationId: props.receiverIncarnationId,
     fallback,
-    ...(observationMode ? { observationMode } : {}),
-  });
+  };
+  if (observationMode) Object.assign(evidence, { observationMode });
+  emit("first-frame", evidence);
 }
 
 function handleVideoReady() {
@@ -502,7 +507,7 @@ function handleVideoReady() {
   const receiverIncarnationId = props.receiverIncarnationId;
   if (!element || !stream || !track || !receiverIncarnationId) return;
   cancelVideoFrameEvidence();
-  if (element && typeof element.requestVideoFrameCallback === "function") {
+  if (element && element.requestVideoFrameCallback instanceof Function) {
     const callbackElement = element;
     const callbackStream = stream;
     const callbackTrack = track;
@@ -603,7 +608,7 @@ function enablePreview() {
   previewEnabled.value = true;
   if (props.local && props.native && props.source === "screen")
     emit("preview-change", true);
-  attachStream();
+  void nextTick(() => attachStream());
 }
 
 function notifyPreviewDemand() {
@@ -619,7 +624,7 @@ onMounted(() => {
   document.addEventListener("webkitfullscreenchange", syncFullscreenState);
   document.addEventListener("visibilitychange", handlePageVisible);
   window.addEventListener("pageshow", handlePageVisible);
-  if (props.native && typeof IntersectionObserver === "function") {
+  if (props.native && globalThis.IntersectionObserver instanceof Function) {
     nativeIntersectionObserver = new IntersectionObserver(([entry]) => {
       nativeFeedVisible = entry?.isIntersecting === true;
       if (nativeFeedVisible) scheduleNativeFrame();

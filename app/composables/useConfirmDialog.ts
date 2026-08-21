@@ -1,4 +1,5 @@
 import { readonly } from "vue";
+import { isExternalString } from "../shared/types/boundary.ts";
 
 export interface ConfirmDialogOptions {
   message: string;
@@ -38,8 +39,9 @@ export function useConfirmDialog() {
   function confirm(options: ConfirmDialogOptions | string): Promise<boolean> {
     if (!import.meta.client) return Promise.resolve(false);
 
-    const normalized =
-      typeof options === "string" ? { message: options } : options;
+    const normalized = isExternalString(options)
+      ? { message: options }
+      : options;
     const request: ConfirmDialogRequest = {
       id: `confirm-${Date.now()}-${nextRequestId++}`,
       message: normalized.message,

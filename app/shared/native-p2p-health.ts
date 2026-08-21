@@ -3,7 +3,6 @@ import {
   P2P_DISCONNECT_GRACE_MS,
   P2P_ICE_RESTART_TIMEOUT_MS,
   P2P_STABILITY_LIVENESS_TIMEOUT_MS,
-  countEnabledP2pSources,
   isP2pLivenessExpired,
   isViableP2pPair,
   mediaFlowSnapshot,
@@ -15,6 +14,8 @@ import type {
   NativeP2pConnectionState,
   NativeP2pHealthMesh,
 } from "./types/native-p2p.ts";
+import { isExternalRecord } from "./types/boundary.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 
 export function bindHealthChannel(
   mesh: NativeP2pHealthMesh,
@@ -25,10 +26,10 @@ export function bindHealthChannel(
   channel.onmessage = (event) => {
     let message: Record<string, unknown>;
     try {
-      const parsed: unknown = JSON.parse(event.data);
-      if (!parsed || typeof parsed !== "object") return;
-      message = parsed as Record<string, unknown>;
-    } catch (_) {
+      const parsed = JSON.parse(event.data);
+      if (!isExternalRecord(parsed)) return;
+      message = parsed;
+    } catch {
       return;
     }
     if (message.type === "health") {
@@ -43,7 +44,10 @@ export function bindHealthChannel(
             }),
           );
         } catch (error) {
-          mesh.fail("health-channel-send-failed", error);
+          mesh.fail(
+            "health-channel-send-failed",
+            asError(error, "Native P2P health channel send failed"),
+          );
         }
       }
     } else if (message.type === "health-ack") {
@@ -85,7 +89,10 @@ export function handleIceState(
         try {
           state.pc.restartIce();
         } catch (error) {
-          mesh.fail("ice-restart-failed", error);
+          mesh.fail(
+            "ice-restart-failed",
+            asError(error, "Native P2P ICE restart failed"),
+          );
           return;
         }
         state.disconnectTimer = setTimeout(() => {
@@ -146,7 +153,10 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
               JSON.stringify({ type: "health", sequence, sentAt: checkedAt }),
             );
           } catch (error) {
-            mesh.fail("health-channel-send-failed", error);
+            mesh.fail(
+              "health-channel-send-failed",
+              asError(error, "Native P2P health channel send failed"),
+            );
           }
         }
         if (
@@ -246,7 +256,7 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
           state.lastInboundBytes = flow.inboundBytes;
           if (state.selectedPair && !isViableP2pPair(state.selectedPair))
             mesh.fail("relay-candidate-selected");
-        } catch (_) {
+        } catch {
           state.selectedPair = null;
           state.mediaReady = false;
         }
@@ -258,7 +268,7 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
     }
   };
   const execute = () =>
-    run().catch((error: unknown) => mesh.fail("health-check-failed", error));
+    run().catch((error) => mesh.fail("health-check-failed", String(error)));
   execute();
   mesh.healthInterval = setInterval(
     execute,
@@ -298,43 +308,24 @@ export function checkQualification(mesh: NativeP2pHealthMesh) {
       type: "ready",
       epoch: mesh.epoch,
       qualifiedPeerIds: qualified.map((state) => state.peerId),
-      candidateReports: qualified.map((state) => ({
-        peerId: state.peerId,
-        localCandidateType:
-          state.selectedPair?.local &&
-          typeof state.selectedPair.local === "object"
-            ? String(
-                (state.selectedPair.local as Record<string, unknown>)
-                  .candidateType || "",
-              ) || null
-            : null,
-        remoteCandidateType:
-          state.selectedPair?.remote &&
-          typeof state.selectedPair.remote === "object"
-            ? String(
-                (state.selectedPair.remote as Record<string, unknown>)
-                  .candidateType || "",
-              ) || null
-            : null,
-        rttMs:
-          state.selectedPair?.currentRoundTripTime == null
-            ? null
-            : Number(state.selectedPair.currentRoundTripTime) * 1000,
-        protocol:
-          state.selectedPair?.local &&
-          typeof state.selectedPair.local === "object"
-            ? String(
-                (state.selectedPair.local as Record<string, unknown>)
-                  .protocol || "",
-              ) || null
-            : state.selectedPair?.remote &&
-                typeof state.selectedPair.remote === "object"
-              ? String(
-                  (state.selectedPair.remote as Record<string, unknown>)
-                    .protocol || "",
-                ) || null
-              : null,
-      })),
+      candidateReports: qualified.map((state) => {
+        const local = isExternalRecord(state.selectedPair?.local)
+          ? state.selectedPair.local
+          : null;
+        const remote = isExternalRecord(state.selectedPair?.remote)
+          ? state.selectedPair.remote
+          : null;
+        return {
+          peerId: state.peerId,
+          localCandidateType: String(local?.candidateType || "") || null,
+          remoteCandidateType: String(remote?.candidateType || "") || null,
+          rttMs:
+            state.selectedPair?.currentRoundTripTime == null
+              ? null
+              : Number(state.selectedPair.currentRoundTripTime) * 1000,
+          protocol: String(local?.protocol || remote?.protocol || "") || null,
+        };
+      }),
     })
   )
     mesh.readyReported = false;

@@ -16,23 +16,53 @@ import type {
 } from "./types/native-mediasoup.ts";
 import type { NativeDirection } from "./types/native-mediasoup-session.ts";
 import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalValue,
+} from "./types/boundary.ts";
+
+type NativeReceiveFrame = {
+  data: string;
+  eventId?: number | string;
+  timestamp?: number;
+  [key: string]: unknown;
+};
+
+function actionValue<T>(value: T): ExternalValue | null {
+  if (isExternalRecord(value)) return value;
+  if (!isExternalString(value)) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return isExternalRecord(parsed) || isExternalString(parsed) ? parsed : null;
+  } catch {
+    return value;
+  }
+}
+
+function actionRecord<T>(value: T): Record<string, unknown> {
+  const parsed = actionValue(value);
+  return isExternalRecord(parsed) ? parsed : {};
+}
+
+function nativeReceiveFrame(
+  payload: Record<string, unknown>,
+  data: string,
+  eventId: number | string | undefined,
+  timestamp: number,
+): NativeReceiveFrame {
+  const frame = Object.assign({}, payload, { data, eventId });
+  if (Number.isFinite(timestamp)) Object.assign(frame, { timestamp });
+  return frame;
+}
 
 export async function handleNativeAction(
   session: NativeMediasoupSfuSession,
   action: NativeAction,
 ) {
   if (!action || session.closed) return false;
-  let params: Record<string, unknown> =
-    action.params && typeof action.params === "object" ? action.params : {};
-  if (typeof action.params === "string")
-    params = JSON.parse(action.params) as Record<string, unknown>;
-  let state: Record<string, unknown> =
-    action.state && typeof action.state === "object" ? action.state : {};
-  if (typeof action.state === "string") {
-    try {
-      state = JSON.parse(action.state) as Record<string, unknown>;
-    } catch {}
-  }
+  const params = actionRecord(action.params);
+  const state = actionValue(action.state);
   const pointer = Number(action.transportPtr);
   if (action.kind === 1) {
     const directionValue =
@@ -98,10 +128,11 @@ export async function handleNativeAction(
       },
       "SFU producer publication",
     );
-    const result = (await acknowledgement) as Record<string, unknown>;
+    const result = await acknowledgement;
+    const producerId = isExternalRecord(result) ? result.id : undefined;
     await session.invoke("media_complete_produce", {
       actionId: Number(action.actionId),
-      producerId: result.id,
+      producerId,
     });
     return true;
   }
@@ -119,7 +150,7 @@ export async function handleNativeAction(
     }
     return true;
   }
-  if (state) {
+  if (state !== null) {
     const direction = session.transportPointers.get(pointer);
     if (direction) session._handleTransportState({ direction, state });
     return true;
@@ -145,7 +176,7 @@ export function handleReceiveEvent(
       session.localVideoFeeds.set(source, feed);
     }
     if (!feed) return false;
-    if (typeof event.data !== "string" || !event.data) return false;
+    if (!isExternalString(event.data) || !event.data) return false;
     session.localVideoFeeds.set(source, {
       ...feed,
       frame: {
@@ -166,14 +197,14 @@ export function handleReceiveEvent(
   if (event.kind === 1) return true;
   if (event.kind === 2) {
     if (entry.kind !== "video") return false;
-    if (typeof event.data !== "string" || !event.data) return false;
+    if (!isExternalString(event.data) || !event.data) return false;
     const timestamp = Number(payload.timestamp ?? payload.timestampMs);
-    const frame = {
-      ...payload,
-      data: event.data,
-      eventId: event.eventId,
-      ...(Number.isFinite(timestamp) ? { timestamp } : {}),
-    };
+    const frame = nativeReceiveFrame(
+      payload,
+      event.data,
+      event.eventId,
+      timestamp,
+    );
     if (!isPresentableVideoFrame(frame)) return false;
     const previousTimestamp = entry.lastFrameTimestamp;
     const nextTimestamp = Number(payload.timestamp ?? payload.timestampMs);

@@ -9,7 +9,9 @@ import {
   startQualificationTimeout,
   stopHealthChecks,
 } from "../native-p2p-health.ts";
+import type { OwnedErrorValue } from "../types/shared-utilities.ts";
 import type { NativeP2pMeshSurface } from "../types/native-p2p.ts";
+import { isExternalRecord, isExternalString } from "../types/boundary.ts";
 export class NativeP2pLifecycleMethods {
   startQualificationTimeout(this: NativeP2pMeshSurface) {
     return startQualificationTimeout(this);
@@ -49,6 +51,14 @@ export class NativeP2pLifecycleMethods {
         packetsLost + packetsReceived > 0
           ? (packetsLost * 100) / (packetsLost + packetsReceived)
           : null;
+      const localProtocol =
+        isExternalRecord(pair?.local) && isExternalString(pair.local.protocol)
+          ? pair.local.protocol
+          : null;
+      const remoteProtocol =
+        isExternalRecord(pair?.remote) && isExternalString(pair.remote.protocol)
+          ? pair.remote.protocol
+          : null;
       edges.push({
         peerId: state.peerId,
         state:
@@ -58,10 +68,7 @@ export class NativeP2pLifecycleMethods {
               ? "failed"
               : "probing",
         candidatePair: pair,
-        network:
-          (pair?.local as Record<string, unknown> | null)?.protocol ||
-          (pair?.remote as Record<string, unknown> | null)?.protocol ||
-          null,
+        network: localProtocol || remoteProtocol,
         rtt:
           pair?.currentRoundTripTime == null
             ? null
@@ -148,6 +155,7 @@ export class NativeP2pLifecycleMethods {
       for (const [, receiver] of state.audioReceivers) {
         if (!receiver) continue;
         try {
+          /* SAFETY: This native-compatible receiver exposes the optional jitter buffer properties checked below. */
           const configurableReceiver = receiver as RTCRtpReceiver &
             Record<string, unknown>;
           if (configurableReceiver.jitterBufferMinimumDelay !== undefined)
@@ -156,12 +164,12 @@ export class NativeP2pLifecycleMethods {
           if (configurableReceiver.jitterBufferTarget !== undefined)
             configurableReceiver.jitterBufferTarget =
               this.jitterBufferTargetDelay;
-        } catch (_) {}
+        } catch {}
       }
     }
   }
 
-  fail(this: NativeP2pMeshSurface, reason: string, error?: unknown) {
+  fail(this: NativeP2pMeshSurface, reason: string, error?: OwnedErrorValue) {
     if (this.mode !== "probing" && this.mode !== "p2p") return;
     const key = `${this.epoch}:${this.mode}`;
     if (this.failureReportedKey === key) return;
@@ -210,8 +218,7 @@ export class NativeP2pLifecycleMethods {
   closeAll(this: NativeP2pMeshSurface) {
     this.mode = "idle";
     this.stopHealthChecks();
-    for (const peerId of [...this.connections.keys()])
-      this.closeConnection(peerId);
+    for (const peerId of this.connections.keys()) this.closeConnection(peerId);
     this.remoteSources.clear();
     this.remoteSourceOwners.clear();
     this.remoteSourceGenerations.clear();
@@ -221,4 +228,5 @@ export class NativeP2pLifecycleMethods {
   }
 }
 
-export interface NativeP2pLifecycleMethods extends NativeP2pMeshSurface {}
+export type NativeP2pLifecycleContract = NativeP2pMeshSurface &
+  NativeP2pLifecycleMethods;

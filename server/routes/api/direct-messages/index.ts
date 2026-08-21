@@ -4,6 +4,11 @@ import {
   openDirectConversation,
 } from "../../../utils/direct-messages-manager.ts";
 import { enforceRateLimit } from "../../../utils/rate-limit.ts";
+import {
+  parseExternalError,
+  parseExternalRecord,
+  parseExternalString,
+} from "../../../../shared/types/external.ts";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
@@ -18,24 +23,22 @@ export default defineEventHandler(async (event) => {
         60,
         60 * 1000,
       );
-      const body = (await readBody(event)) as { friendId?: unknown };
-      if (!body?.friendId)
+      const body = parseExternalRecord(await readBody(event));
+      const friendId = parseExternalString(body?.friendId);
+      if (!friendId)
         throw createError({
           statusCode: 400,
           statusMessage: "friendId is required",
         });
-      return await openDirectConversation(userId, String(body.friendId));
+      return await openDirectConversation(userId, friendId);
     }
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
-  } catch (error: unknown) {
-    const errorRecord =
-      error && typeof error === "object"
-        ? (error as { statusCode?: number; status?: number; message?: string })
-        : {};
-    if (errorRecord.statusCode || errorRecord.status) throw error;
+  } catch (error) {
+    const errorDetails = parseExternalError(error);
+    if (errorDetails.statusCode || errorDetails.status) throw error;
     throw createError({
       statusCode: 400,
-      statusMessage: errorRecord.message || "Direct message request failed",
+      statusMessage: errorDetails.message || "Direct message request failed",
     });
   }
 });

@@ -1,5 +1,6 @@
 import { apiErrorMessage } from "./api-errors.ts";
 import type { ChatMessageRecord } from "~~/shared/types/message.ts";
+import { isExternalNumber, isExternalString } from "./types/boundary.ts";
 
 export function reconcileSentMessage<T extends ChatMessageRecord>(
   messages: T[],
@@ -110,19 +111,17 @@ export function pendingMessageClientId(message: ChatMessageRecord): string {
   return id.startsWith("pending_") ? id.slice("pending_".length) : "";
 }
 
-export function chatApiErrorMessage(
-  text: unknown,
+export function chatApiErrorMessage<T>(
+  text: T,
   status: number | null | undefined,
 ) {
   return apiErrorMessage(text, status, "Chat request failed");
 }
 
-export function isValidMessageTimestamp(value: unknown) {
+export function isValidMessageTimestamp<T>(value: T) {
   if (!value) return false;
   const dateValue =
-    typeof value === "string" ||
-    typeof value === "number" ||
-    value instanceof Date
+    isExternalString(value) || isExternalNumber(value) || value instanceof Date
       ? value
       : String(value);
   return Number.isFinite(new Date(dateValue).getTime());

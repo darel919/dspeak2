@@ -4,6 +4,22 @@ import type {
   TopologyProviderActionsContext,
   TopologyProviderSocket,
 } from "../types/topology-controller.ts";
+import { isExternalRecord, isExternalString } from "../types/boundary.ts";
+
+type ProviderEventData = {
+  provider: string;
+  providerId?: string;
+  epoch: number;
+  sourceRevision: number;
+  reason: string;
+};
+
+function providerFailureReason<T>(value: T): string {
+  if (value instanceof Error) return value.message;
+  if (isExternalRecord(value) && isExternalString(value.reason))
+    return value.reason;
+  return "Provider transition failed";
+}
 
 export function createTopologyProviderActions({
   MediasoupProviderSocket,
@@ -172,25 +188,19 @@ export function createTopologyProviderActions({
         providerTicketIdentity = null;
       }
     };
-    const reportFailure = (providerError: unknown) => {
+    const reportFailure = <T>(providerError: T) => {
       if (failureNotified) return;
       failureNotified = true;
+      const failure: ProviderEventData = {
+        provider,
+        epoch,
+        sourceRevision: resolvedSourceRevision,
+        reason: providerFailureReason(providerError),
+      };
+      if (providerId) failure.providerId = providerId;
       send({
         type: "provider-failure",
-        data: {
-          provider,
-          ...(providerId ? { providerId } : {}),
-          epoch,
-          sourceRevision: resolvedSourceRevision,
-          reason:
-            providerError instanceof Error
-              ? providerError.message
-              : providerError &&
-                  typeof providerError === "object" &&
-                  "reason" in providerError
-                ? String(providerError.reason)
-                : "Provider transition failed",
-        },
+        data: failure,
       });
     };
     const settleTicketWaiter = (ready: boolean) => {
@@ -200,12 +210,16 @@ export function createTopologyProviderActions({
       if (
         send({
           type: "provider-ready",
-          data: {
-            provider,
-            ...(providerId ? { providerId } : {}),
-            epoch,
-            sourceRevision: resolvedSourceRevision,
-          },
+          data: (() => {
+            const ready: ProviderEventData = {
+              provider,
+              epoch,
+              sourceRevision: resolvedSourceRevision,
+              reason: "provider-ready",
+            };
+            if (providerId) ready.providerId = providerId;
+            return ready;
+          })(),
         }) === false
       )
         throw new Error("Media control signaling unavailable");
@@ -259,8 +273,8 @@ export function createTopologyProviderActions({
       }
       if (
         provider !== "mediasoup" ||
-        typeof data.signalingUrl !== "string" ||
-        typeof data.ticket !== "string"
+        !isExternalString(data.signalingUrl) ||
+        !isExternalString(data.ticket)
       )
         throw new Error("Media provider ticket is incomplete");
       getProviderSocket()?.close();
@@ -269,13 +283,15 @@ export function createTopologyProviderActions({
         onMessage: (type: string, payload: Record<string, unknown>) => {
           if (!isCurrentAttempt() || getProviderSocket() !== socket) return;
           if (type === "provider-draining") {
-            const failure = {
+            const failure: ProviderEventData = {
               provider,
-              ...(providerId ? { providerId } : {}),
               epoch,
               sourceRevision: resolvedSourceRevision,
-              reason: payload?.reason || "provider-draining",
+              reason: isExternalString(payload?.reason)
+                ? payload.reason
+                : "provider-draining",
             };
+            if (providerId) failure.providerId = providerId;
             socket?.close();
             setProviderSocket(null);
             handleProviderFailure(failure);
@@ -284,7 +300,7 @@ export function createTopologyProviderActions({
           }
           return getMessageHandler(type)?.(payload || {});
         },
-        onFailure: (providerError: unknown) => {
+        onFailure: <T>(providerError: T) => {
           if (!isCurrentAttempt() || getProviderSocket() !== socket) return;
           clearProviderSocket();
           error.value =
@@ -309,7 +325,7 @@ export function createTopologyProviderActions({
       providerTicketIdentity = { ...identity, socket };
       sendProviderReady();
       settleTicketWaiter(true);
-    } catch (providerError: unknown) {
+    } catch (providerError) {
       if (!isCurrentAttempt()) {
         try {
           socket?.close();

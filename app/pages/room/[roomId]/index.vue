@@ -41,7 +41,7 @@ let resizeHandler = null;
 let roomAccessGeneration = 0;
 
 onMounted(() => {
-  if (typeof window !== "undefined") {
+  if (import.meta.client) {
     const checkMobile = () => {
       isMobile.value = window.innerWidth < MOBILE_BREAKPOINT_PX;
     };
@@ -82,7 +82,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   roomAccessGeneration += 1;
-  if (typeof window !== "undefined" && resizeHandler) {
+  if (import.meta.client && resizeHandler) {
     window.removeEventListener("resize", resizeHandler);
   }
 });

@@ -1,3 +1,5 @@
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { RtpStatsSample } from "./rtc-media-stats.ts";
 import type { PeerMetric } from "../../../shared/types/media.ts";
@@ -60,9 +62,9 @@ export interface RtcStatsSnapshot {
 
 export interface RtcStatsSession {
   getWebRTCStatsSnapshot: () => Promise<RtcStatsSnapshot>;
-  getOutboundRtpStats?: () => Promise<unknown>;
-  getInboundRtpStats?: () => Promise<unknown>;
-  getWebRTCDiagnosticStats?: () => Promise<unknown>;
+  getOutboundRtpStats?: () => Promise<MediaCommandResult>;
+  getInboundRtpStats?: () => Promise<MediaCommandResult>;
+  getWebRTCDiagnosticStats?: () => Promise<MediaCommandResult>;
 }
 
 export interface RtcDiagnosticError {

@@ -1,6 +1,6 @@
-export function normalizeMediaOwnerSource(
-  source: unknown,
-  ownerSource: unknown,
+export function normalizeMediaOwnerSource<TSource, TOwnerSource>(
+  source: TSource,
+  ownerSource: TOwnerSource,
 ): "system-audio" | "screen" | null {
   if (source !== "screen-audio") return null;
   return ownerSource === "system-audio" ? "system-audio" : "screen";

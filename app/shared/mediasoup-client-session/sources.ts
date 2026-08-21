@@ -5,8 +5,37 @@ import type {
   MediasoupProducerLike,
   MediasoupSourceEntry,
 } from "../types/mediasoup-client.ts";
+import { asError } from "../native-mediasoup-utils.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
 
-export const methods: Record<string, unknown> = {
+type RequestedVideoSettings = {
+  qualityPriority?: "framerate" | "resolution";
+  maxBitrate?: number | null;
+};
+
+function requestedVideoSettings<T>(value: T): RequestedVideoSettings {
+  if (!isExternalRecord(value)) return {};
+  return {
+    qualityPriority:
+      value.qualityPriority === "framerate" ||
+      value.qualityPriority === "resolution"
+        ? value.qualityPriority
+        : undefined,
+    maxBitrate: isExternalNumber(value.maxBitrate) ? value.maxBitrate : null,
+  };
+}
+
+type SourceAppData = {
+  source: string;
+  ownerSource?: string;
+  captureSelection?: Record<string, unknown>;
+};
+
+export const methods = {
   async addSource(
     this: MediasoupClientSessionLike,
     entry: MediasoupSourceEntry,
@@ -22,7 +51,7 @@ export const methods: Record<string, unknown> = {
   enqueueSourceOperation(
     this: MediasoupClientSessionLike,
     source: string,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
@@ -59,7 +88,7 @@ export const methods: Record<string, unknown> = {
             this.sourceTransmission.get(entry.source),
           );
         } catch (rollbackError) {
-          this.onError?.(rollbackError);
+          this.onError?.(asError(rollbackError, "SFU source rollback failed"));
         }
         track.stop();
         if (previousSource) this.sources.set(entry.source, previousSource);
@@ -120,20 +149,18 @@ export const methods: Record<string, unknown> = {
     const mediaRevision = this.mediaRevision;
     const track = entry.track.clone();
     const settings = track.getSettings?.() || {};
-    const requestedVideo = (this.getVideoSettings?.(entry.source) || {}) as {
-      qualityPriority?: "framerate" | "resolution";
-      maxBitrate?: number | null;
-    };
+    const requestedVideo = requestedVideoSettings(
+      this.getVideoSettings?.(entry.source),
+    );
     const selectedBitrate = Number(
       entry.captureSelection?.audio?.maxBitrateBps || entry.roomBitrateBps,
     );
-    const appData = {
+    const appData: SourceAppData = {
       source: entry.source,
-      ...(entry.ownerSource ? { ownerSource: entry.ownerSource } : {}),
-      ...(entry.captureSelection
-        ? { captureSelection: entry.captureSelection }
-        : {}),
     };
+    if (entry.ownerSource) appData.ownerSource = entry.ownerSource;
+    if (entry.captureSelection)
+      appData.captureSelection = entry.captureSelection;
     const options =
       track.kind === "audio"
         ? {
@@ -242,4 +269,4 @@ export const methods: Record<string, unknown> = {
     });
     return true;
   },
-};
+} satisfies Record<string, unknown>;

@@ -8,7 +8,6 @@ import {
   createSFURoute,
   normalizeMediaPathMetrics,
   ConnectionMode,
-  MediaRouteKind,
   P2PPath,
   SFUProvider,
 } from "../shared/media-route.ts";

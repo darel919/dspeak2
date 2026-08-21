@@ -11,7 +11,7 @@ export const MEDIA_SIGNALING_HEARTBEAT_INTERVAL_MS = 5_000;
 export const MEDIA_SIGNALING_HEARTBEAT_TIMEOUT_MS = 15_000;
 
 export function isMediaSignalingServerHello(
-  data: unknown,
+  data: ExternalField,
 ): data is MediaSignalingRecord & {
   protocolVersion: number;
   contractRevision: number;
@@ -20,22 +20,29 @@ export function isMediaSignalingServerHello(
   heartbeatTimeoutMs: number;
   serverTime: number;
 } {
-  if (!data || typeof data !== "object") return false;
-  const record = data as MediaSignalingRecord;
+  const record = parseExternalRecord(data);
+  if (record === null) return false;
+  const mediaSessionId = parseExternalString(record.mediaSessionId);
+  const heartbeatIntervalMs = parseExternalNumberLiteral(
+    record.heartbeatIntervalMs,
+  );
+  const heartbeatTimeoutMs = parseExternalNumberLiteral(
+    record.heartbeatTimeoutMs,
+  );
+  const serverTime = parseExternalNumberLiteral(record.serverTime);
   return (
     record.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
     record.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
-    typeof record.mediaSessionId === "string" &&
-    record.mediaSessionId.length > 0 &&
-    record.mediaSessionId.length <= 160 &&
-    typeof record.heartbeatIntervalMs === "number" &&
-    Number.isInteger(record.heartbeatIntervalMs) &&
-    record.heartbeatIntervalMs >= 1_000 &&
-    typeof record.heartbeatTimeoutMs === "number" &&
-    Number.isInteger(record.heartbeatTimeoutMs) &&
-    record.heartbeatTimeoutMs > record.heartbeatIntervalMs &&
-    typeof record.serverTime === "number" &&
-    Number.isFinite(record.serverTime)
+    mediaSessionId !== null &&
+    mediaSessionId.length > 0 &&
+    mediaSessionId.length <= 160 &&
+    heartbeatIntervalMs !== null &&
+    Number.isInteger(heartbeatIntervalMs) &&
+    heartbeatIntervalMs >= 1_000 &&
+    heartbeatTimeoutMs !== null &&
+    Number.isInteger(heartbeatTimeoutMs) &&
+    heartbeatTimeoutMs > heartbeatIntervalMs &&
+    serverTime !== null
   );
 }
 
@@ -65,8 +72,7 @@ export function isMediaSignalingClientHello(
   return (
     data?.protocolVersion === MEDIA_SIGNALING_PROTOCOL_VERSION &&
     data.contractRevision === MEDIA_SIGNALING_CONTRACT_REVISION &&
-    typeof data.mediaSessionId === "string" &&
-    data.mediaSessionId === mediaSessionId
+    parseExternalString(data.mediaSessionId) === mediaSessionId
   );
 }
 
@@ -132,3 +138,9 @@ export const MEDIA_CONTROL_MESSAGE_TYPES = {
   CLOUDFLARE_PUBLICATION_AVAILABLE: "cloudflare-publication-available",
   PARTICIPANT_SFU_RTT: "participant-sfu-rtt",
 };
+import {
+  parseExternalNumberLiteral,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "./types/external.ts";

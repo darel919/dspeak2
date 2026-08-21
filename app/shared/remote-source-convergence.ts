@@ -1,3 +1,5 @@
+import { isExternalNumber, isExternalString } from "./types/boundary.ts";
+
 export type RemoteSourceProvider =
   "p2p" | "sfu" | "cloudflare-realtime" | "native-p2p" | "native-sfu";
 
@@ -150,9 +152,8 @@ function sourceKind(source: string): RemoteSourceKind {
   return source === "camera" || source === "screen" ? "video" : "audio";
 }
 
-function receiverIdentityPart(value: unknown): string {
-  if (typeof value === "string" || typeof value === "number")
-    return String(value);
+function receiverIdentityPart<T>(value: T): string {
+  if (isExternalString(value) || isExternalNumber(value)) return String(value);
   return "";
 }
 
@@ -363,7 +364,11 @@ export function createRemoteSourceConvergenceState(
   };
 }
 
-const VALID_TRANSITIONS: Record<RemoteSourcePhase, RemoteSourcePhase[]> = {
+type RemoteSourceTransitionMap = {
+  [phase in RemoteSourcePhase]: readonly RemoteSourcePhase[];
+};
+
+const VALID_TRANSITIONS: RemoteSourceTransitionMap = {
   "not-announced": ["announced", "retired", "failed"],
   announced: [
     "publication-discovered",
@@ -673,7 +678,7 @@ export function scheduleFirstFrameCallback(
   state.firstFrameEvidence.element = element;
   state.firstFrameEvidence.stream = stream;
   state.firstFrameEvidence.track = track;
-  if (typeof element.requestVideoFrameCallback !== "function") return;
+  if (!(element.requestVideoFrameCallback instanceof Function)) return;
   const handle = element.requestVideoFrameCallback(() => {
     if (
       state.firstFrameEvidence.callbackHandle !== handle ||

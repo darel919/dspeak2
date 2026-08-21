@@ -6,23 +6,42 @@ import type {
   StreamMetadataDatabase,
   StreamSongResult,
 } from "../types/stream-metadata.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 const ALBUM_ART_DIR = "data/album-art";
 
 const ITUNES_SEARCH_URL = "https://itunes.apple.com/search";
 
-export function normalizeSongTitle(str: unknown): string {
-  if (typeof str !== "string") return "";
-  return str.trim().toLowerCase().replace(/\s+/g, " ");
+export function normalizeSongTitle(str: ExternalField | undefined): string {
+  const text = parseExternalString(str);
+  return text ? text.trim().toLowerCase().replace(/\s+/g, " ") : "";
 }
 
-export function normalizeArtist(str: unknown): string {
-  if (typeof str !== "string") return "";
-  return str.trim().toLowerCase().replace(/\s+/g, " ");
+export function normalizeArtist(str: ExternalField | undefined): string {
+  const text = parseExternalString(str);
+  return text ? text.trim().toLowerCase().replace(/\s+/g, " ") : "";
 }
 
 export function getAlbumArtPath(songId: string): string {
   return join(ALBUM_ART_DIR, `${songId}.jpg`);
+}
+
+function parseItunesSongRecord(
+  value: ExternalField | undefined,
+): ItunesSongRecord | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  return {
+    trackName: parseExternalString(record.trackName) ?? undefined,
+    artistName: parseExternalString(record.artistName) ?? undefined,
+    collectionName: parseExternalString(record.collectionName) ?? undefined,
+    artworkUrl100: parseExternalString(record.artworkUrl100) ?? undefined,
+  };
 }
 
 export async function ensureAlbumArtDir() {
@@ -65,7 +84,7 @@ export async function logPlayToHistory(
   userId: string | null | undefined,
   playedAt: string | null | undefined,
   duration: number | null | undefined,
-): Promise<unknown> {
+): Promise<ExternalField> {
   if (!pb || !songId || !channelId) return null;
 
   return pb.collection("dspeak_stream_playlog").create({
@@ -92,29 +111,31 @@ async function lookupCachedSong(
         `title = '${escapedTitle}' && artist = '${escapedArtist}'`,
       );
 
-    const song = record as {
-      id?: string;
-      title?: string;
-      artist?: string;
-      album?: string | null;
-      album_art_path?: string | null;
-      itunes_artwork_url?: string | null;
-    };
-    if (!song.id || !song.title || !song.artist) return null;
+    const song = parseExternalRecord(record);
+    if (!song) return null;
+    const id = parseExternalString(song.id);
+    const title = parseExternalString(song.title);
+    const artist = parseExternalString(song.artist);
+    const album = parseExternalString(song.album);
+    const albumArtPath = parseExternalString(song.album_art_path);
+    const artworkUrl = parseExternalString(song.itunes_artwork_url);
+    if (!id || !title || !artist) return null;
     return {
-      songId: song.id,
-      title: song.title,
-      artist: song.artist,
-      album: song.album || null,
-      albumArtUrl: song.album_art_path
-        ? `/api/assets/album-art/${song.id}`
-        : song.itunes_artwork_url?.replace("100x100bb.jpg", "192x192bb.jpg") ||
-          null,
+      songId: id,
+      title,
+      artist,
+      album,
+      albumArtUrl: albumArtPath
+        ? `/api/assets/album-art/${id}`
+        : artworkUrl?.replace("100x100bb.jpg", "192x192bb.jpg") || null,
       cached: true,
     };
-  } catch (error: unknown) {
-    const value = error as { status?: number; response?: { status?: number } };
-    if (value.status === 404 || value.response?.status === 404) return null;
+  } catch (error) {
+    const value = parseExternalRecord(error);
+    const response = parseExternalRecord(value?.response);
+    const status = parseExternalNumber(value?.status);
+    const responseStatus = parseExternalNumber(response?.status);
+    if (status === 404 || responseStatus === 404) return null;
     console.error("[StreamMetadata] cache lookup failed", error);
     return null;
   }
@@ -150,14 +171,10 @@ async function fetchFromItunes(
       );
     }
 
-    const data: unknown = await response.json();
-    if (
-      !data ||
-      typeof data !== "object" ||
-      !("results" in data) ||
-      !Array.isArray(data.results) ||
-      data.results.length === 0
-    ) {
+    const data = parseExternalRecord(await response.json());
+    const result = data && Array.isArray(data.results) ? data.results[0] : null;
+    const parsedResult = parseItunesSongRecord(result);
+    if (!parsedResult) {
       return buildFallbackResult(
         normalizedTitle,
         normalizedArtist,
@@ -166,8 +183,8 @@ async function fetchFromItunes(
       );
     }
 
-    itunesResult = data.results[0] as ItunesSongRecord;
-  } catch (error: unknown) {
+    itunesResult = parsedResult;
+  } catch (error) {
     console.error("[StreamMetadata] iTunes search error", error);
     return buildFallbackResult(
       normalizedTitle,
@@ -263,7 +280,7 @@ async function downloadAlbumArt(url: string): Promise<string | null> {
     const filePath = getAlbumArtPath(tempId);
     await writeFile(filePath, buffer);
     return filePath;
-  } catch (error: unknown) {
+  } catch (error) {
     console.error("[StreamMetadata] album art download error", error);
     return null;
   }
@@ -282,9 +299,9 @@ async function persistSongRecord(
       itunes_artwork_url: itunesArtworkUrl,
       last_updated: new Date().toISOString(),
     });
-    const value = record as { id?: string };
-    return value.id || null;
-  } catch (error: unknown) {
+    const value = parseExternalRecord(record);
+    return parseExternalString(value?.id);
+  } catch (error) {
     console.error("[StreamMetadata] failed to persist song record", error);
     return null;
   }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ExternalError } from "../shared/types/external.ts";
 
 const testDatabaseUrl = process.env.DSPEAK_TEST_DATABASE_URL || "";
 const enabled = Boolean(testDatabaseUrl);
@@ -95,7 +96,7 @@ test(
           displayName: "Conflict B",
           avatarKey: null,
         }),
-      (error: unknown) => error instanceof EmailIdentityConflictError,
+      (error: ExternalError) => error instanceof EmailIdentityConflictError,
     );
   },
 );

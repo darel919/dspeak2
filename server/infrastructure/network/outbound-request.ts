@@ -108,9 +108,10 @@ export function parseOutboundHttpsUrl(
 export async function resolvePublicOutboundAddresses(
   hostname: string,
 ): Promise<Array<{ address: string; family: 4 | 6 }>> {
-  if (isIP(hostname))
+  const hostnameFamily = isIP(hostname);
+  if (hostnameFamily)
     return isPublicOutboundAddress(hostname)
-      ? [{ address: hostname, family: isIP(hostname) as 4 | 6 }]
+      ? [{ address: hostname, family: hostnameFamily === 4 ? 4 : 6 }]
       : [];
   const addresses = await lookup(hostname, {
     all: true,
@@ -118,7 +119,10 @@ export async function resolvePublicOutboundAddresses(
   });
   return addresses
     .filter(({ address }) => isPublicOutboundAddress(address))
-    .map(({ address, family }) => ({ address, family: family as 4 | 6 }));
+    .map(({ address, family }) => ({
+      address,
+      family: family === 4 ? 4 : 6,
+    }));
 }
 
 export async function assertSafeOutboundUrl(
@@ -353,7 +357,9 @@ export async function fetchPublicBytes(
   return fetchBytes(value, maxRedirects);
 }
 
-export function configuredOutboundHosts(value: unknown): string[] {
+import type { ExternalField } from "../../../shared/types/external.ts";
+
+export function configuredOutboundHosts(value: ExternalField): string[] {
   return String(value || "")
     .split(",")
     .map((host) => host.trim().toLowerCase())

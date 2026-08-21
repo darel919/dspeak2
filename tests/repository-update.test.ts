@@ -7,9 +7,10 @@ import {
   normalizeCommit,
   normalizeRepository,
 } from "../shared/app-build.ts";
+import { createUnavailableSnapshot } from "../server/utils/repository-update.ts";
 
 const [
-  buildInfo,
+  _buildInfo,
   nuxtConfig,
   desktopNuxtConfig,
   route,
@@ -112,6 +113,7 @@ test("build identity normalizes source metadata without exposing arbitrary value
   assert.equal(normalizeCommit("C".repeat(40)), "c".repeat(40));
   assert.equal(normalizeCommit("not-a-commit"), null);
   assert.equal(normalizeCommit("1234567", { short: true }), "1234567");
+  assert.equal(normalizeCommit(1_234_567, { short: true }), null);
   assert.equal(normalizeBranch("feature/updates"), "feature/updates");
   assert.equal(normalizeBranch("bad branch"), "next");
   assert.equal(
@@ -141,6 +143,20 @@ test("build identity normalizes source metadata without exposing arbitrary value
       updateBranch: "next",
     },
   );
+});
+
+test("repository update metadata rejects numeric build commits", () => {
+  const snapshot = createUnavailableSnapshot(
+    { commit: 1_234_567 },
+    { commit: 7_654_321 },
+    "darel919/dspeak2",
+    "next",
+  );
+
+  assert.equal(snapshot.client.commit, null);
+  assert.equal(snapshot.client.shortCommit, null);
+  assert.equal(snapshot.deployed.commit, null);
+  assert.equal(snapshot.deployed.shortCommit, null);
 });
 
 test("web and desktop builds embed the same commit-aware identity", () => {

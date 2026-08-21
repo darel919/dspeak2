@@ -1,9 +1,11 @@
+import type { MediaCommandResult } from "./boundary.ts";
+
 export interface MediaCleanupCapture {
-  stopAll: () => unknown;
+  stopAll: () => MediaCommandResult;
 }
 
 export interface MediaCleanupHandoff {
-  clear: () => unknown;
+  clear: () => MediaCommandResult;
 }
 
 export interface MediaCleanupRef<T> {
@@ -12,10 +14,10 @@ export interface MediaCleanupRef<T> {
 
 export interface MediaSessionCleanupOptions {
   capture: MediaCleanupCapture;
-  getP2pMesh: () => unknown;
-  getSfu: () => unknown;
+  getP2pMesh: () => MediaCommandResult;
+  getSfu: () => MediaCommandResult;
   handoff: MediaCleanupHandoff;
-  socket?: { close: () => unknown } | null;
+  socket?: { close: () => MediaCommandResult } | null;
 }
 
 export interface MediaTelemetryResetOptions {
@@ -29,10 +31,10 @@ export interface MediaTelemetryResetOptions {
 }
 
 export interface MediaSignalingCloseOptions {
-  closeProviders?: () => unknown;
+  closeProviders?: () => MediaCommandResult;
   mediaConnectionState: MediaCleanupRef<string>;
-  onRecovering?: () => unknown;
+  onRecovering?: () => MediaCommandResult;
   protocolRejected: boolean;
-  resetMediaState?: () => unknown;
-  resetTelemetry?: () => unknown;
+  resetMediaState?: () => MediaCommandResult;
+  resetTelemetry?: () => MediaCommandResult;
 }

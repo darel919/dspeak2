@@ -5,6 +5,12 @@ import type {
   RoomPermission,
   RoomRole,
 } from "./types/room.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "./types/external.ts";
 
 export const ROOM_PERMISSIONS = Object.freeze([
   "room.update_identity",
@@ -91,15 +97,16 @@ export const DEFAULT_ROLE_TEMPLATES = Object.freeze([
   },
 ]);
 
-export function normalizePermissions(value: unknown): RoomPermission[] {
+export function normalizePermissions(value: ExternalField): RoomPermission[] {
   const permissions = Array.isArray(value) ? value : [];
   return [
     ...new Set(
-      permissions.filter(
-        (item): item is RoomPermission =>
-          typeof item === "string" &&
-          ROOM_PERMISSIONS.some((permission) => permission === item),
-      ),
+      permissions.flatMap((item) => {
+        const permission = parseExternalString(item);
+        return permission !== null && ROOM_PERMISSIONS.includes(permission)
+          ? [permission]
+          : [];
+      }),
     ),
   ];
 }
@@ -177,36 +184,45 @@ export function canModerateVoiceMember(
   );
 }
 
-export function normalizeRoomAccent(value: unknown): RoomAccent {
-  return ROOM_ACCENTS.some((accent) => accent === value)
-    ? (value as RoomAccent)
-    : DEFAULT_ROOM_ACCENT;
+export function normalizeRoomAccent(value: ExternalField): RoomAccent {
+  const accent = parseExternalString(value);
+  switch (accent) {
+    case "cobalt":
+    case "cyan":
+    case "violet":
+    case "magenta":
+    case "orange":
+    case "lime":
+      return accent;
+    default:
+      return DEFAULT_ROOM_ACCENT;
+  }
 }
 
 export function normalizeAttenuation(value: AttenuationInput = {}) {
-  value = value && typeof value === "object" ? value : {};
+  const record = parseExternalRecord(value) ?? {};
   return {
-    enabled: value.enabled !== false,
-    reductionPercent: boundedNumber(value.reductionPercent, 65, 0, 100),
+    enabled: record.enabled !== false,
+    reductionPercent: boundedNumber(record.reductionPercent, 65, 0, 100),
     sensitivity:
-      value.sensitivity === "relaxed" ||
-      value.sensitivity === "standard" ||
-      value.sensitivity === "responsive"
-        ? value.sensitivity
+      record.sensitivity === "relaxed" ||
+      record.sensitivity === "standard" ||
+      record.sensitivity === "responsive"
+        ? record.sensitivity
         : "standard",
-    attackMs: boundedNumber(value.attackMs, 120, 20, 2000),
-    releaseMs: boundedNumber(value.releaseMs, 650, 50, 5000),
+    attackMs: boundedNumber(record.attackMs, 120, 20, 2000),
+    releaseMs: boundedNumber(record.releaseMs, 650, 50, 5000),
   };
 }
 
 function boundedNumber(
-  value: unknown,
+  value: ExternalField,
   fallback: number,
   min: number,
   max: number,
 ) {
-  const number = Number(value);
-  return Number.isFinite(number) && number >= min && number <= max
+  const number = parseExternalNumber(value);
+  return number !== null && number >= min && number <= max
     ? Math.round(number)
     : fallback;
 }

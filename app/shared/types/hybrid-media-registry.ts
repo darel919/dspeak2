@@ -1,3 +1,5 @@
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { AttenuationReportInput } from "../media-attenuation-reporter.ts";
 import type {
@@ -34,8 +36,8 @@ export interface RemoteMediaEntry extends RegistryEntry {
   trackName?: string;
   cloudflareSessionId?: string;
   cloudflareTrackName?: string;
-  receiver?: { getStats?: () => Promise<unknown> };
-  consumer?: { getStats?: () => Promise<unknown> };
+  receiver?: { getStats?: () => Promise<MediaCommandResult> };
+  consumer?: { getStats?: () => Promise<MediaCommandResult> };
   nativeTrackHandle?: unknown;
   logicalStreamId?: string;
   variantId?: string;
@@ -115,5 +117,5 @@ export interface HybridMediaRegistryOptions {
     attempt: number,
     signal: AbortSignal,
   ) => Promise<boolean> | boolean;
-  onReceiverFailed?: (entry: RemoteMediaEntry) => unknown;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => MediaCommandResult;
 }

@@ -11,6 +11,10 @@ import {
   normalizeMediaPopupFeed,
   type MediaPopupFeed,
 } from "~/shared/media-popouts.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 
 type MediaPopupTauriApi = NonNullable<
   Awaited<ReturnType<typeof getMediaPopupTauriApi>>
@@ -66,19 +70,13 @@ function createDesktopMediaPopouts() {
       if (!api || unlisten.length > 0) return api;
       unlisten.push(
         await api.listen(MEDIA_POPUP_EVENTS.closed, ({ payload }) => {
-          const record =
-            payload && typeof payload === "object"
-              ? (payload as Record<string, unknown>)
-              : {};
+          const record = isExternalRecord(payload) ? payload : {};
           removePopup(String(record.popupId || ""));
         }),
       );
       unlisten.push(
         await api.listen(MEDIA_POPUP_EVENTS.volume, ({ payload }) => {
-          const record =
-            payload && typeof payload === "object"
-              ? (payload as Record<string, unknown>)
-              : {};
+          const record = isExternalRecord(payload) ? payload : {};
           if (record.origin === "main") return;
           const popupId = String(record.popupId || "");
           const popup = popouts.value.get(popupId);
@@ -135,8 +133,9 @@ function createDesktopMediaPopouts() {
   }
 
   async function closePopout(value: MediaFeedRecord | string) {
-    const popupId =
-      typeof value === "string" ? value : mediaPopupIdForFeed(value);
+    const popupId = isExternalString(value)
+      ? value
+      : mediaPopupIdForFeed(value);
     const popup = popouts.value.get(popupId);
     if (!popup) return false;
     const api = await ensureListeners();
@@ -147,8 +146,9 @@ function createDesktopMediaPopouts() {
   }
 
   async function focusPopout(value: MediaFeedRecord | string) {
-    const popupId =
-      typeof value === "string" ? value : mediaPopupIdForFeed(value);
+    const popupId = isExternalString(value)
+      ? value
+      : mediaPopupIdForFeed(value);
     if (!popouts.value.has(popupId)) return false;
     const api = await ensureListeners();
     if (!api) return false;

@@ -3,6 +3,8 @@ import type {
   ChatMessageInput,
   ChatUserInput,
 } from "../shared/types/composables.ts";
+import { isExternalString } from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 export const useChatUtils = () => {
   function formatChatTime(dateString: string | number | Date) {
@@ -88,8 +90,8 @@ export const useChatUtils = () => {
     return profileAssetUrl(avatarPath) || "";
   }
 
-  function validateMessage(content: unknown) {
-    if (!content || typeof content !== "string") {
+  function validateMessage(content: ExternalField) {
+    if (!isExternalString(content) || !content) {
       return { valid: false, error: "Message content is required" };
     }
 

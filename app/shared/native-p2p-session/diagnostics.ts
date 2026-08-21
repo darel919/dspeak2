@@ -8,7 +8,8 @@ import type {
   NativeP2pSessionSurface,
   NativeP2pTrackEntry,
 } from "../types/native-p2p-session.ts";
-export class NativeP2pSessionDiagnosticsMethods {
+export const nativeP2pSessionDiagnosticsMethods: Partial<NativeP2pSessionSurface> &
+  ThisType<NativeP2pSessionSurface> = {
   async _rawStats(peer: NativeP2pSessionPeer) {
     try {
       return await this.invoke("media_p2p_get_stats", {
@@ -17,7 +18,7 @@ export class NativeP2pSessionDiagnosticsMethods {
     } catch {
       return null;
     }
-  }
+  },
 
   async stats() {
     const results: Array<Record<string, unknown>> = [];
@@ -39,7 +40,7 @@ export class NativeP2pSessionDiagnosticsMethods {
       });
     }
     return results;
-  }
+  },
 
   async diagnosticStats() {
     return [
@@ -57,7 +58,7 @@ export class NativeP2pSessionDiagnosticsMethods {
         runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
       },
     ];
-  }
+  },
 
   async getOutboundRtpStats() {
     const results: Array<Record<string, unknown>> = [];
@@ -90,7 +91,7 @@ export class NativeP2pSessionDiagnosticsMethods {
       }
     }
     return results;
-  }
+  },
 
   async getInboundRtpStats() {
     const results: Array<Record<string, unknown>> = [];
@@ -120,9 +121,12 @@ export class NativeP2pSessionDiagnosticsMethods {
       }
     }
     return results;
-  }
+  },
 
-  async mediaReadiness(expectedInbound = this.trackEntries.size) {
+  async mediaReadiness(
+    this: NativeP2pSessionSurface,
+    expectedInbound = this.trackEntries.size,
+  ) {
     let outboundExpected = 0;
     let inboundExpected = 0;
     let outboundFlowing = 0;
@@ -133,9 +137,11 @@ export class NativeP2pSessionDiagnosticsMethods {
         .filter((source) => this.sourceTransmission.get(source) !== false)
         .map((source) => ({
           source,
-          ...(this.sources.get(source) || {}),
           trackId: peer.trackIds.get(source),
         }));
+      for (const entry of outboundEntries) {
+        Object.assign(entry, this.sources.get(entry.source) || {});
+      }
       const inboundEntries = [...this.trackEntries.values()].filter(
         (entry) => entry.p2pHandle === peer.handle && entry.receiving !== false,
       );
@@ -164,14 +170,14 @@ export class NativeP2pSessionDiagnosticsMethods {
       inboundExpected: requiredInbound,
       inboundFlowing,
     };
-  }
+  },
 
   get iceConnectedBoth() {
     return (
       this.peers.size > 0 &&
       [...this.peers.values()].every((peer) => peer.connected)
     );
-  }
+  },
 
   _applyJitterBufferConfig(entry: NativeP2pTrackEntry) {
     if (!entry || entry.kind !== "audio" || !entry.trackId || !entry.p2pHandle)
@@ -181,11 +187,11 @@ export class NativeP2pSessionDiagnosticsMethods {
       trackId: entry.trackId,
       minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay || 0)),
       targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay || 0)),
-    }).catch((error: unknown) => {
+    }).catch((error) => {
       this.onError?.(error);
       return false;
     });
-  }
+  },
 
   setJitterBufferConfig({
     minDelayMs = 0,
@@ -204,7 +210,7 @@ export class NativeP2pSessionDiagnosticsMethods {
         this._applyJitterBufferConfig(entry),
       ),
     );
-  }
+  },
 
   async _updateSourceParameters(
     source: string,
@@ -226,7 +232,5 @@ export class NativeP2pSessionDiagnosticsMethods {
       ),
     );
     return true;
-  }
-}
-
-export interface NativeP2pSessionDiagnosticsMethods extends NativeP2pSessionSurface {}
+  },
+};

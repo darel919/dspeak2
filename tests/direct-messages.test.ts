@@ -69,7 +69,7 @@ test("direct messages have friend-gated, idempotent persistence", () => {
   assert.match(manager, /profileMap\.get/);
   assert.match(
     manager,
-    /new Date\(latest\.createdAt(?: as string \| number \| Date)?\)/,
+    /const createdAt = parseExternalDate\(latest\.createdAt\)/,
   );
   assert.match(manager, /type: "direct_message"/);
   assert.match(manager, /type: "notification_created"/);
@@ -98,7 +98,10 @@ test("direct message routes authorize conversation reads, sends, and receipts", 
   assert.match(conversationRoute, /sendDirectMessage/);
   assert.match(conversationRoute, /markDirectConversationRead/);
   assert.match(conversationRoute, /markDirectMessagesDelivered/);
-  assert.match(conversationRoute, /action === "delivered"/);
+  assert.match(
+    conversationRoute,
+    /parseExternalString\(body\?\.action\) === "delivered"/,
+  );
   assert.match(conversationRoute, /event\.method === "PATCH"/);
 });
 

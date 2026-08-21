@@ -21,6 +21,7 @@ function receiverCapabilities(
 ): ParticipantMediaCapabilities {
   const codecs = ["H264", "H265", "VP8", "VP9", "AV1"] as const;
   return {
+    /* SAFETY: The fixed codec tuple supplies every key and each mapped entry has both directions. */
     videoCodecs: Object.fromEntries(
       codecs.map((codec) => [
         codec,
@@ -102,7 +103,7 @@ function findMessage(socket, type) {
 }
 
 function createControlSignaling(session, messages, { stop } = {}) {
-  return {
+  const signaling = {
     send(message) {
       messages.push(message);
       if (
@@ -123,8 +124,9 @@ function createControlSignaling(session, messages, { stop } = {}) {
       }
       return true;
     },
-    ...(stop ? { stop } : {}),
   };
+  if (stop) signaling.stop = stop;
+  return signaling;
 }
 
 describe("NativeMediasoupSfuSession", () => {

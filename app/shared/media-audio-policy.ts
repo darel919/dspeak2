@@ -1,4 +1,9 @@
 import { getAudioBitrateBps } from "./voice-transport.ts";
+import { isExternalNumber, isExternalString } from "./types/boundary.ts";
+
+function audioBitrateValue<T>(value: T): number | string | null | undefined {
+  return isExternalNumber(value) || isExternalString(value) ? value : undefined;
+}
 
 export function createMediaAudioPolicy({
   channelsStore,
@@ -30,8 +35,8 @@ export function createMediaAudioPolicy({
         : channel?.mediaPolicy?.microphoneKbps;
     return getAudioBitrateBps(
       source,
-      channelBitrate,
-      settingsStore.systemAudioBitrate,
+      audioBitrateValue(channelBitrate),
+      audioBitrateValue(settingsStore.systemAudioBitrate),
     );
   }
 

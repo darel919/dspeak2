@@ -1,10 +1,16 @@
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.ts";
 import { closeSocketOnPageHide } from "./socket-lifecycle.ts";
 import { mediaDebug } from "./media-debug.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 import type {
   MediasoupProviderConnectOptions,
   MediasoupProviderSocketOptions,
 } from "./types/mediasoup-provider-socket.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+} from "./types/boundary.ts";
 export class MediasoupProviderSocket {
   private readonly onMessage: MediasoupProviderSocketOptions["onMessage"];
   private readonly onFailure: MediasoupProviderSocketOptions["onFailure"];
@@ -32,14 +38,14 @@ export class MediasoupProviderSocket {
       let handshakeSettled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
       closeSocketOnPageHide(socket);
-      const reportFailure = (error: unknown) => {
+      const reportFailure = (error: Error | string | null | undefined) => {
         if (failureReported) return;
         failureReported = true;
         try {
           Promise.resolve(this.onFailure?.(error)).catch(() => {});
         } catch {}
       };
-      const rejectHandshake = (error: unknown) => {
+      const rejectHandshake = (error: Error | string | null | undefined) => {
         if (handshakeSettled) return;
         handshakeSettled = true;
         if (timer) clearTimeout(timer);
@@ -55,26 +61,27 @@ export class MediasoupProviderSocket {
       socket.addEventListener("open", () => {
         mediaDebug("mediasoup.socket-open");
         try {
-          socket.send(
-            JSON.stringify({
-              type: "hello919",
-              protocolRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
-              ticket,
-              ...(mediaCapabilities ? { mediaCapabilities } : {}),
-              ...(capabilityProtocol ? { capabilityProtocol } : {}),
-            }),
-          );
+          const hello: ExternalObject = {
+            type: "hello919",
+            protocolRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
+            ticket,
+          };
+          if (mediaCapabilities) hello.mediaCapabilities = mediaCapabilities;
+          if (capabilityProtocol) hello.capabilityProtocol = capabilityProtocol;
+          socket.send(JSON.stringify(hello));
         } catch (error) {
-          rejectHandshake(error);
+          rejectHandshake(asError(error, "Provider handshake failed"));
           if (this.socket === socket && socket.readyState < WebSocket.CLOSING)
             socket.close(1011, "Provider handshake failed");
         }
       });
       socket.addEventListener("message", (event) => {
         void (async () => {
-          let message;
+          let message: ExternalObject;
           try {
-            message = JSON.parse(String(event.data)) as Record<string, unknown>;
+            const parsed = JSON.parse(String(event.data));
+            if (!isExternalRecord(parsed)) return;
+            message = parsed;
           } catch {
             return;
           }
@@ -88,14 +95,13 @@ export class MediasoupProviderSocket {
           }
           if (message.type === "connected") return;
           if (message.type === "error919") {
-            const payload: Record<string, unknown> =
-              message.data && typeof message.data === "object"
-                ? (message.data as Record<string, unknown>)
-                : message;
+            const payload = isExternalRecord(message.data)
+              ? message.data
+              : message;
             const error = new Error(
-              (typeof payload.message === "string" ? payload.message : null) ||
-                (typeof payload.error === "string" ? payload.error : null) ||
-                (typeof message.error === "string" ? message.error : null) ||
+              (isExternalString(payload.message) ? payload.message : null) ||
+                (isExternalString(payload.error) ? payload.error : null) ||
+                (isExternalString(message.error) ? message.error : null) ||
                 "Media provider error",
             );
             mediaDebug("mediasoup.provider-error", { error });
@@ -103,12 +109,10 @@ export class MediasoupProviderSocket {
             if (handled !== true) reportFailure(error);
             return;
           }
-          if (typeof message.type === "string")
+          if (isExternalString(message.type))
             await this.onMessage?.(
               message.type,
-              message.data && typeof message.data === "object"
-                ? (message.data as Record<string, unknown>)
-                : message,
+              isExternalRecord(message.data) ? message.data : message,
             );
         })().catch((error) => {
           reportFailure(error);
@@ -142,7 +146,7 @@ export class MediasoupProviderSocket {
     return this.ready;
   }
 
-  send(message: unknown) {
+  send(message: ExternalObject) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return false;
     try {
       this.socket.send(JSON.stringify(message));

@@ -30,20 +30,20 @@ const USER_SAFE_VOICE_ERROR_CODES = new Map([
 ]);
 
 import type { VoiceErrorLike } from "./types/shared-utilities.ts";
+import { isExternalString } from "./types/boundary.ts";
 
 export function voiceJoinErrorMessage(
   error: string | VoiceErrorLike | null | undefined,
   { includeDetails = false }: { includeDetails?: boolean } = {},
 ) {
-  const message =
-    typeof error === "string"
-      ? error
-      : error instanceof Error
-        ? error.message
-        : error?.message;
+  const message = isExternalString(error)
+    ? error
+    : error instanceof Error
+      ? error.message
+      : error?.message;
 
   if (message && USER_SAFE_VOICE_JOIN_MESSAGES.has(message)) return message;
-  const details = typeof error === "string" ? null : error;
+  const details = isExternalString(error) ? null : error;
   const code = details?.code || details?.cause?.code;
   if (code && USER_SAFE_VOICE_ERROR_CODES.has(code))
     return USER_SAFE_VOICE_ERROR_CODES.get(code);

@@ -121,7 +121,7 @@ export class NativeMediasoupConsumersMethods {
       consumerId: entry.consumerId,
       minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay || 0)),
       targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay || 0)),
-    }).catch((error: unknown) => {
+    }).catch((error) => {
       this.onError?.(asError(error, "Native jitter buffer update failed"));
       return false;
     });
@@ -185,7 +185,7 @@ export class NativeMediasoupConsumersMethods {
     try {
       return (await handler(data)) !== false;
     } catch (error: unknown) {
-      this._fail(error);
+      this._fail(asError(error, "Native mediasoup message handling failed"));
       throw error;
     }
   }
@@ -277,4 +277,5 @@ export class NativeMediasoupConsumersMethods {
   }
 }
 
-export interface NativeMediasoupConsumersMethods extends NativeMediasoupSfuSessionSurface {}
+export type NativeMediasoupConsumersContract =
+  NativeMediasoupSfuSessionSurface & NativeMediasoupConsumersMethods;

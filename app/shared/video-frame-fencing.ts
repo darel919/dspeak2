@@ -18,12 +18,17 @@ export interface VideoFrameScheduler {
   cancel: (handle: number) => void;
 }
 
+export interface ScheduledVideoFrame {
+  handle: number;
+  cancel: () => void;
+}
+
 export function scheduleFencedVideoFrame(
   scheduler: VideoFrameScheduler,
   candidate: VideoFrameIdentity,
   getCurrent: () => VideoFrameIdentity,
   onPresented: () => void,
-): { handle: number; cancel: () => void } {
+): ScheduledVideoFrame {
   let active = true;
   const handle = scheduler.request(() => {
     if (!active) return;

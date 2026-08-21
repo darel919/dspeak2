@@ -1,5 +1,6 @@
 import { mediaDebug } from "./media-debug.ts";
 import type { HybridSessionTerminationContext } from "./types/hybrid-media-session.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
 export function createHybridMediaSessionTermination({
   capture,
@@ -42,11 +43,8 @@ export function createHybridMediaSessionTermination({
   resolveTopologyWaiter,
   transportReady,
 }: HybridSessionTerminationContext) {
-  function failSession(message: unknown) {
+  function failSession(message: OwnedErrorValue) {
     if (message instanceof Error) error.value = message.message;
-    else if (typeof message === "string") error.value = message;
-    else if (message && typeof message === "object" && "message" in message)
-      error.value = String(message.message);
     else error.value = String(message);
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
@@ -68,7 +66,7 @@ export function createHybridMediaSessionTermination({
     if (wasConnected) {
       try {
         leavePromise = Promise.resolve(sendLeave());
-      } catch (leaveError: unknown) {
+      } catch (leaveError) {
         leavePromise = Promise.reject(leaveError);
         mediaDebug("session.leave-failed", {
           error:

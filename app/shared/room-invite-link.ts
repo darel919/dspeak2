@@ -1,15 +1,14 @@
 const INVITE_URL_PATTERN = /^<?(https?:\/\/[^\s<>]+)>?$/i;
 const MARKDOWN_INVITE_PATTERN = /^\[[^\]]*\]\((https?:\/\/[^)\s]+)\)$/i;
 
+import { isExternalString } from "./types/boundary.ts";
+
 function trimUrlPunctuation(value: string) {
   return value.replace(/[.,!?;:)\]}]+$/g, "");
 }
 
-export function extractInviteLink(
-  value: unknown,
-  allowedOrigin?: string | null,
-) {
-  if (typeof value !== "string" || !value.trim()) return null;
+export function extractInviteLink<T>(value: T, allowedOrigin?: string | null) {
+  if (!isExternalString(value) || !value.trim()) return null;
 
   const content = value.trim();
   const markdownMatch = content.match(MARKDOWN_INVITE_PATTERN);

@@ -2,6 +2,7 @@ import {
   nativeFlowing,
   nativeRtpStatForTrack,
 } from "../native-mediasoup-diagnostics.ts";
+import { isExternalString } from "../types/boundary.ts";
 
 function requestIdentifier() {
   return (
@@ -11,14 +12,14 @@ function requestIdentifier() {
 }
 
 function sourceKind(entry: Record<string, unknown>): string {
-  return typeof entry.kind === "string"
+  return isExternalString(entry.kind)
     ? entry.kind
     : entry.source === "camera" || entry.source === "screen"
       ? "video"
       : "audio";
 }
 
-function mediaSections(sdp: unknown, kind: string): string[] {
+function mediaSections<T>(sdp: T, kind: string): string[] {
   return String(sdp || "")
     .split(/(?=m=)/g)
     .filter((section: string) => section.startsWith(`m=${kind} `));
@@ -29,7 +30,7 @@ function sectionMid(section: string): string | null {
   return match?.[1]?.trim() || null;
 }
 
-function sectionContainsTrack(section: string, trackId: unknown): boolean {
+function sectionContainsTrack<T>(section: string, trackId: T): boolean {
   const expectedTrackId = String(trackId);
   return section.split(/\r?\n/).some((line) => {
     if (!line.startsWith("a=msid:")) return false;
@@ -45,9 +46,9 @@ function sectionSendsMedia(section: string): boolean {
   return /(?:^|\r?\n)a=(?:sendrecv|sendonly)(?:\r?\n|$)/.test(section);
 }
 
-function midForTrack(
-  sdp: unknown,
-  trackId: unknown,
+function midForTrack<T, U>(
+  sdp: T,
+  trackId: U,
   kind: string,
   usedMids: Set<string> = new Set(),
 ): string | null {
@@ -69,8 +70,8 @@ function midForTrack(
   return sending[0]?.mid || null;
 }
 
-function nativeFlowForTrack(
-  value: unknown,
+function nativeFlowForTrack<T>(
+  value: T,
   type: string,
   entry: Record<string, unknown>,
 ) {

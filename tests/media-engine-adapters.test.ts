@@ -10,6 +10,10 @@ import {
   resolveNativeMediaFlags,
   useMediaEngine,
 } from "../app/composables/media/useMediaEngine.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 const activeEngines = new Set<{ shutdown: () => Promise<void> }>();
 
@@ -75,7 +79,7 @@ describe("MediaEngine adapters", () => {
     );
     assert.match(
       source,
-      /dispatchNativeAction\(engine, payload as NativeCaptureRequest\)/,
+      /dispatchNativeAction\(\s*engine,[\s\S]*isExternalRecord\(payload\)/,
     );
     assert.match(source, /engine\.nativeEventOperation/);
     const receiveDispatch = source.indexOf(
@@ -268,16 +272,17 @@ describe("MediaEngine adapters", () => {
     ];
     engine.nativeSession = nativeSession;
 
-    const snapshot = (await engine.getWebRTCStatsSnapshot()) as {
-      topology: Record<string, unknown>;
-      nodes: Array<Record<string, unknown>>;
-      edges: Array<Record<string, unknown>>;
-    };
+    const snapshot = parseExternalRecord(await engine.getWebRTCStatsSnapshot());
+    assert.ok(snapshot);
+    const topology = parseExternalRecord(snapshot.topology);
+    assert.ok(topology);
 
-    assert.equal(snapshot.topology.mode, "sfu");
-    assert.equal(snapshot.topology.label, "SFU (IPv4 fallback)");
+    assert.equal(parseExternalString(topology.mode), "sfu");
+    assert.equal(parseExternalString(topology.label), "SFU (IPv4 fallback)");
+    assert.ok(Array.isArray(snapshot.nodes));
+    assert.ok(Array.isArray(snapshot.edges));
     assert.equal(
-      snapshot.nodes.some((node) => node.role === "sfu"),
+      snapshot.nodes.some((node) => parseExternalRecord(node)?.role === "sfu"),
       true,
     );
     assert.equal(snapshot.edges.length, 3);
@@ -313,13 +318,14 @@ describe("MediaEngine adapters", () => {
     ];
     engine.nativeP2pSession = nativeP2pSession;
 
-    const snapshot = (await engine.getWebRTCStatsSnapshot()) as {
-      topology: Record<string, unknown>;
-      nodes: Array<Record<string, unknown>>;
-      edges: Array<Record<string, unknown>>;
-    };
+    const snapshot = parseExternalRecord(await engine.getWebRTCStatsSnapshot());
+    assert.ok(snapshot);
+    const topology = parseExternalRecord(snapshot.topology);
+    assert.ok(topology);
 
-    assert.equal(snapshot.topology.mode, "p2p-direct");
+    assert.equal(parseExternalString(topology.mode), "p2p-direct");
+    assert.ok(Array.isArray(snapshot.nodes));
+    assert.ok(Array.isArray(snapshot.edges));
     assert.equal(snapshot.nodes.length, 2);
     assert.equal(snapshot.edges.length, 1);
   });
@@ -958,7 +964,7 @@ describe("MediaEngine adapters", () => {
         ["audio", { source: "audio" }],
         ["screen", { source: "screen" }],
       ]),
-      getState: () => "ready",
+      getState: () => "connected",
       removeSource(source) {
         this.sources.delete(source);
       },
@@ -989,7 +995,7 @@ describe("MediaEngine adapters", () => {
     engine.nativeSession = nativeSession;
     engine.nativeP2pSession = nativeP2pSession;
 
-    assert.equal(engine.getState(), "ready");
+    assert.equal(engine.getState(), "connected");
     assert.equal(engine.isMicrophoneEnabled(), true);
     assert.equal(engine.isScreenSharing(), true);
     await engine.stopScreenShare();

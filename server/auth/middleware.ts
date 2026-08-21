@@ -4,6 +4,11 @@ import {
   type SupabaseAccessTokenClaims,
 } from "./supabase.ts";
 import type { AuthEvent } from "../types/auth.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 type BearerEvent = Pick<H3Event, "headers" | "context">;
 
@@ -29,18 +34,15 @@ function setBearerAuthContext(
   return payload;
 }
 
-function requireBearerClaims(payload: unknown): SupabaseAccessTokenClaims {
-  if (
-    !payload ||
-    typeof payload !== "object" ||
-    Array.isArray(payload) ||
-    !("sub" in payload) ||
-    typeof payload.sub !== "string" ||
-    !payload.sub
-  ) {
+function requireBearerClaims(
+  payload: ExternalField,
+): SupabaseAccessTokenClaims {
+  const record = parseExternalRecord(payload);
+  const subject = parseExternalString(record?.sub);
+  if (record === null || subject === null || !subject) {
     throw new Error("Supabase access token has no subject");
   }
-  return { ...payload, sub: payload.sub };
+  return { ...record, sub: subject };
 }
 
 export async function ensureVerifiedBearer(
@@ -91,7 +93,7 @@ export async function requireAuth(event: AuthEvent) {
       role: payload.role,
     };
     return event.context.user;
-  } catch (error) {
+  } catch {
     throw createError({
       statusCode: 401,
       statusMessage: "Invalid or expired token",

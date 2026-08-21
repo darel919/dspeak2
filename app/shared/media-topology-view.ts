@@ -1,38 +1,103 @@
 import { normalizeMediaPathMetrics } from "#shared/media-route.ts";
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
 import type {
   MediaTopologyCandidatePair,
-  MediaTopologyConnection,
   MediaTopologyEdge,
   MediaTopologyParticipant,
   MediaTopologyProvider,
   MediaTopologyViewContext,
 } from "./types/media-topology-view.ts";
+import type { PeerMetric } from "#shared/types/media.ts";
 
-function asProvider(value: unknown): MediaTopologyProvider | null {
-  if (!value || typeof value !== "object") return null;
-  const provider = value as Partial<MediaTopologyProvider>;
-  return provider.connections instanceof Map
-    ? (provider as MediaTopologyProvider)
-    : null;
+type TopologyGraphBuilder =
+  typeof import("./rtc-topology.ts").buildTopologyGraph;
+type PeerMetricMapper = (
+  edges: readonly PeerMetric[],
+  peers: readonly PeerMetric[],
+) => Record<string, unknown>;
+
+type MediaTopologyViewDependencies = MediaTopologyViewContext & {
+  buildTopologyGraph: TopologyGraphBuilder;
+  mapPeerConnectionMetrics: PeerMetricMapper;
+  mapPeerRoundTripTimes: PeerMetricMapper;
+};
+
+function asProvider<T>(value: T): MediaTopologyProvider | null {
+  if (!isExternalRecord(value)) return null;
+  if (!(value.connections instanceof Map)) return null;
+  const provider: MediaTopologyProvider = { connections: value.connections };
+  if (value.producers instanceof Map) provider.producers = value.producers;
+  if (value.consumers instanceof Map) provider.consumers = value.consumers;
+  return provider;
 }
 
-function asParticipant(value: unknown): MediaTopologyParticipant {
-  if (value && typeof value === "object")
-    return value as MediaTopologyParticipant;
+function asParticipant<T>(value: T): MediaTopologyParticipant {
+  if (isExternalRecord(value)) {
+    const participant: MediaTopologyParticipant = {};
+    if (isExternalString(value.id) || isExternalNumber(value.id))
+      participant.id = value.id;
+    if (isExternalString(value.userId) || isExternalNumber(value.userId))
+      participant.userId = value.userId;
+    if (isExternalRecord(value.profile)) participant.profile = value.profile;
+    if (Array.isArray(value.sources)) participant.sources = value.sources;
+    if (isExternalBoolean(value.muted)) participant.muted = value.muted;
+    if (isExternalBoolean(value.deafened))
+      participant.deafened = value.deafened;
+    return participant;
+  }
   return {
-    userId:
-      typeof value === "string" || typeof value === "number" ? value : null,
+    userId: value === null ? null : String(value),
   };
 }
 
-function asEdge(value: unknown): MediaTopologyEdge {
-  return value && typeof value === "object" ? (value as MediaTopologyEdge) : {};
+function asEdge<T>(value: T): MediaTopologyEdge {
+  if (!isExternalRecord(value)) return {};
+  const edge: MediaTopologyEdge = {};
+  if (isExternalString(value.peerId) || isExternalNumber(value.peerId))
+    edge.peerId = value.peerId;
+  if (isExternalString(value.state)) edge.state = value.state;
+  if (isExternalNumber(value.rtt)) edge.rtt = value.rtt;
+  if (isExternalNumber(value.jitter)) edge.jitter = value.jitter;
+  if (isExternalString(value.network)) edge.network = value.network;
+  if (isExternalNumber(value.bitrate)) edge.bitrate = value.bitrate;
+  if (isExternalNumber(value.packetLoss)) edge.packetLoss = value.packetLoss;
+  if (isExternalNumber(value.jitterBufferDelayMs))
+    edge.jitterBufferDelayMs = value.jitterBufferDelayMs;
+  if (isExternalNumber(value.availableOutgoingBitrate))
+    edge.availableOutgoingBitrate = value.availableOutgoingBitrate;
+  if (isExternalNumber(value.concealedAudioRatio))
+    edge.concealedAudioRatio = value.concealedAudioRatio;
+  edge.candidatePair = asCandidatePair(value.candidatePair);
+  return edge;
 }
 
-function asCandidatePair(value: unknown): MediaTopologyCandidatePair | null {
-  return value && typeof value === "object"
-    ? (value as MediaTopologyCandidatePair)
-    : null;
+function asCandidatePair<T>(value: T): MediaTopologyCandidatePair | null {
+  if (!isExternalRecord(value)) return null;
+  const pair: MediaTopologyCandidatePair = {};
+  if (isExternalNumber(value.currentRoundTripTime))
+    pair.currentRoundTripTime = value.currentRoundTripTime;
+  if (isExternalNumber(value.availableOutgoingBitrate))
+    pair.availableOutgoingBitrate = value.availableOutgoingBitrate;
+  if (isExternalNumber(value.packetLoss)) pair.packetLoss = value.packetLoss;
+  for (const side of ["local", "remote"] as const) {
+    const candidate = isExternalRecord(value[side]) ? value[side] : null;
+    if (!candidate) continue;
+    pair[side] = {
+      candidateType: isExternalString(candidate.candidateType)
+        ? candidate.candidateType
+        : null,
+      protocol: isExternalString(candidate.protocol)
+        ? candidate.protocol
+        : null,
+      address: isExternalString(candidate.address) ? candidate.address : null,
+    };
+  }
+  return pair;
 }
 
 export function createMediaTopologyView({
@@ -56,20 +121,12 @@ export function createMediaTopologyView({
   topologyGraph,
   topologyState,
   voiceStore,
-}: MediaTopologyViewContext) {
-  const buildTopologyGraph = buildTopologyGraphValue as (
-    snapshot: Record<string, unknown>,
-  ) => Record<string, unknown>;
-  const mapPeerConnectionMetrics = mapPeerConnectionMetricsValue as (
-    edges: unknown[],
-    peers: unknown[],
-  ) => Record<string, unknown>;
-  const mapPeerRoundTripTimes = mapPeerRoundTripTimesValue as (
-    edges: unknown[],
-    peers: unknown[],
-  ) => Record<string, unknown>;
+}: MediaTopologyViewDependencies) {
+  const buildTopologyGraph = buildTopologyGraphValue;
+  const mapPeerConnectionMetrics = mapPeerConnectionMetricsValue;
+  const mapPeerRoundTripTimes = mapPeerRoundTripTimesValue;
 
-  function syncConnectedUsers(participants: unknown[] = []) {
+  function syncConnectedUsers<T>(participants: T[] = []) {
     const entries = participants
       .map(asParticipant)
       .map((participant) => ({
@@ -97,15 +154,15 @@ export function createMediaTopologyView({
           ...profile,
           id: String(participant.userId),
         });
-      if (!voiceStore.isUserConnected(String(participant.userId)))
-        voiceStore.addConnectedUser(String(participant.userId), {
-          ...(profile || {}),
-          id: String(participant.userId),
-          ...mediaState,
-        });
+      if (!voiceStore.isUserConnected(String(participant.userId))) {
+        const userInfo = profile
+          ? { ...profile, id: String(participant.userId), ...mediaState }
+          : { id: String(participant.userId), ...mediaState };
+        voiceStore.addConnectedUser(String(participant.userId), userInfo);
+      }
       if (
-        typeof participant.muted === "boolean" ||
-        typeof participant.deafened === "boolean" ||
+        participant.muted !== undefined ||
+        participant.deafened !== undefined ||
         sources !== null
       )
         voiceStore.updateUserVoiceState?.(
@@ -119,7 +176,7 @@ export function createMediaTopologyView({
     }
   }
 
-  function updateP2pStats(rawEdges: unknown[]) {
+  function updateP2pStats<T>(rawEdges: T[]) {
     const edges = rawEdges.map(asEdge);
     setP2pEdges(edges);
     peerRoundTripTimes.value = mapPeerRoundTripTimes(
@@ -160,23 +217,21 @@ export function createMediaTopologyView({
     refreshTopologyGraph();
   }
 
-  function refreshTopologyGraph(candidatePairValue: unknown = null) {
+  function refreshTopologyGraph<T>(candidatePairValue?: T) {
     const details: Record<string, Record<string, unknown>> = {};
     const p2pMesh = asProvider(getP2pMesh());
     const localPeerId = getLocalPeerId();
     for (const connection of p2pMesh?.connections?.values() || []) {
-      const typedConnection = connection as MediaTopologyConnection;
       const edge =
         getP2pEdges()
           .map(asEdge)
-          .find((candidate) => candidate.peerId === typedConnection.peerId) ||
-        {};
-      const key = [localPeerId, typedConnection.peerId].sort().join(":");
+          .find((candidate) => candidate.peerId === connection.peerId) || {};
+      const key = [localPeerId, connection.peerId].sort().join(":");
       const pair = asCandidatePair(edge.candidatePair);
       details[key] = {
         state:
           edge.state ||
-          (typedConnection.pc.connectionState === "connected"
+          (connection.pc.connectionState === "connected"
             ? "active"
             : "probing"),
         rtt: edge.rtt ?? null,
@@ -188,14 +243,22 @@ export function createMediaTopologyView({
       };
     }
     const candidatePair = asCandidatePair(candidatePairValue);
+    const displayMode = isExternalString(topologyState.value.displayMode)
+      ? topologyState.value.displayMode
+      : topologyState.value.mode;
     topologyGraph.value = buildTopologyGraph({
-      mode: topologyState.value.displayMode || topologyState.value.mode,
-      currentMode: activeProvider(),
-      target: topologyState.value.target,
+      mode: displayMode,
+      currentMode: activeProvider() ?? undefined,
+      target: topologyState.value.target ?? undefined,
       epoch: topologyState.value.epoch,
-      reason: topologyState.value.reason,
-      activatedAt: topologyState.value.activatedAt,
-      participantIds: topologyState.value.peers.map((peer) => peer.peerId),
+      reason: topologyState.value.reason ?? undefined,
+      activatedAt:
+        topologyState.value.activatedAt == null
+          ? null
+          : String(topologyState.value.activatedAt),
+      participantIds: topologyState.value.peers.flatMap((peer) =>
+        isExternalString(peer.peerId) ? [peer.peerId] : [],
+      ),
       localPeerId,
       edgeDetails: details,
       participantSfuEdges: Object.fromEntries(
@@ -221,8 +284,14 @@ export function createMediaTopologyView({
             bitrate: candidatePair.availableOutgoingBitrate ?? null,
             packetLoss: candidatePair.packetLoss ?? null,
           }
+        : undefined,
+      candidatePair: candidatePair
+        ? {
+            remote: candidatePair.remote
+              ? { address: candidatePair.remote.address }
+              : undefined,
+          }
         : null,
-      candidatePair,
     });
   }
 

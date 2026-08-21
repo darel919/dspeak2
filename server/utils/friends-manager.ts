@@ -1,6 +1,6 @@
 import { db } from "../db/client.ts";
 import { friends, profiles } from "../db/schema/index.ts";
-import { eq, and, or, desc, asc, inArray } from "drizzle-orm";
+import { eq, and, or, desc, inArray } from "drizzle-orm";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
 import { publicDisplayName } from "../../shared/user-profile.ts";
 type UserId = string;

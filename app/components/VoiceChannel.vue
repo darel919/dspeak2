@@ -840,6 +840,10 @@ import { getDesktopCaptureApi } from "../shared/desktop-capture";
 import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 import { useDesktopMediaPopouts } from "../composables/useDesktopMediaPopouts";
 import { useAdaptiveVideoGrid } from "../composables/useAdaptiveVideoGrid";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 
 const DesktopCapturePicker = defineAsyncComponent(
   () => import("./DesktopCapturePicker.vue"),
@@ -897,7 +901,7 @@ watch(
   { immediate: true },
 );
 const videoFeeds = computed(() => {
-  mediaFeedRevision.value;
+  void mediaFeedRevision.value;
   const currentUser = authStore.getUserData?.();
   const currentUserId = currentUser?.id;
   const sessionLocalFeeds = unref(mediaSessionRef.value?.localVideoFeeds);
@@ -1075,26 +1079,28 @@ function setScreenReceiving(feed, receiving) {
 }
 
 function onRemoteFirstFrame(event) {
-  const feedKey = typeof event === "string" ? event : event?.feedKey;
-  const receiverIncarnationId =
-    typeof event === "string" ? null : event?.receiverIncarnationId || null;
-  const observationMode =
-    typeof event === "object" ? event?.observationMode : undefined;
+  const eventRecord = isExternalRecord(event) ? event : null;
+  const feedKey = isExternalString(event) ? event : eventRecord?.feedKey;
+  const receiverIncarnationId = isExternalString(event)
+    ? null
+    : eventRecord?.receiverIncarnationId || null;
+  const observationMode = eventRecord?.observationMode;
   if (!feedKey) return;
   mediaSessionRef.value?.markRemoteFirstFrame?.(
     feedKey,
     receiverIncarnationId,
-    typeof event === "object" && event?.fallback === true,
+    eventRecord?.fallback === true,
     observationMode,
   );
 }
 
 function onRemoteFramePresented(event) {
-  const feedKey = typeof event === "string" ? event : event?.feedKey;
-  const receiverIncarnationId =
-    typeof event === "string" ? null : event?.receiverIncarnationId || null;
-  const observationMode =
-    typeof event === "object" ? event?.observationMode : undefined;
+  const eventRecord = isExternalRecord(event) ? event : null;
+  const feedKey = isExternalString(event) ? event : eventRecord?.feedKey;
+  const receiverIncarnationId = isExternalString(event)
+    ? null
+    : eventRecord?.receiverIncarnationId || null;
+  const observationMode = eventRecord?.observationMode;
   if (!feedKey) return;
   mediaSessionRef.value?.markRemoteFramePresented?.(
     feedKey,

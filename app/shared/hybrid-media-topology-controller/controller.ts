@@ -21,15 +21,36 @@ import type {
   TopologySfuSession,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object";
+type TopologyReadyData = {
+  provider: string;
+  providerId?: string;
+  epoch: number;
+  target: "sfu";
+  sourceRevision: number;
+};
+
+type ProviderFailureData = {
+  provider: string | null;
+  providerId?: string;
+  epoch: number | string | undefined;
+  sourceRevision: number | string | undefined;
+  reason: string;
+};
+
+function isRecord<T>(value: T): value is T & Record<string, unknown> {
+  return isExternalRecord(value);
 }
 
-function isMediaStreamTrack(value: unknown): value is MediaStreamTrack {
+function isMediaStreamTrack<T>(value: T): value is T & MediaStreamTrack {
   return (
     isRecord(value) &&
-    typeof value.id === "string" &&
+    isExternalString(value.id) &&
     (value.kind === "audio" || value.kind === "video")
   );
 }
@@ -41,7 +62,7 @@ function topologySourceEntry(
   if (
     !("track" in entry) ||
     !isMediaStreamTrack(entry.track) ||
-    typeof entry.source !== "string"
+    !isExternalString(entry.source)
   )
     return null;
   return {
@@ -230,32 +251,36 @@ export function createHybridMediaTopologyController({
         summary.send === "connected" &&
         summary.recv === "connected";
     };
-    const getVideoSettings = (source: string): Record<string, unknown> => ({
-      ...getRequestedVideoSettings(source),
+    const getVideoSettings = (source: string) =>
+      getRequestedVideoSettings(source);
+    if (provider === "cloudflare-realtime") {
+      const session = new CloudflareRealtimeSession({
+        send: (message) => Boolean(send(message)),
+        iceServers,
+        getControlConnectionEpoch: () => getConnectionEpoch(),
+        localPeerId: getLocalPeerId() || undefined,
+        onRemoteTrack,
+        onRemoteTrackEnded,
+        onStateChange,
+        getVideoSettings,
+      });
+      session.provider = provider;
+      session.providerId = providerId;
+      setSfu(session);
+      mediaDebug("topology.sfu-created", { provider });
+      return session;
+    }
+    const session = new MediasoupClientSession({
+      send: (message) => getProviderSocket()?.send(message) ?? false,
+      iceServers,
+      onRemoteTrack,
+      onRemoteTrackEnded,
+      onStateChange,
+      getAudioBitrate: getEffectiveAudioBitrate,
+      getAudioStereo,
+      getVideoSettings,
+      mediaProfile,
     });
-    const session =
-      provider === "cloudflare-realtime"
-        ? new CloudflareRealtimeSession({
-            send: (message) => Boolean(send(message)),
-            iceServers,
-            getControlConnectionEpoch: () => getConnectionEpoch(),
-            localPeerId: getLocalPeerId() || undefined,
-            onRemoteTrack,
-            onRemoteTrackEnded,
-            onStateChange,
-            getVideoSettings,
-          })
-        : new MediasoupClientSession({
-            send: (message) => getProviderSocket()?.send(message) ?? false,
-            iceServers,
-            onRemoteTrack,
-            onRemoteTrackEnded,
-            onStateChange,
-            getAudioBitrate: getEffectiveAudioBitrate,
-            getAudioStereo,
-            getVideoSettings,
-            mediaProfile,
-          });
     session.provider = provider;
     session.providerId = providerId;
     setSfu(session);
@@ -373,22 +398,18 @@ export function createHybridMediaTopologyController({
     const sourceRevision = Number.isFinite(Number(data.sourceRevision))
       ? Number(data.sourceRevision)
       : Number(topologyState.value.sourceRevision) || 0;
-    if (
-      send({
-        type: "topology-ready",
-        data: {
-          provider,
-          ...(providerId ? { providerId } : {}),
-          epoch: Number(data.epoch),
-          target: "sfu",
-          sourceRevision,
-        },
-      }) === false
-    )
+    const ready: TopologyReadyData = {
+      provider,
+      epoch: Number(data.epoch),
+      target: "sfu",
+      sourceRevision,
+    };
+    if (providerId) ready.providerId = providerId;
+    if (send({ type: "topology-ready", data: ready }) === false)
       throw new Error("Media control signaling unavailable");
   }
 
-  function queueTopology(data: TopologyData): Promise<unknown> {
+  function queueTopology(data: TopologyData): Promise<MediaCommandResult> {
     setConnectionPhase("topology-selecting", {
       topologyEpoch: Number(data.epoch) || 0,
       topologyMode: data.mode || null,
@@ -428,7 +449,14 @@ export function createHybridMediaTopologyController({
         appliedTopologyKey = key;
         if (activeTopologyAbort === abort) activeTopologyAbort = null;
       })
-      .catch((topologyError) => handleTopologyFailure(data, topologyError))
+      .catch((topologyError) =>
+        handleTopologyFailure(
+          data,
+          topologyError instanceof Error
+            ? topologyError
+            : String(topologyError),
+        ),
+      )
       .finally(() => {
         if (pendingTopologyKey === key) pendingTopologyKey = null;
         if (activeTopologyAbort === abort) activeTopologyAbort = null;
@@ -466,8 +494,13 @@ export function createHybridMediaTopologyController({
         ? previousProvider
         : null;
 
-    const incomingMode = (data.mode || "idle") as
-      "idle" | "probing" | "switching" | "p2p" | "sfu";
+    const incomingMode =
+      data.mode === "probing" ||
+      data.mode === "switching" ||
+      data.mode === "p2p" ||
+      data.mode === "sfu"
+        ? data.mode
+        : "idle";
     let canonicalMode: "idle" | "probing" | "switching" | "p2p" | "sfu" =
       incomingMode;
     let activeTransport: "p2p" | "sfu" | null = currentTransport;
@@ -779,7 +812,10 @@ export function createHybridMediaTopologyController({
     }
   }
 
-  function handleTopologyFailure(data: TopologyData, topologyError: unknown) {
+  function handleTopologyFailure(
+    data: TopologyData,
+    topologyError: Error | string,
+  ) {
     if (topologyEventKey(data) !== latestTopologyKey) return;
     if (
       topologyError instanceof Error &&
@@ -809,13 +845,16 @@ export function createHybridMediaTopologyController({
       ) {
         send({
           type: "provider-failure",
-          data: {
-            provider: data.provider,
-            ...(data.providerId ? { providerId: data.providerId } : {}),
-            epoch: data.epoch,
-            sourceRevision: data.sourceRevision,
-            reason: `fallback-activation-failed-${reason}`,
-          },
+          data: (() => {
+            const failure: ProviderFailureData = {
+              provider: data.provider,
+              epoch: data.epoch,
+              sourceRevision: data.sourceRevision,
+              reason: `fallback-activation-failed-${reason}`,
+            };
+            if (data.providerId) failure.providerId = data.providerId;
+            return failure;
+          })(),
         });
         return;
       }
@@ -860,13 +899,16 @@ export function createHybridMediaTopologyController({
     reportedSfuFailureState.value = failureKey;
     send({
       type: "provider-failure",
-      data: {
-        provider,
-        ...(providerId ? { providerId } : {}),
-        epoch,
-        sourceRevision,
-        reason,
-      },
+      data: (() => {
+        const failure: ProviderFailureData = {
+          provider,
+          epoch,
+          sourceRevision,
+          reason,
+        };
+        if (providerId) failure.providerId = providerId;
+        return failure;
+      })(),
     });
     transportReady.value = false;
     iceConnectedBoth.value = false;

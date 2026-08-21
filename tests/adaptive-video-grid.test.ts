@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { effectScope, nextTick, ref } from "vue";
+import { effectScope, nextTick, ref, shallowRef } from "vue";
 import {
   calculateAdaptiveVideoGrid,
   type AdaptiveVideoGridLayout,
@@ -161,15 +161,15 @@ describe("calculateAdaptiveVideoGrid", () => {
     assert.equal(layout.tileHeight, 0);
   });
 
-  it("produces valid layout for 1 tile in various container shapes", () => {
-    const shapes = [
+  it("produces valid layout for 1 tile in various container dimensions", () => {
+    const dimensions = [
       { w: 1200, h: 400 },
       { w: 1280, h: 720 },
       { w: 700, h: 1000 },
       { w: 480, h: 320 },
       { w: 1600, h: 900 },
     ];
-    for (const { w, h } of shapes) {
+    for (const { w, h } of dimensions) {
       const layout = calculateAdaptiveVideoGrid(1, w, h);
       checkLayout(layout, 1, w, h);
     }
@@ -201,42 +201,62 @@ describe("useAdaptiveVideoGrid", () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const observers: TestResizeObserver[] = [];
 
-    class TestResizeObserver {
-      private readonly callback: ResizeObserverCallback;
+    type TestResizeObserverEntry = {
+      borderBoxSize: ReadonlyArray<ResizeObserverSize>;
+      contentRect: Pick<DOMRectReadOnly, "width" | "height">;
+    };
+    type TestResizeObserverCallback = (
+      entries: TestResizeObserverEntry[],
+    ) => void;
+    type TestResizeObserverTarget = Record<string, never>;
 
-      constructor(callback: ResizeObserverCallback) {
+    const stageElementTarget: TestResizeObserverTarget = {};
+
+    function assertTestStageElement(
+      element: TestResizeObserverTarget | HTMLElement,
+    ): asserts element is HTMLElement {
+      assert.equal(element, stageElementTarget);
+    }
+
+    class TestResizeObserver {
+      private readonly callback: TestResizeObserverCallback;
+
+      constructor(callback: TestResizeObserverCallback) {
         this.callback = callback;
         observers.push(this);
       }
 
-      observe() {}
+      observe(element: TestResizeObserverTarget) {
+        assert.equal(element, stageElementTarget);
+      }
 
       disconnect() {}
 
       trigger(width: number, height: number) {
-        this.callback(
-          [
-            {
-              borderBoxSize: [{ inlineSize: width, blockSize: height }],
-              contentRect: { width, height },
-            } as ResizeObserverEntry,
-          ],
-          this as unknown as ResizeObserver,
-        );
+        this.callback([
+          {
+            borderBoxSize: [{ inlineSize: width, blockSize: height }],
+            contentRect: { width, height },
+          },
+        ]);
       }
     }
 
-    globalThis.ResizeObserver =
-      TestResizeObserver as unknown as typeof ResizeObserver;
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      value: TestResizeObserver,
+      writable: true,
+    });
 
-    const stageElement = ref<HTMLElement | null>(null);
+    const stageElement = shallowRef<HTMLElement | null>(null);
     const scope = effectScope();
 
     try {
       const grid = scope.run(() => useAdaptiveVideoGrid(stageElement, ref(1)));
       assert.ok(grid);
 
-      stageElement.value = {} as HTMLElement;
+      assertTestStageElement(stageElementTarget);
+      stageElement.value = stageElementTarget;
       await nextTick();
 
       const observer = observers[0];
@@ -247,7 +267,15 @@ describe("useAdaptiveVideoGrid", () => {
       assert.ok(grid.layout.value.tileWidth > 0);
     } finally {
       scope.stop();
-      globalThis.ResizeObserver = originalResizeObserver;
+      if (originalResizeObserver) {
+        Object.defineProperty(globalThis, "ResizeObserver", {
+          configurable: true,
+          value: originalResizeObserver,
+          writable: true,
+        });
+      } else {
+        Reflect.deleteProperty(globalThis, "ResizeObserver");
+      }
     }
   });
 });

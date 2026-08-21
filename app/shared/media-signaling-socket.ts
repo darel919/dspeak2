@@ -9,9 +9,16 @@ import type {
   DispatchMediaSignalingOptions,
 } from "./types/media-signaling.ts";
 import { buildMediaSignalingClientHello } from "../../shared/media-signaling-protocol.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalValue,
+} from "./types/boundary.ts";
+import { asError } from "./native-mediasoup-utils.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
-export function mediaSignalingUrl(
-  configuredPath: unknown,
+export function mediaSignalingUrl<T>(
+  configuredPath: T,
   channelId: string,
   location: SignalingLocation = globalThis.window?.location || {
     protocol: "http:",
@@ -19,7 +26,7 @@ export function mediaSignalingUrl(
   },
   accessToken: string = "",
 ) {
-  if (typeof configuredPath === "string" && /^wss?:\/\//.test(configuredPath)) {
+  if (isExternalString(configuredPath) && /^wss?:\/\//.test(configuredPath)) {
     const endpoint = new URL(configuredPath);
     endpoint.searchParams.set("channelId", channelId);
     if (accessToken) endpoint.searchParams.set("accessToken", accessToken);
@@ -27,7 +34,7 @@ export function mediaSignalingUrl(
   }
   const origin = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}`;
   const base =
-    typeof configuredPath === "string" && configuredPath
+    isExternalString(configuredPath) && configuredPath
       ? configuredPath
       : `${origin}/socket`;
   const separator = base.includes("?") ? "&" : "?";
@@ -81,7 +88,7 @@ export function createMediaSignalingSocket({
   let heartbeatTimeoutMs = defaultHeartbeatTimeoutMs;
   let protocolState: ServerHello | null = null;
 
-  function reportError(error: unknown) {
+  function reportError(error: OwnedErrorValue) {
     try {
       onError(error);
     } catch (reportingError) {
@@ -136,7 +143,7 @@ export function createMediaSignalingSocket({
           data: buildHeartbeatData(heartbeatSequence),
         });
       } catch (error) {
-        reportError(error);
+        reportError(asError(error, "Media signaling heartbeat failed"));
         socket?.close(4000, "Signaling heartbeat failed");
       }
     };
@@ -181,7 +188,7 @@ export function createMediaSignalingSocket({
         try {
           onOpen();
         } catch (error) {
-          reportError(error);
+          reportError(asError(error, "Media signaling open handler failed"));
           candidate.close(4000, "Media signaling open handler failed");
         }
       };
@@ -189,11 +196,11 @@ export function createMediaSignalingSocket({
         if (socket !== candidate) return;
         try {
           mediaDebug("control.message-received", {
-            bytes: typeof event.data === "string" ? event.data.length : null,
+            bytes: isExternalString(event.data) ? event.data.length : null,
           });
           handleMessage(event.data);
         } catch (error) {
-          reportError(error);
+          reportError(asError(error, "Media signaling message handler failed"));
           candidate.close(4000, "Media signaling message handler failed");
         }
       };
@@ -231,13 +238,18 @@ export function createMediaSignalingSocket({
           try {
             onProtocolRejected(event);
           } catch (error) {
-            reportError(error);
+            reportError(
+              asError(
+                error,
+                "Media signaling protocol rejection handler failed",
+              ),
+            );
           }
         }
         try {
           onClose(event, protocolRejected);
         } catch (error) {
-          reportError(error);
+          reportError(asError(error, "Media signaling close handler failed"));
         } finally {
           if (!isIntentionalClose() && !protocolRejected) scheduleReconnect();
         }
@@ -247,7 +259,7 @@ export function createMediaSignalingSocket({
     return promise;
   }
 
-  function acceptServerHello(data: unknown) {
+  function acceptServerHello(data: ExternalValue) {
     if (!protocol.isServerHello(data)) {
       socket?.close(protocol.closeCode, protocol.closeReason);
       return false;
@@ -310,7 +322,7 @@ export function createMediaSignalingSocket({
         await reconnectNow();
       } catch (error) {
         if (!isIntentionalClose()) {
-          reportError(error);
+          reportError(asError(error, "Media signaling reconnect failed"));
           scheduleReconnect();
         }
       }
@@ -379,23 +391,27 @@ export function createMediaSignalingSocket({
   };
 }
 
-export function dispatchMediaSignalingMessage(
-  raw: unknown,
+function parseSignalingMessage<T>(value: T): SignalingMessage | null {
+  if (!isExternalRecord(value) || !isExternalString(value.type)) return null;
+  return { ...value, type: value.type };
+}
+
+export function dispatchMediaSignalingMessage<T>(
+  raw: T,
   { getHandler, onFailure }: DispatchMediaSignalingOptions,
 ) {
   let message: SignalingMessage;
   try {
-    if (typeof raw !== "string" || raw.length > 96000)
+    if (!isExternalString(raw) || raw.length > 96000)
       throw new Error("Invalid signaling payload");
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object")
-      throw new Error("Invalid signaling payload");
-    message = parsed as SignalingMessage;
+    const parsed = parseSignalingMessage(JSON.parse(raw));
+    if (!parsed) throw new Error("Invalid signaling payload");
+    message = parsed;
   } catch {
     onFailure("The media server sent an invalid message");
     return;
   }
-  if (typeof message.type !== "string") return;
+  if (!isExternalString(message.type)) return;
   const handler = getHandler(message.type);
   if (!handler) return;
   Promise.resolve(handler(message.data || {})).catch((error) => {

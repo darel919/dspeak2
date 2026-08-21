@@ -136,7 +136,7 @@ test("duplicate callback cannot start a restore while the bridge is in flight", 
 test("original bridge error is preserved and rethrown before restore fallback", () => {
   assert.match(
     authStore,
-    /request\.then\(\s*\(\) => \{[\s\S]*?\},\s*\(error\) => \{\n\s*if \(desktopCallbackPromise !== request\) return;\n\s*desktopCallbackPromiseError = error;\n\s*desktopCallbackPromise = null;\n\s*desktopCallbackCode = "";/,
+    /request\.then\(\s*\(\) => \{[\s\S]*?\},\s*\(error\) => \{[\s\S]*?desktopCallbackPromiseError = isDesktopAuthError\(error\)[\s\S]*?parseThrownError\(error\);[\s\S]*?desktopCallbackPromise = null;[\s\S]*?desktopCallbackCode = "";/,
   );
   assert.match(
     authStore,
@@ -217,7 +217,7 @@ test("event and polling both converge on completeDesktopSignIn", () => {
   assert.match(authPage, /authStore\.completePendingDesktopSignIn\(\)/);
   assert.match(
     authStore,
-    /return completeDesktopSignIn\(pending\.code, pending\.state/,
+    /return completeDesktopSignIn\(pendingCode, pendingState\)/,
   );
 });
 

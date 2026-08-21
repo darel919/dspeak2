@@ -8,17 +8,17 @@ export type DesktopOAuthStorage = Pick<
   "getItem" | "setItem" | "removeItem"
 >;
 
-type DesktopOAuthClient = {
+type DesktopOAuthClient<T> = {
   auth: {
     exchangeCodeForSession: (
       code: string,
       options?: { flowId?: string },
-    ) => Promise<unknown>;
+    ) => Promise<T>;
   };
 };
 
 function defaultStorage(): DesktopOAuthStorage | null {
-  if (typeof window === "undefined") return null;
+  if (!import.meta.client) return null;
   try {
     return window.localStorage;
   } catch {
@@ -125,13 +125,13 @@ export function isDesktopOAuthStateValid(expectedState: string, state: string) {
   return Boolean(expectedState) && expectedState === state;
 }
 
-export function exchangeDesktopOAuthCode<T = unknown>(
-  client: DesktopOAuthClient,
+export function exchangeDesktopOAuthCode<T>(
+  client: DesktopOAuthClient<T>,
   code: string,
   flowId: string,
 ) {
   return client.auth.exchangeCodeForSession(
     code,
     desktopOAuthExchangeOptions(flowId),
-  ) as Promise<T>;
+  );
 }

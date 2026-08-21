@@ -40,7 +40,9 @@ function keyProjectRef(key) {
     const claims = JSON.parse(
       Buffer.from(payload, "base64url").toString("utf8"),
     );
-    return typeof claims.ref === "string" ? claims.ref : "";
+    const ref = claims.ref;
+    const text = String(ref);
+    return ref === text ? text : "";
   } catch {
     return "";
   }

@@ -11,7 +11,7 @@ test("shared audio statistics follow the active source", () => {
   assert.match(source, /getOutboundTrackStats\(source\)/);
 });
 
-function createEngine({ context, p2pMesh, sfu, sharedAudioDucking }) {
+function createEngine({ context: _context, p2pMesh, sfu, sharedAudioDucking }) {
   return createLocalAudioEngine({
     authStore: { getUserData: () => ({ id: "local-user" }) },
     automaticGateThreshold: () => -40,
@@ -386,7 +386,7 @@ test("shared audio waits for its processing context before publication", async (
       stream: new MediaStream([{ id: "capture", kind: "audio" }]),
       track: { id: "capture", kind: "audio" },
     });
-    assert.equal(typeof publication.then, "function");
+    assert.equal(publication instanceof Promise, true);
     assert.equal((await publication).track, destinationTrack);
     assert.equal(resumed, 1);
   } finally {

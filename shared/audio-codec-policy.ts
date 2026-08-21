@@ -1,3 +1,15 @@
+import type {
+  AudioCaptureConstraints,
+  AudioCodecPolicyValue,
+  AudioSourceType,
+  CaptureProcessingMode,
+  CaptureSourceType,
+} from "./types/audio-codec.ts";
+
+type CaptureConstraintTable = {
+  [sourceType in CaptureSourceType]: AudioCaptureConstraints;
+};
+
 export const AudioCodecPolicy = {
   STANDARD_MICROPHONE: Object.freeze({
     codec: "opus",
@@ -115,7 +127,7 @@ export function getCaptureConstraints(
   mode: CaptureProcessingMode = AudioCodecPolicy.CaptureProcessingMode.DEFAULT,
   _options: MediaTrackConstraints = {},
 ) {
-  const baseConstraints: Record<CaptureSourceType, AudioCaptureConstraints> = {
+  const baseConstraints: CaptureConstraintTable = {
     microphone: {
       audio: {
         sampleRate: 48000,
@@ -168,10 +180,3 @@ export function getCaptureConstraints(
 
   return constraints;
 }
-import type {
-  AudioCaptureConstraints,
-  AudioCodecPolicyValue,
-  AudioSourceType,
-  CaptureProcessingMode,
-  CaptureSourceType,
-} from "./types/audio-codec.ts";

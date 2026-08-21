@@ -1,6 +1,7 @@
 import type { HybridSessionOperationsContext } from "./types/hybrid-media-session.ts";
 import type { SignalingMessage } from "./types/media-signaling.ts";
 import type { TopologyData } from "./types/topology-controller.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
 export function createHybridMediaSessionOperations({
   getSignaling,
@@ -20,7 +21,7 @@ export function createHybridMediaSessionOperations({
       getTopologyController()?.queueTopology(data) || Promise.resolve(),
     reportSfuFailure: (reason: string) =>
       getTopologyController()?.reportSfuFailure(reason),
-    failSession: (message: unknown) =>
+    failSession: (message: OwnedErrorValue) =>
       getSessionTermination()?.failSession(message),
     disconnect: () => getSessionTermination()?.disconnect(),
     connect: (nextChannelId: string, options: { roomId?: string } = {}) =>

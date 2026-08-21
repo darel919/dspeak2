@@ -1,11 +1,14 @@
+import { normalizeCommit } from "../../../../shared/app-build.ts";
+import { parseExternalString } from "../../../../shared/types/external.ts";
 import { configuredSupabaseProjectRef } from "../../../auth/supabase.ts";
 
 export default defineEventHandler(async (event) => {
   const runtimeConfig = useRuntimeConfig(event);
   const serverBuildCommit =
-    typeof runtimeConfig.public?.appBuild?.shortCommit === "string"
-      ? runtimeConfig.public.appBuild.shortCommit
-      : "";
+    normalizeCommit(
+      parseExternalString(runtimeConfig.public?.appBuild?.shortCommit),
+      { short: true },
+    ) ?? "";
 
   return {
     buildCommit: serverBuildCommit,

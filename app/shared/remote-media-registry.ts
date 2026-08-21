@@ -37,6 +37,8 @@ import {
   DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
 } from "./remote-source-convergence.ts";
 import type { RemoteReceiverStats } from "./remote-source-convergence.ts";
+import { isExternalString } from "./types/boundary.ts";
+import type { RemoteSourceProvider } from "./remote-source-convergence.ts";
 
 const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
 const VISIBLE_VOICE_DETECTION_INTERVAL_MS = 120;
@@ -50,20 +52,17 @@ export interface RemoteMediaRegistryOptions {
   isDeafened: () => boolean;
   isBroadcastMode: () => boolean;
   isAnyoneSpeaking: () => boolean;
-  onSpeaking: (userId: string, speaking: boolean) => unknown;
+  onSpeaking: (userId: string, speaking: boolean) => void;
   getAttenuation: (
     entry: Record<string, unknown>,
   ) => RegistryAttenuation | null;
-  onVideoReceivingChange: (
-    entry: RemoteMediaEntry,
-    receiving: boolean,
-  ) => unknown;
+  onVideoReceivingChange: (entry: RemoteMediaEntry, receiving: boolean) => void;
   onPlaybackState: (state: {
     userId: string | null;
     state: string;
     error: { name: string; message: string } | null;
-  }) => unknown;
-  onEffectiveGain: (state: AttenuationReportInput) => unknown;
+  }) => void;
+  onEffectiveGain: (state: AttenuationReportInput) => void;
   getReceiverStats?: (
     entry: RemoteMediaEntry,
   ) => Promise<RemoteReceiverStats | null>;
@@ -72,7 +71,19 @@ export interface RemoteMediaRegistryOptions {
     attempt: number,
     signal: AbortSignal,
   ) => Promise<boolean> | boolean;
-  onReceiverFailed?: (entry: RemoteMediaEntry) => unknown;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => void;
+}
+
+function remoteProvider(value: string): RemoteSourceProvider {
+  if (
+    value === "p2p" ||
+    value === "sfu" ||
+    value === "cloudflare-realtime" ||
+    value === "native-p2p" ||
+    value === "native-sfu"
+  )
+    return value;
+  return "sfu";
 }
 
 export function replaceMediaStreamTrack(
@@ -177,7 +188,7 @@ export class RemoteMediaRegistry {
   }
 
   createIncarnation(entry: RemoteMediaEntry): RemoteSourceIncarnation {
-    const provider = entry.provider as RemoteSourceIncarnation["provider"];
+    const provider = remoteProvider(entry.provider);
     const connectionEpoch = entry.connectionEpoch ?? 1;
     const sourceGeneration = entry.sourceGeneration ?? 1;
     const receiverIncarnationId =
@@ -240,12 +251,7 @@ export class RemoteMediaRegistry {
       previousEntry.track?.kind === "video"
     )
       entry = { ...entry, stream: previousEntry.stream };
-    if (
-      previousEntry?.stream &&
-      entry.stream &&
-      entry.track &&
-      typeof entry.stream.getTracks === "function"
-    )
+    if (previousEntry?.stream && entry.stream && entry.track)
       replaceMediaStreamTrack(entry.stream, entry.track);
     const incarnation = this.createIncarnation(entry);
     const isNewIncarnation =
@@ -301,7 +307,7 @@ export class RemoteMediaRegistry {
           ? (this.receivingPreferences.get(entry.key) ??
             current?.receiving ??
             false)
-          : typeof document === "undefined" || !document.hidden;
+          : !import.meta.client || !document.hidden;
       entry.track.enabled = receiving;
       setIntentionalReceivingDisabled(convergenceState, !receiving);
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
@@ -609,7 +615,7 @@ export class RemoteMediaRegistry {
     this.audioContextToken = contextToken;
     this.audioContext = context;
     const sinkId = this.getOutputDevice();
-    if (sinkId && typeof context.setSinkId === "function") {
+    if (sinkId && context.setSinkId instanceof Function) {
       try {
         Promise.resolve(context.setSinkId(sinkId)).catch((error) => {
           if (
@@ -675,7 +681,7 @@ export class RemoteMediaRegistry {
   applyOutputDevice() {
     const sinkId = this.getOutputDevice();
     const context = this.audioContext;
-    if (!context || typeof context.setSinkId !== "function") {
+    if (!context || !(context.setSinkId instanceof Function)) {
       if (sinkId)
         this.publishPlaybackState(
           null,
@@ -858,13 +864,13 @@ export class RemoteMediaRegistry {
     graph.resumeTimer?.unref?.();
   }
 
-  async recoverOutputDevice(
+  async recoverOutputDevice<T>(
     output: AudioContext,
     userId: string | number | null,
-    error: unknown,
+    error: T,
   ) {
     this.publishPlaybackState(userId, "output-failed", error);
-    if (typeof output.setSinkId !== "function") return false;
+    if (!(output.setSinkId instanceof Function)) return false;
     try {
       await output.setSinkId("");
       this.publishPlaybackState(userId, "default-output");
@@ -875,10 +881,10 @@ export class RemoteMediaRegistry {
     }
   }
 
-  publishPlaybackState(
+  publishPlaybackState<T>(
     userId: string | number | null,
     state: string,
-    error: unknown = null,
+    error: T | null = null,
   ) {
     try {
       const result = this.onPlaybackState?.({
@@ -889,7 +895,7 @@ export class RemoteMediaRegistry {
             ? { name: error.name, message: error.message }
             : null,
       });
-      Promise.resolve(result).catch((callbackError: unknown) => {
+      Promise.resolve(result).catch((callbackError) => {
         console.warn("[Media] playback-state observer failed", callbackError);
       });
     } catch (callbackError) {
@@ -985,7 +991,7 @@ export class RemoteMediaRegistry {
   ) {
     try {
       const result = this.onSpeaking?.(String(userId ?? ""), speaking);
-      Promise.resolve(result).catch((error: unknown) => {
+      Promise.resolve(result).catch((error) => {
         console.warn("[Media] speaking observer failed", error);
       });
     } catch (error) {
@@ -1094,10 +1100,9 @@ export class RemoteMediaRegistry {
   ) {
     const state = this.remoteSourceConvergence.get(key);
     if (!state) return false;
-    const expected =
-      typeof expectedReceiverIncarnation === "string"
-        ? expectedReceiverIncarnation
-        : expectedReceiverIncarnation.receiverIncarnationId;
+    const expected = isExternalString(expectedReceiverIncarnation)
+      ? expectedReceiverIncarnation
+      : expectedReceiverIncarnation.receiverIncarnationId;
     return state.incarnation.receiverIncarnationId === expected;
   }
 

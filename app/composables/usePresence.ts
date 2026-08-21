@@ -5,12 +5,11 @@ import { usePresenceStatusStore } from "../stores/presenceStatus";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
 import type { Ref } from "vue";
-import type {
-  PresenceRealtimeMessage,
-  PresenceRecord,
-} from "../shared/types/presence.ts";
+import type { PresenceRealtimeMessage } from "../shared/types/presence.ts";
+import { parsePresenceChannelMessage } from "../shared/types/presence-status.ts";
 import type { IdentityProfile } from "../shared/types/identity.ts";
 import type { VoiceUserRecord } from "../shared/types/voice-media-actions.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 export function usePresence(userId: string | Ref<string | null | undefined>) {
   const status = ref<string>("disconnected");
@@ -22,7 +21,7 @@ export function usePresence(userId: string | Ref<string | null | undefined>) {
   const roomsStore = useRoomsStore();
   const presenceStatusStore = usePresenceStatusStore();
   let voiceStorePromise: Promise<{
-    upsertUserProfile: (profile: VoiceUserRecord) => unknown;
+    upsertUserProfile: (profile: VoiceUserRecord) => void;
   }> | null = null;
 
   function loadVoiceStore() {
@@ -92,13 +91,14 @@ export function usePresence(userId: string | Ref<string | null | undefined>) {
     intentionallyDisconnected = false;
     debugLog("[usePresence] Subscribing to global presence channel");
     openRealtimeChannel<PresenceRealtimeMessage>("global", {
+      decodePayload: parsePresenceChannelMessage,
       onMessage: receiveMessage,
       onSubscribe: () => {
         debugLog("[usePresence] Global channel subscribed");
         status.value = "connected";
         presenceStatusStore.connectionStatus = "connected";
       },
-      onError: (err: unknown, channelStatus: string) => {
+      onError: (err: ExternalField, channelStatus: string) => {
         debugLog("[usePresence] Global channel error:", err, channelStatus);
         status.value = "disconnected";
         presenceStatusStore.connectionStatus = "disconnected";

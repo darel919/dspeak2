@@ -1,3 +1,5 @@
+import { isExternalString } from "./types/boundary.ts";
+
 const THEMES = Object.freeze({
   default: {
     "voice-join": "/sounds/default_connect.ogg",
@@ -33,7 +35,7 @@ export function systemSoundAsset(
   theme: keyof typeof THEMES = "default",
 ) {
   const value = THEMES[theme]?.[event];
-  return typeof value === "string" ? value : null;
+  return isExternalString(value) ? value : null;
 }
 
 function volume(settings: SoundSettings) {
@@ -43,7 +45,7 @@ function volume(settings: SoundSettings) {
 async function playAsset(path: string, settings: SoundSettings) {
   const audio = new Audio(path);
   audio.volume = volume(settings);
-  if (settings.outputDeviceId && typeof audio.setSinkId === "function") {
+  if (settings.outputDeviceId && audio.setSinkId instanceof Function) {
     try {
       await audio.setSinkId(settings.outputDeviceId);
     } catch (error) {
@@ -85,6 +87,6 @@ function playTone(notes: number[], settings: SoundSettings) {
 export function playSystemSound(event: SoundEvent, settings: SoundSettings) {
   if (!import.meta.client || settings.systemSoundsMuted) return;
   const sound = THEMES[settings.systemSoundTheme]?.[event];
-  if (typeof sound === "string") return playAsset(sound, settings);
+  if (isExternalString(sound)) return playAsset(sound, settings);
   if (Array.isArray(sound)) playTone(sound, settings);
 }

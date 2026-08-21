@@ -15,6 +15,11 @@ import type {
   ChatMessageRow,
 } from "../../types/chat-api.ts";
 import type { H3Event } from "h3";
+import {
+  parseExternalError,
+  parseExternalNumber,
+  parseExternalRecord,
+} from "../../../shared/types/external.ts";
 
 export function createChatDiscoveryHandler(
   dependencies: ChatRouteDependencies,
@@ -86,19 +91,14 @@ export function createChatDiscoveryHandler(
             );
           await roomAccessCache.get(channel.roomId);
           accessibleBookmarks.push({ bookmark, message });
-        } catch (error: unknown) {
-          const errorRecord =
-            error && typeof error === "object"
-              ? (error as {
-                  statusCode?: number;
-                  status?: number;
-                  response?: { status?: number };
-                })
-              : {};
+        } catch (error) {
+          const details = parseExternalError(error);
+          const record = parseExternalRecord(error);
+          const response = parseExternalRecord(record?.response);
           const status =
-            errorRecord.statusCode ||
-            errorRecord.status ||
-            errorRecord.response?.status;
+            details.statusCode ||
+            details.status ||
+            parseExternalNumber(response?.status);
           if (status !== 403 && status !== 404) throw error;
         }
       }

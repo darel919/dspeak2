@@ -13,9 +13,8 @@ import {
   membershipRoles,
   channels,
 } from "../db/schema/index.ts";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type {
-  AuthorizationChannel,
   AuthorizationChannelUpdate,
   AuthorizationRoom,
   CachedRoomAccess,

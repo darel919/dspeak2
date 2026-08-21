@@ -12,6 +12,11 @@ import {
   normalizeSlowMode,
 } from "../../../shared/channel-policy.ts";
 
+type ChannelPolicyUpdate = {
+  policy?: string;
+  slowMode?: number;
+};
+
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
   const method = getMethod(event);
@@ -74,7 +79,7 @@ export default defineEventHandler(async (event) => {
 
     await requireRoomPermission(room, userId, "channel.update");
 
-    const updateData: { policy?: string; slowMode?: number } = {};
+    const updateData: ChannelPolicyUpdate = {};
     if (policy !== undefined) {
       updateData.policy = normalizeChannelPolicy(policy);
     }

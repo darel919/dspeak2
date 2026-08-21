@@ -9,8 +9,11 @@ import {
   normalizeParticipantMediaCapabilities,
   normalizeVideoCodecName,
 } from "../types/video-codec-capabilities.ts";
+import type { ExternalValue } from "../types/boundary.ts";
+import { isExternalRecord, isExternalString } from "../types/boundary.ts";
 
 import { sourceFromTrackId } from "./helpers.ts";
+import { asError } from "../native-mediasoup-utils.ts";
 import type {
   NativeP2pSessionPeer,
   NativeP2pSessionSurface,
@@ -22,7 +25,7 @@ export const NATIVE_P2P_CODEC_MIGRATION_TIMEOUT_MS = 5000;
 export const NATIVE_P2P_CODEC_MIGRATION_STABILIZATION_MS = 1500;
 export const NATIVE_P2P_CODEC_MIGRATION_MAX_FRAME_GAP_MS = 1000;
 
-function positiveMetadataNumber(value: unknown) {
+function positiveMetadataNumber<T>(value: T) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
 }
@@ -30,7 +33,7 @@ function positiveMetadataNumber(value: unknown) {
 function p2pSourceTarget(source: NativeP2pSource) {
   const target: Record<string, number> = {};
   const requested =
-    source.target && typeof source.target === "object" ? source.target : {};
+    source.target && isExternalRecord(source.target) ? source.target : {};
   for (const key of ["width", "height", "fps", "bitrate"] as const) {
     const value = positiveMetadataNumber(requested[key] ?? source[key]);
     if (value) target[key] = value;
@@ -278,14 +281,15 @@ export function finalizeP2pVideoMigration(
   session._emitState();
   return true;
 }
-export class NativeP2pSessionLifecycleMethods {
+export const nativeP2pSessionLifecycleMethods: Partial<NativeP2pSessionSurface> &
+  ThisType<NativeP2pSessionSurface> = {
   async _acceptOffer(
     this: NativeP2pSessionSurface,
     peer: NativeP2pSessionPeer,
-    sdp: unknown,
+    sdp: ExternalValue,
   ) {
     const hadRemoteDescription = peer.remoteDescriptionSet;
-    const remoteSdp = typeof sdp === "string" ? sdp : String(sdp || "");
+    const remoteSdp = isExternalString(sdp) ? sdp : String(sdp || "");
     if (
       !remoteSdp ||
       peer.closed ||
@@ -302,7 +306,7 @@ export class NativeP2pSessionLifecycleMethods {
           peer.negotiationInFlight = false;
           peer.negotiationRequested = false;
         } catch (error) {
-          this.onError?.(error);
+          this.onError?.(asError(error, "Native P2P offer rollback failed"));
           return false;
         }
       } else {
@@ -339,9 +343,11 @@ export class NativeP2pSessionLifecycleMethods {
           p2pHandle: peer.handle,
         });
       } catch (rollbackError) {
-        this.onError?.(rollbackError);
+        this.onError?.(
+          asError(rollbackError, "Native P2P answer rollback failed"),
+        );
       }
-      this.onError?.(error);
+      this.onError?.(asError(error, "Native P2P answer failed"));
       return false;
     } finally {
       const pendingOffer = peer.pendingOffer;
@@ -356,7 +362,7 @@ export class NativeP2pSessionLifecycleMethods {
       )
         await this._acceptOffer(peer, pendingOffer);
     }
-  }
+  },
 
   async _createOffer(
     this: NativeP2pSessionSurface,
@@ -383,20 +389,20 @@ export class NativeP2pSessionLifecycleMethods {
     peer.offerCreated = true;
     this._sendSignal(peer.peerId, { description: { type: "offer", sdp } });
     return true;
-  }
+  },
 
   _sendSignal(
     this: NativeP2pSessionSurface,
     targetPeerId: string,
     signal: Record<string, unknown>,
   ) {
-    if (typeof this.sendSignal !== "function") return false;
+    if (!(this.sendSignal instanceof Function)) return false;
     return this.sendSignal({
       targetPeerId,
       epoch: this.epoch,
       signal,
     });
-  }
+  },
 
   async _addCandidate(
     this: NativeP2pSessionSurface,
@@ -407,7 +413,7 @@ export class NativeP2pSessionLifecycleMethods {
       p2pHandle: peer.handle,
       candidate: JSON.stringify(candidate),
     });
-  }
+  },
 
   async _flushCandidates(
     this: NativeP2pSessionSurface,
@@ -416,7 +422,7 @@ export class NativeP2pSessionLifecycleMethods {
     const candidates = peer.pendingCandidates.splice(0);
     for (const candidate of candidates)
       await this._addCandidate(peer, candidate);
-  }
+  },
 
   _handleP2pEvent(
     this: NativeP2pSessionSurface,
@@ -432,7 +438,7 @@ export class NativeP2pSessionLifecycleMethods {
         sdpMid: payload.sdpMid,
         sdpMLineIndex: payload.sdpMLineIndex,
       };
-      if (typeof candidate.candidate === "string" && candidate.candidate)
+      if (isExternalString(candidate.candidate) && candidate.candidate)
         this._sendSignal(peer.peerId, { candidate });
       return true;
     }
@@ -635,7 +641,7 @@ export class NativeP2pSessionLifecycleMethods {
       return true;
     }
     return true;
-  }
+  },
 
   _handleIceState(
     this: NativeP2pSessionSurface,
@@ -670,7 +676,7 @@ export class NativeP2pSessionLifecycleMethods {
     }
     if (state === 4) this._failPeer(peer, "ICE failed");
     if (state === 6) this._failPeer(peer, "ICE connection closed");
-  }
+  },
 
   async _restartIce(this: NativeP2pSessionSurface, peer: NativeP2pSessionPeer) {
     const sdp = await this.invoke("media_p2p_restart_ice", {
@@ -693,7 +699,7 @@ export class NativeP2pSessionLifecycleMethods {
     }, this.iceRestartTimeoutMs);
     peer.restartTimer.unref?.();
     return true;
-  }
+  },
 
   _failPeer(
     this: NativeP2pSessionSurface,
@@ -706,7 +712,7 @@ export class NativeP2pSessionLifecycleMethods {
     const error = new Error(`Native P2P ${reason}`);
     if (cause) error.cause = cause;
     this.onError?.(error);
-  }
+  },
 
   _startHealthPump(this: NativeP2pSessionSurface, peer: NativeP2pSessionPeer) {
     if (peer.healthTimer) return;
@@ -724,19 +730,19 @@ export class NativeP2pSessionLifecycleMethods {
           message,
         });
       } catch (error: unknown) {
-        this.onError?.(error);
+        this.onError?.(asError(error, "Native P2P health send failed"));
       }
     };
     send();
     peer.healthTimer = setInterval(send, 1000);
     peer.healthTimer.unref?.();
-  }
+  },
 
   _stopHealthPump(this: NativeP2pSessionSurface, peer: NativeP2pSessionPeer) {
     if (!peer.healthTimer) return;
     clearInterval(peer.healthTimer);
     peer.healthTimer = null;
-  }
+  },
 
   _checkPeerQualification(
     this: NativeP2pSessionSurface,
@@ -764,7 +770,7 @@ export class NativeP2pSessionLifecycleMethods {
         .map((candidate) => candidate.peerId),
       epoch: this.epoch,
     });
-  }
+  },
 
   _hasExpectedMedia(this: NativeP2pSessionSurface, peer: NativeP2pSessionPeer) {
     for (const source of peer.remoteSourceNames) {
@@ -779,7 +785,7 @@ export class NativeP2pSessionLifecycleMethods {
       if (entry.kind === "video" && !entry.frame) return false;
     }
     return true;
-  }
+  },
 
   _requestOffer(this: NativeP2pSessionSurface, peer: NativeP2pSessionPeer) {
     peer.negotiationRequested = true;
@@ -797,7 +803,7 @@ export class NativeP2pSessionLifecycleMethods {
         peer.negotiationInFlight = false;
         if (created && peer.negotiationRequested) this._requestOffer(peer);
       })
-      .catch((error: unknown) => {
+      .catch((error) => {
         peer.negotiationInFlight = false;
         this.retryP2pOfferWithSoftwareFallback(peer, error)
           .then((recovered) => {
@@ -808,12 +814,12 @@ export class NativeP2pSessionLifecycleMethods {
             peer.negotiationRequested = true;
             this.onError?.(error);
           })
-          .catch((fallbackError: unknown) => {
+          .catch((fallbackError) => {
             peer.negotiationRequested = true;
             this.onError?.(fallbackError);
           });
       });
-  }
+  },
 
   async _closePeer(this: NativeP2pSessionSurface, peerId: string) {
     const peer = this.peers.get(peerId);
@@ -826,7 +832,7 @@ export class NativeP2pSessionLifecycleMethods {
     peer.capabilityWaitTimer = null;
     peer.pendingOffer = null;
     this._stopHealthPump(peer);
-    for (const entry of [...this.trackEntries.values()]) {
+    for (const entry of this.trackEntries.values()) {
       if (entry.userId !== peer.userId) continue;
       entry.closed = true;
       if (entry.migrationTimer) clearTimeout(entry.migrationTimer);
@@ -836,7 +842,9 @@ export class NativeP2pSessionLifecycleMethods {
         if (entry.visible !== false && entry.superseded !== true)
           this.onRemoteTrackEnded?.(entry);
       } catch (error: unknown) {
-        this.onError?.(error);
+        this.onError?.(
+          asError(error, "Native P2P remote track cleanup failed"),
+        );
       }
     }
     for (const [key, entry] of this.retiredTrackEntries) {
@@ -845,13 +853,11 @@ export class NativeP2pSessionLifecycleMethods {
     try {
       await this.invoke("media_p2p_destroy", { p2pHandle: peer.handle });
     } catch (error: unknown) {
-      this.onError?.(error);
+      this.onError?.(asError(error, "Native P2P peer cleanup failed"));
     }
-  }
+  },
 
   _emitState(this: NativeP2pSessionSurface) {
     this.onStateChange?.(this);
-  }
-}
-
-export interface NativeP2pSessionLifecycleMethods extends NativeP2pSessionSurface {}
+  },
+};

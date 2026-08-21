@@ -1,3 +1,8 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { NativeP2pMeshSurface } from "./native-p2p.ts";
 import type { createHybridMediaSessionTermination } from "../../shared/hybrid-media-session-termination.ts";
 import type { createHybridMediaSessionRuntime } from "../../shared/hybrid-media-session-runtime.ts";
@@ -22,27 +27,32 @@ import type { RtcStatsSnapshot } from "./rtc-stats.ts";
 import type { MediaCaptureStartOptions } from "./media-capture.ts";
 import type { RemotePresentationObservationMode } from "../remote-source-convergence.ts";
 
-export type HybridSessionDynamicFunction = (...args: unknown[]) => unknown;
+export type HybridSessionDynamicFunction = (
+  ...args: unknown[]
+) => MediaCommandResult;
 export interface HybridMediaSessionApiContext {
   activeProviderState: Ref<string | null>;
   areTransportsIceConnected: () => Promise<boolean>;
-  connect: (channelId: string, options?: { roomId?: string }) => unknown;
+  connect: (
+    channelId: string,
+    options?: { roomId?: string },
+  ) => MediaCommandResult;
   connected: Ref<boolean>;
   connectionPhase: Ref<string>;
-  disconnect: () => unknown;
+  disconnect: () => MediaCommandResult;
   echoDetected: Ref<boolean>;
   error: Ref<string | null>;
-  getInboundRtpStats: () => Promise<unknown>;
-  getOutboundRtpStats: () => Promise<unknown>;
+  getInboundRtpStats: () => Promise<Array<Record<string, unknown>>>;
+  getOutboundRtpStats: () => Promise<Array<Record<string, unknown>>>;
   getVoiceTransportTimeout: () => number;
-  getWebRTCDiagnosticStats: () => Promise<unknown>;
+  getWebRTCDiagnosticStats: () => Promise<Array<Record<string, unknown>>>;
   getWebRTCStatsSnapshot: () => Promise<RtcStatsSnapshot>;
   iceConnectedBoth: Ref<boolean>;
   isProducing: Ref<boolean>;
   joinReady: Ref<boolean>;
   lastInRoom: Ref<unknown>;
-  lastReceivedConsumerParams: () => unknown;
-  lastSentClientRtpCapabilities: () => unknown;
+  lastReceivedConsumerParams: () => MediaCommandResult;
+  lastSentClientRtpCapabilities: () => MediaCommandResult;
   consumers: Ref<unknown>;
   lifecycle: Ref<unknown>;
   localVideoFeeds: Ref<Map<string, MediaVideoFeed>>;
@@ -54,25 +64,25 @@ export interface HybridMediaSessionApiContext {
   peerConnectionMetrics: Ref<unknown>;
   peerRoundTripTimes: Ref<unknown>;
   playbackState: Ref<unknown>;
-  prepareAudioPlayback: () => unknown;
+  prepareAudioPlayback: () => MediaCommandResult;
   producers: Ref<unknown>;
   protocolState: Ref<unknown>;
   protocolUpdateRequired: Ref<unknown>;
   remoteAudioFeeds: Ref<Map<string, RemoteMediaEntry>>;
   remoteProducersCount: Ref<unknown>;
   remoteVideoFeeds: Ref<Map<string, RemoteMediaEntry>>;
-  restartAudioProduction: () => unknown;
+  restartAudioProduction: () => MediaCommandResult;
   markRemoteFirstFrame: (
     key: string,
     receiverIncarnationId?: string | null,
     fallback?: boolean,
     observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
-  ) => unknown;
+  ) => MediaCommandResult;
   markRemoteFramePresented: (
     key: string,
     receiverIncarnationId?: string | null,
     observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
-  ) => unknown;
+  ) => MediaCommandResult;
   sharedAudioAttenuation: Ref<unknown>;
   sharedAudioDucking: Ref<unknown>;
   sharedAudioStats: Ref<unknown>;
@@ -80,13 +90,16 @@ export interface HybridMediaSessionApiContext {
   sendParticipantVoiceState: (state?: {
     muted?: boolean;
     deafened?: boolean;
-  }) => unknown;
+  }) => MediaCommandResult;
   setMediaCapabilities: (value: ParticipantMediaCapabilities | null) => void;
-  setRemoteScreenReceiving: (feedKey: string, receiving: boolean) => unknown;
+  setRemoteScreenReceiving: (
+    feedKey: string,
+    receiving: boolean,
+  ) => MediaCommandResult;
   setRemoteSystemAudioReceiving: (
     feedKey: string,
     receiving: boolean,
-  ) => unknown;
+  ) => MediaCommandResult;
   setSharedAudioAttenuation: (
     speaking: boolean,
     attenuation?: {
@@ -95,31 +108,33 @@ export interface HybridMediaSessionApiContext {
       attackMs?: number;
       releaseMs?: number;
     } | null,
-  ) => unknown;
-  setSharedAudioVolume: (volume: number) => unknown;
-  setSystemAudioBitrate: (bitrate: number) => unknown;
-  startAudioProduction: () => Promise<unknown>;
+  ) => MediaCommandResult;
+  setSharedAudioVolume: (volume: number) => MediaCommandResult;
+  setSystemAudioBitrate: (bitrate: number) => MediaCommandResult;
+  startAudioProduction: () => Promise<MediaCommandResult>;
   startSystemAudioProduction: (
     options?: MediaCaptureStartOptions,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   startVideoProduction: (
     source: "camera" | "screen",
     options?: MediaCaptureStartOptions,
-  ) => Promise<unknown>;
-  stopAudioProduction: () => Promise<unknown>;
-  stopSystemAudioProduction: () => Promise<unknown>;
-  stopVideoProduction: (source: "camera" | "screen") => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
+  stopAudioProduction: () => Promise<MediaCommandResult>;
+  stopSystemAudioProduction: () => Promise<MediaCommandResult>;
+  stopVideoProduction: (
+    source: "camera" | "screen",
+  ) => Promise<MediaCommandResult>;
   topologyGraph: Ref<unknown>;
   topologyState: Ref<unknown>;
   transportReady: Ref<boolean>;
-  applyOutputDeviceToAll: () => unknown;
+  applyOutputDeviceToAll: () => MediaCommandResult;
   applyVolumeForTrack: (
     userId: string,
     source: string,
     volume: number,
-  ) => unknown;
-  applyVolumeForUser: (userId: string, volume: number) => unknown;
-  ensureAudioElements: () => unknown;
+  ) => MediaCommandResult;
+  applyVolumeForUser: (userId: string, volume: number) => MediaCommandResult;
+  ensureAudioElements: () => MediaCommandResult;
 }
 
 export type HybridP2pMesh = NativeP2pMeshSurface;
@@ -141,7 +156,7 @@ export type HybridSessionApi = ReturnType<typeof createHybridMediaSessionApi>;
 export type HybridPublicationRegistry = ReturnType<
   typeof createCloudflarePublicationRegistry
 >;
-export type HybridTopologyWaiter = (reason?: unknown) => void;
+export type HybridTopologyWaiter = (reason?: OwnedErrorValue) => void;
 export type HybridTopologyState = ReturnType<
   typeof import("../../shared/media-session-state.ts").initialMediaTopologyState
 > & { sourceRevision?: number };
@@ -158,37 +173,44 @@ export interface HybridSessionOperationsContext {
   getTopologyController: () => {
     ensureP2p: () => HybridP2pMesh | null;
     ensureSfu: () => HybridSfuSession | null;
-    handleProviderFailure: (data?: Record<string, unknown>) => unknown;
-    handleP2pQualification: (data?: Record<string, unknown>) => unknown;
-    queueTopology: (data: TopologyData) => unknown;
-    reportSfuFailure: (reason: string) => unknown;
+    handleProviderFailure: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    handleP2pQualification: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    queueTopology: (data: TopologyData) => MediaCommandResult;
+    reportSfuFailure: (reason: string) => MediaCommandResult;
   } | null;
   getSessionTermination: () => {
-    failSession: (message: unknown) => unknown;
-    disconnect: () => unknown;
+    failSession: (message: OwnedErrorValue) => MediaCommandResult;
+    disconnect: () => MediaCommandResult;
   } | null;
   getSessionLifecycle: () => {
-    connect: (channelId: string, options?: { roomId?: string }) => unknown;
+    connect: (
+      channelId: string,
+      options?: { roomId?: string },
+    ) => MediaCommandResult;
     handleSignalingClose: (
       event: CloseEvent,
       protocolRejected: boolean,
-    ) => unknown;
+    ) => MediaCommandResult;
   } | null;
 }
 
 export interface HybridSessionTerminationContext {
   capture: MediaCaptureManager;
-  clearAttenuation: () => unknown;
+  clearAttenuation: () => MediaCommandResult;
   closeMediaSessionTransports: (options: {
     capture: MediaCaptureManager;
     getP2pMesh: () => HybridP2pMesh | null;
     getSfu: () => HybridSfuSession | null;
     handoff: RemoteMediaHandoff;
     socket: WebSocket | null;
-  }) => unknown;
+  }) => MediaCommandResult;
   connected: Ref<boolean>;
-  cancelConnect?: () => unknown;
-  disposeVisibility: () => unknown;
+  cancelConnect?: () => MediaCommandResult;
+  disposeVisibility: () => MediaCommandResult;
   error: Ref<string | null>;
   handoff: RemoteMediaHandoff;
   iceConnectedBoth: Ref<boolean>;
@@ -196,7 +218,10 @@ export interface HybridSessionTerminationContext {
   getProviderSocket: () => HybridProviderSocket | null;
   getSfu: () => HybridSfuSession | null;
   lifecycleState: {
-    record: (phase: string, details?: Record<string, unknown>) => unknown;
+    record: (
+      phase: string,
+      details?: Record<string, unknown>,
+    ) => MediaCommandResult;
   };
   mediaConnectionState: Ref<string>;
   mediaPathMetrics: Ref<unknown[]>;
@@ -206,25 +231,25 @@ export interface HybridSessionTerminationContext {
   playbackState: Ref<string>;
   protocolState: Ref<Record<string, unknown> | null>;
   protocolUpdateRequired: Ref<boolean>;
-  refreshPublicMaps: () => unknown;
-  refreshTopologyGraph: () => unknown;
-  resetTopologySequencing: (reason?: string) => unknown;
+  refreshPublicMaps: () => MediaCommandResult;
+  refreshTopologyGraph: () => MediaCommandResult;
+  resetTopologySequencing: (reason?: string) => MediaCommandResult;
   rtpStatsSamples: Map<string, unknown>;
   sfuRoundTripTime: Ref<number | null>;
-  setActiveProvider: (provider: "p2p" | "sfu" | null) => unknown;
-  setChannelId: (value: string | null) => unknown;
-  setIntentionalClose: (value: boolean) => unknown;
-  setLastP2pEdges: (value: unknown[]) => unknown;
-  setP2pMesh: (value: HybridP2pMesh | null) => unknown;
-  setProviderSocket: (value: HybridProviderSocket | null) => unknown;
-  setSfu: (value: HybridSfuSession | null) => unknown;
-  sendLeave: () => unknown;
+  setActiveProvider: (provider: "p2p" | "sfu" | null) => MediaCommandResult;
+  setChannelId: (value: string | null) => MediaCommandResult;
+  setIntentionalClose: (value: boolean) => MediaCommandResult;
+  setLastP2pEdges: (value: ExternalValue[]) => MediaCommandResult;
+  setP2pMesh: (value: HybridP2pMesh | null) => MediaCommandResult;
+  setProviderSocket: (value: HybridProviderSocket | null) => MediaCommandResult;
+  setSfu: (value: HybridSfuSession | null) => MediaCommandResult;
+  sendLeave: () => MediaCommandResult;
   signaling: {
     getSocket: () => WebSocket | null;
-    stop: () => unknown;
+    stop: () => MediaCommandResult;
   };
-  stopLocalVoiceDetection: () => unknown;
-  stopSharedAudioMeter: () => unknown;
-  resolveTopologyWaiter: (reason: unknown) => unknown;
+  stopLocalVoiceDetection: () => MediaCommandResult;
+  stopSharedAudioMeter: () => MediaCommandResult;
+  resolveTopologyWaiter: (reason: OwnedErrorValue) => MediaCommandResult;
   transportReady: Ref<boolean>;
 }

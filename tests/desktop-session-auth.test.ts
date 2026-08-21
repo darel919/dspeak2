@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseAccessTokenClaims } from "../server/auth/supabase.ts";
+import type { ExternalError } from "../shared/types/external.ts";
 
 const previousSupabaseUrl = process.env.SUPABASE_URL;
 const previousSupabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -68,7 +69,7 @@ test("a verified token from another Supabase project maps to issuer mismatch", a
 
   await assert.rejects(
     () => verifySupabaseAccessToken("cross-project-token", auth),
-    (error: unknown) => {
+    (error: ExternalError) => {
       assert.ok(error instanceof SupabaseTokenIssuerMismatchError);
       assert.equal(
         error.receivedIssuer,

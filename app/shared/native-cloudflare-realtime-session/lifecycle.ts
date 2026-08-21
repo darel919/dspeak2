@@ -10,8 +10,14 @@ import type {
   NativeCloudflareTopology,
 } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
-export interface NativeCloudflareLifecycleMethods extends NativeCloudflareSessionSurface {}
-export class NativeCloudflareLifecycleMethods {
+import { isExternalRecord, isExternalString } from "../types/boundary.ts";
+
+function sourceEntry<T>(value: T): NativeCloudflareSourceEntry | null {
+  if (!isExternalRecord(value) || !isExternalString(value.source)) return null;
+  return Object.assign({}, value, { source: value.source });
+}
+export const nativeCloudflareLifecycleMethods: Partial<NativeCloudflareSessionSurface> &
+  ThisType<NativeCloudflareSessionSurface> = {
   connectionState() {
     const connected = this.iceState === 2 || this.iceState === 3;
     const failed = this.iceState === 4;
@@ -29,15 +35,16 @@ export class NativeCloudflareLifecycleMethods {
       sendRequired,
       receiveRequired,
     };
-  }
+  },
 
   expectedInboundFlowCount() {
     return [...this.consumers.values()].filter(
       (entry) => entry.receiving !== false,
     ).length;
-  }
+  },
 
   async waitForRemoteTracks(
+    this: NativeCloudflareSessionSurface,
     topology: NativeCloudflareTopology = {},
     timeoutMs = 10000,
   ) {
@@ -78,9 +85,9 @@ export class NativeCloudflareLifecycleMethods {
       timer.unref?.();
       check();
     });
-  }
+  },
 
-  async stats() {
+  async stats(this: NativeCloudflareSessionSurface) {
     if (!this.handle) return [];
     try {
       const raw = await this.invoke("media_p2p_get_stats", {
@@ -106,7 +113,7 @@ export class NativeCloudflareLifecycleMethods {
       this.onError?.(asError(error, "Native Cloudflare stats failed"));
       return [];
     }
-  }
+  },
 
   async diagnosticStats() {
     return [
@@ -124,7 +131,7 @@ export class NativeCloudflareLifecycleMethods {
         runtimeTelemetry: this.codecRuntimeTelemetry.slice(-128),
       },
     ];
-  }
+  },
 
   async _rawStats() {
     if (!this.handle) return null;
@@ -135,18 +142,26 @@ export class NativeCloudflareLifecycleMethods {
     } catch {
       return null;
     }
-  }
+  },
 
   async mediaReadiness(expectedInbound: number) {
     const outboundEntries = [
       ...this.producers.values(),
       ...this.producerVariants.values(),
-    ].filter(
-      (entry) => this.sourceTransmission.get(String(entry.source)) !== false,
-    );
-    const inboundEntries = [...this.consumers.values()].filter(
-      (entry) => entry.receiving !== false,
-    );
+    ]
+      .filter(
+        (entry) => this.sourceTransmission.get(String(entry.source)) !== false,
+      )
+      .flatMap((entry) => {
+        const parsed = sourceEntry(entry);
+        return parsed ? [parsed] : [];
+      });
+    const inboundEntries = [...this.consumers.values()]
+      .filter((entry) => entry.receiving !== false)
+      .flatMap((entry) => {
+        const parsed = sourceEntry(entry);
+        return parsed ? [parsed] : [];
+      });
     const inboundExpected = Math.max(0, Number(expectedInbound) || 0);
     const raw = await this._rawStats();
     if (!raw) {
@@ -180,14 +195,14 @@ export class NativeCloudflareLifecycleMethods {
     const outboundFlowing = outboundEntries.filter((entry) =>
       sample(
         `out:${String(entry.trackName || entry.source)}`,
-        entry as NativeCloudflareSourceEntry,
+        entry,
         "outbound-rtp",
       ),
     ).length;
     const inboundFlowing = inboundEntries.filter((entry) =>
       sample(
         `in:${String(entry.trackName || entry.trackId)}`,
-        entry as NativeCloudflareSourceEntry,
+        entry,
         "inbound-rtp",
       ),
     ).length;
@@ -201,7 +216,7 @@ export class NativeCloudflareLifecycleMethods {
       inboundExpected,
       inboundFlowing,
     };
-  }
+  },
 
   async getOutboundRtpStats() {
     const raw = await this._rawStats();
@@ -222,7 +237,7 @@ export class NativeCloudflareLifecycleMethods {
         };
       },
     );
-  }
+  },
 
   async getInboundRtpStats() {
     const raw = await this._rawStats();
@@ -245,7 +260,7 @@ export class NativeCloudflareLifecycleMethods {
         visible: entry.visible !== false,
       };
     });
-  }
+  },
 
   closeMedia() {
     this.sessionGeneration += 1;
@@ -270,14 +285,18 @@ export class NativeCloudflareLifecycleMethods {
           },
         });
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(
+          asError(error, "Native Cloudflare publication cleanup failed"),
+        );
       }
     }
     for (const entry of this.consumers.values()) {
       try {
         this._closeConsumer(entry);
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(
+          asError(error, "Native Cloudflare consumer cleanup failed"),
+        );
       }
     }
     this.producers.clear();
@@ -307,9 +326,10 @@ export class NativeCloudflareLifecycleMethods {
           this.onError?.(asError(cause, "Native Cloudflare close failed")),
       );
     return Promise.resolve();
-  }
+  },
 
   _assertCurrent(
+    this: NativeCloudflareSessionSurface,
     generation: number,
     handle: string | number | null = this.handle,
   ) {
@@ -319,11 +339,11 @@ export class NativeCloudflareLifecycleMethods {
       (handle != null && this.handle !== handle)
     )
       throw sessionClosedError();
-  }
+  },
 
   shutdown() {
     return this.closeMedia();
-  }
+  },
 
   _closeConsumer(entry: Record<string, unknown>) {
     if (!entry || entry.closed) return;
@@ -348,12 +368,14 @@ export class NativeCloudflareLifecycleMethods {
       try {
         this.onRemoteTrackEnded?.(entry);
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(
+          asError(error, "Native Cloudflare remote track cleanup failed"),
+        );
       }
     }
-  }
+  },
 
   _emitState() {
     this.onStateChange?.(this);
-  }
-}
+  },
+};

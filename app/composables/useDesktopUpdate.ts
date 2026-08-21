@@ -3,6 +3,12 @@ import type {
   DesktopUpdate,
   DesktopUpdateState,
 } from "../shared/types/desktop-update.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import { parseThrownError } from "../utils/external-values.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 const DESKTOP_UPDATE_STATE = "desktop-update-state";
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
@@ -10,6 +16,13 @@ const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 async function getTauriInvoke() {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke;
+}
+
+function parseDesktopUpdate(value: ExternalField): DesktopUpdate | null {
+  if (!isExternalRecord(value)) return null;
+  return isExternalString(value.version)
+    ? { ...value, version: value.version }
+    : { ...value };
 }
 
 function isDesktopDevelopment() {
@@ -51,9 +64,7 @@ export function useDesktopUpdate() {
 
     request = (async () => {
       const invoke = await getTauriInvoke();
-      const update = (await invoke(
-        "check_for_updates",
-      )) as DesktopUpdate | null;
+      const update = parseDesktopUpdate(await invoke("check_for_updates"));
       const previousVersion = state.value.update?.version;
       state.value = {
         ...state.value,
@@ -135,7 +146,7 @@ export function useDesktopUpdate() {
       state.value = {
         ...state.value,
         status: "error",
-        error,
+        error: parseThrownError(error),
       };
       return false;
     }

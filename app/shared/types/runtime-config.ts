@@ -1,8 +1,8 @@
-export interface PublicRuntimeConfigShape {
+export interface PublicRuntimeConfig {
   apiPath?: string;
   baseApiPath?: string;
 }
 
-export interface RuntimeConfigShape {
-  public?: PublicRuntimeConfigShape;
+export interface RuntimeConfig {
+  public?: PublicRuntimeConfig;
 }

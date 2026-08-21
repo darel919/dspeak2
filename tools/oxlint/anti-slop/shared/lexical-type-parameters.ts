@@ -1,18 +1,33 @@
 import type { ESTree } from "@oxlint/plugins";
 
 type VisitorKeys = Readonly<Record<string, readonly string[]>>;
+type NodePropertyValue =
+  ESTree.Node | readonly ESTree.Node[] | null | undefined;
 
-function isNode(value: unknown): value is ESTree.Node {
+function isNode<T>(value: T): value is T & ESTree.Node {
+  if (value === null || value === undefined || Array.isArray(value))
+    return false;
+  const nodeType = Object.getOwnPropertyDescriptor(
+    Object(value),
+    "type",
+  )?.value;
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "type" in value &&
-    typeof value.type === "string"
+    Object.prototype.toString.call(value) === "[object Object]" &&
+    Object.prototype.toString.call(nodeType) === "[object String]" &&
+    String(nodeType) === nodeType
   );
 }
 
-function propertyValue(value: object, key: string): unknown {
-  return Object.getOwnPropertyDescriptor(value, key)?.value;
+function isNodeArray<T>(value: T): value is T & readonly ESTree.Node[] {
+  return Array.isArray(value) && value.every((child) => isNode(child));
+}
+
+function propertyValue(value: ESTree.Node, key: string): NodePropertyValue {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return undefined;
+  if (isNode(descriptor.value)) return descriptor.value;
+  if (isNodeArray(descriptor.value)) return descriptor.value;
+  return undefined;
 }
 
 function collectInferTypeParameterNames(
@@ -27,11 +42,9 @@ function collectInferTypeParameterNames(
       collectInferTypeParameterNames(value, visitorKeys, names);
       continue;
     }
-    if (!Array.isArray(value)) continue;
-    for (const child of value) {
-      if (isNode(child))
-        collectInferTypeParameterNames(child, visitorKeys, names);
-    }
+    if (!isNodeArray(value)) continue;
+    for (const child of value)
+      collectInferTypeParameterNames(child, visitorKeys, names);
   }
 }
 

@@ -399,11 +399,15 @@ function formatDate(value, includeTime = false) {
   if (!value) return "";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(includeTime ? { hour: "numeric", minute: "2-digit" } : {}),
-  }).format(date);
+  const options = includeTime
+    ? {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }
+    : { month: "short", day: "numeric" };
+  return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 </script>
 

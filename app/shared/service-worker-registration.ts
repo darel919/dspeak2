@@ -1,4 +1,5 @@
 import { hasTauriRuntimeMarker } from "./desktop-capture.ts";
+import { isExternalRecord } from "./types/boundary.ts";
 
 export const SERVICE_WORKER_OPTIONS = Object.freeze({
   type: "module",
@@ -11,24 +12,30 @@ export const SERVICE_WORKER_URL = import.meta.dev
 
 const TRUSTED_TYPES_POLICY_NAME = "dspeak-service-worker";
 interface TrustedTypesPolicyLike {
-  createScriptURL: (value: string) => unknown;
+  createScriptURL: (value: string) => string;
 }
-interface TrustedTypesFactoryLike {
+type TrustedTypesRuntime = {
   createPolicy: (
     name: string,
     rules: { createScriptURL: (value: string) => string },
   ) => TrustedTypesPolicyLike;
-}
-let registrationRequest =
-  null as Promise<ServiceWorkerRegistration | null> | null;
+};
+let registrationRequest: Promise<ServiceWorkerRegistration | null> | null =
+  null;
 let trustedTypesPolicy: TrustedTypesPolicyLike | null = null;
 
+function isTrustedTypesRuntime<T>(value: T): value is T & TrustedTypesRuntime {
+  return isExternalRecord(value) && value.createPolicy instanceof Function;
+}
+
 function serviceWorkerScriptUrl() {
-  const trustedTypes = (
-    globalThis as typeof globalThis & {
-      trustedTypes?: TrustedTypesFactoryLike;
-    }
-  ).trustedTypes;
+  const trustedTypesValue = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "trustedTypes",
+  )?.value;
+  const trustedTypes = isTrustedTypesRuntime(trustedTypesValue)
+    ? trustedTypesValue
+    : null;
   if (!trustedTypes) return SERVICE_WORKER_URL;
   if (!trustedTypesPolicy) {
     trustedTypesPolicy = trustedTypes.createPolicy(TRUSTED_TYPES_POLICY_NAME, {

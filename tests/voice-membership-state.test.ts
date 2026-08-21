@@ -22,7 +22,7 @@ test("transient media route health does not clear voice membership", async () =>
 test("voice channel does not render duplicate disconnected join panels", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
 
-  assert.doesNotMatch(source, /Connect to \" \+ props\.channel\.name/);
+  assert.doesNotMatch(source, /Connect to " \+ props\.channel\.name/);
   assert.match(source, /@click="joinThisChannel"/);
 });
 

@@ -1,3 +1,5 @@
+import { isExternalRecord } from "./types/boundary.ts";
+
 type EmbedPlatform = {
   domains: string[];
   getEmbedUrl?: (url: string) => string | null;
@@ -50,7 +52,7 @@ export function getDomain(url: string): string {
   }
 }
 
-export const EMBED_PLATFORMS: Record<string, EmbedPlatform> = {
+export const EMBED_PLATFORMS = {
   youtube: {
     domains: ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"],
     getEmbedUrl: (url: string) => {
@@ -89,7 +91,7 @@ export const EMBED_PLATFORMS: Record<string, EmbedPlatform> = {
   github: {
     domains: ["github.com", "www.github.com"],
   },
-};
+} satisfies Record<string, EmbedPlatform>;
 
 export function identifyPlatform(url: string): string | null {
   try {
@@ -103,7 +105,15 @@ export function identifyPlatform(url: string): string | null {
   return null;
 }
 
-export async function fetchLinkPreview(url: string): Promise<unknown> {
+export type LinkPreviewPayload = Record<string, unknown> | null;
+
+function parseLinkPreviewPayload<T>(value: T): LinkPreviewPayload {
+  return isExternalRecord(value) ? value : null;
+}
+
+export async function fetchLinkPreview(
+  url: string,
+): Promise<LinkPreviewPayload> {
   try {
     const apiPath = window.__NUXT__?.config?.public?.apiPath || "/api";
     const response = await fetch(
@@ -111,7 +121,7 @@ export async function fetchLinkPreview(url: string): Promise<unknown> {
       { credentials: "include" },
     );
     if (!response.ok) return null;
-    return await response.json();
+    return parseLinkPreviewPayload(await response.json());
   } catch {
     return null;
   }

@@ -127,8 +127,7 @@ const supportStatus = computed(() => {
 });
 
 const swStatus = computed(() => {
-  if (typeof window === "undefined")
-    return { text: "Unknown", color: "text-warning" };
+  if (!import.meta.client) return { text: "Unknown", color: "text-warning" };
 
   if (!("serviceWorker" in navigator)) {
     return { text: "Not Available", color: "text-error" };
@@ -209,7 +208,7 @@ async function runBasicTests() {
       addResult("error", "VAPID key is missing or invalid");
     }
 
-    if (typeof window !== "undefined" && "Notification" in window) {
+    if (import.meta.client && "Notification" in window) {
       const permission = Notification.permission;
       if (permission === "granted") {
         addResult("success", "Notification permission granted");

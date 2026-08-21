@@ -41,9 +41,10 @@ describe("voice join resolves the room before connecting", () => {
       source,
       /const joiningRoomId = resolveChannelRoomId\(\s*channelsStore\.getChannelById\(channelId\),\s*\);/,
     );
+    assert.match(source, /connectOptions\.roomId = joiningRoomId/);
     assert.match(
       source,
-      /session!\.connect\(channelId,[\s\S]*?roomId: joiningRoomId/,
+      /requireSession\(session\)\.connect\(channelId, connectOptions\)/,
     );
     assert.match(source, /withVoiceJoinDeadline\(/);
   });

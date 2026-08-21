@@ -11,6 +11,10 @@ import type {
   MediasoupTransportLike,
   MediasoupTransportState,
 } from "./types/mediasoup-client.ts";
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 import {
   handleMediasoupTransportRecovery,
   restartMediasoupTransportIce,
@@ -28,8 +32,8 @@ function waitFor(
   key: string,
   timeoutMs: number,
   label: string,
-): Promise<unknown> {
-  return new Promise<unknown>((resolve, reject) => {
+): Promise<MediaCommandResult> {
+  return new Promise<MediaCommandResult>((resolve, reject) => {
     const timer = setTimeout(() => {
       map.delete(key);
       reject(new Error(`${label} timed out`));
@@ -49,16 +53,16 @@ function waitFor(
   });
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function isRecord<T>(value: T): value is T & Record<string, unknown> {
+  return isExternalRecord(value);
 }
 
-function isMediasoupMessage(value: unknown): value is MediasoupMessage {
+function isMediasoupMessage<T>(value: T): value is T & MediasoupMessage {
   return isRecord(value);
 }
 
-function parseRtpCapabilities(
-  value: unknown,
+function parseRtpCapabilities<T>(
+  value: T,
 ): MediasoupTypes.RtpCapabilities | null {
   if (!isRecord(value)) return null;
   if (value.codecs !== undefined && !Array.isArray(value.codecs)) return null;
@@ -69,22 +73,22 @@ function parseRtpCapabilities(
     return null;
   return value;
 }
-export class MediasoupClientSession {
+export class MediasoupClientSession implements MediasoupClientSessionLike {
   provider?: string;
   providerId?: string | null;
-  send!: (message: Record<string, unknown>) => unknown;
+  send!: (message: Record<string, unknown>) => MediaCommandResult;
   iceServers!: unknown[];
   onRemoteTrack?: (
     entry: import("./types/mediasoup-client.ts").MediasoupConsumerEntry,
-  ) => unknown;
+  ) => MediaCommandResult;
   onRemoteTrackEnded?: (
     entry: import("./types/mediasoup-client.ts").MediasoupConsumerEntry,
-  ) => unknown;
+  ) => MediaCommandResult;
   onStateChange?: (
     kind: string,
     state: string,
     details: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   getAudioBitrate?: (source: string) => number | null;
   getVideoSettings?: (source: string) => Record<string, unknown>;
   getAudioStereo?: (source: string) => boolean;
@@ -105,8 +109,8 @@ export class MediasoupClientSession {
     import("./types/mediasoup-client.ts").MediasoupProducerEntry
   >;
   sourceTransmission!: Map<string, boolean>;
-  sourcePublications!: Map<string, Promise<unknown>>;
-  sourceOperations!: Map<string, Promise<unknown>>;
+  sourcePublications!: Map<string, Promise<MediaCommandResult>>;
+  sourceOperations!: Map<string, Promise<MediaCommandResult>>;
   consumers!: Map<
     string,
     import("./types/mediasoup-client.ts").MediasoupConsumerEntry
@@ -117,9 +121,9 @@ export class MediasoupClientSession {
   requestedConsumers!: Set<string>;
   consumerRetryAttempts!: Map<string, number>;
   consumerRetryTimers!: Map<string, ReturnType<typeof setTimeout>>;
-  readyPromise!: Promise<unknown> | null;
-  readyResolve!: ((value?: unknown) => void) | null;
-  readyReject!: ((error: unknown) => void) | null;
+  readyPromise!: Promise<MediaCommandResult> | null;
+  readyResolve!: ((value?: MediaCommandResult) => void) | null;
+  readyReject!: ((error: OwnedErrorValue) => void) | null;
   initializationTimer!: ReturnType<typeof setTimeout> | null;
   closed!: boolean;
   lastSentClientRtpCapabilities!: unknown;
@@ -131,7 +135,10 @@ export class MediasoupClientSession {
   rtpSamples!: Map<string, { bytes: number; timestamp: number }>;
   nextRequestSequence!: number;
   recoveryAttempts!: Map<MediasoupTransportDirection, number>;
-  recoveryOperations!: Map<MediasoupTransportDirection, Promise<unknown>>;
+  recoveryOperations!: Map<
+    MediasoupTransportDirection,
+    Promise<MediaCommandResult>
+  >;
   recoveryTimers!: Map<
     MediasoupTransportDirection,
     ReturnType<typeof setTimeout>
@@ -139,6 +146,33 @@ export class MediasoupClientSession {
   mediaRevision!: number;
   initializationRequestId!: string | null;
   transportRequestIds!: Map<MediasoupTransportDirection, string>;
+  declare onError?: (error: OwnedErrorValue) => MediaCommandResult;
+  declare publish: MediasoupClientSessionLike["publish"];
+  declare publishSource: MediasoupClientSessionLike["publishSource"];
+  declare enqueueSourceOperation: MediasoupClientSessionLike["enqueueSourceOperation"];
+  declare addSourceInternal: MediasoupClientSessionLike["addSourceInternal"];
+  declare setSourceTransmission: MediasoupClientSessionLike["setSourceTransmission"];
+  declare removeSourceInternal: MediasoupClientSessionLike["removeSourceInternal"];
+  declare closeMedia: MediasoupClientSessionLike["closeMedia"];
+  declare stats: MediasoupClientSessionLike["stats"];
+  declare diagnosticStats: MediasoupClientSessionLike["diagnosticStats"];
+  declare applyJitterBufferConfig: MediasoupClientSessionLike["applyJitterBufferConfig"];
+  declare setJitterBufferConfig: MediasoupClientSessionLike["setJitterBufferConfig"];
+  declare shouldReceive: MediasoupClientSessionLike["shouldReceive"];
+  declare requestConsumer: MediasoupClientSessionLike["requestConsumer"];
+  declare setConsumerReceiving: MediasoupClientSessionLike["setConsumerReceiving"];
+  declare closeConsumerByProducer: MediasoupClientSessionLike["closeConsumerByProducer"];
+  declare resetReadiness: MediasoupClientSessionLike["resetReadiness"];
+  declare addSource: (
+    entry: import("./types/mediasoup-client.ts").MediasoupSourceEntry,
+  ) => Promise<MediaCommandResult>;
+  declare startSubscriptions?: () => Promise<MediaCommandResult>;
+  declare createConsumer: (
+    data: MediasoupMessage,
+  ) => Promise<MediaCommandResult>;
+  declare handleServerError: (
+    data: Record<string, unknown>,
+  ) => MediaCommandResult;
   constructor({
     send,
     iceServers,
@@ -168,8 +202,8 @@ export class MediasoupClientSession {
     this.recoveryTimeoutMs = recoveryTimeoutMs;
     this.consumerRetryDelayMs = consumerRetryDelayMs;
     this.device = null;
-    this.sendTransport = null as MediasoupTransportLike | null;
-    this.recvTransport = null as MediasoupTransportLike | null;
+    this.sendTransport = null;
+    this.recvTransport = null;
     this.sources = new Map();
     this.producers = new Map();
     this.sourceTransmission = new Map();
@@ -234,7 +268,7 @@ export class MediasoupClientSession {
     return this.readyPromise;
   }
 
-  async handle(type: string, data: unknown) {
+  async handle<T>(type: string, data: T) {
     if (!isMediasoupMessage(data)) return false;
     if (this.closed) return false;
     if (type === "rtp-capabilities") {
@@ -261,10 +295,8 @@ export class MediasoupClientSession {
           },
           "SFU capability negotiation",
         );
-        for (const direction of [
-          "send",
-          "recv",
-        ] as MediasoupTransportDirection[]) {
+        const directions: MediasoupTransportDirection[] = ["send", "recv"];
+        for (const direction of directions) {
           const requestId = this.requestId(`create-${direction}`);
           this.transportRequestIds.set(direction, requestId);
           this.sendOrThrow(
@@ -302,7 +334,7 @@ export class MediasoupClientSession {
           this.readyResolve = null;
           this.readyReject = null;
           for (const entry of this.sources.values()) await this.publish(entry);
-          for (const producerId of [...this.pendingConsumers])
+          for (const producerId of this.pendingConsumers)
             this.requestConsumer(producerId);
         }
       } catch (error) {
@@ -348,7 +380,11 @@ export class MediasoupClientSession {
     }
     if (type === "ice-restarted") {
       if (data.requestId)
-        this.pending.get(data.requestId)?.resolve(data.iceParameters);
+        this.pending
+          .get(data.requestId)
+          ?.resolve(
+            isExternalRecord(data.iceParameters) ? data.iceParameters : {},
+          );
       return true;
     }
     if (type === "transport-state") {
@@ -386,7 +422,7 @@ export class MediasoupClientSession {
       "connect",
       (
         { dtlsParameters }: { dtlsParameters: unknown },
-        callback: (value?: unknown) => void,
+        callback: (value?: MediaCommandResult) => void,
         errback: (error: Error) => void,
       ) => {
         const requestId = this.requestId("connect");
@@ -409,7 +445,9 @@ export class MediasoupClientSession {
             "SFU send transport connection",
           );
         } catch (error) {
-          this.pending.get(requestId)?.reject(error);
+          this.pending
+            .get(requestId)
+            ?.reject(asError(error, "SFU send transport connection failed"));
         }
         acknowledgement.then((value) => callback(value), errback);
       },
@@ -447,12 +485,18 @@ export class MediasoupClientSession {
             "SFU producer publication",
           );
         } catch (error) {
-          this.pendingProduce.get(requestId)?.reject(error);
+          this.pendingProduce
+            .get(requestId)
+            ?.reject(asError(error, "SFU producer publication failed"));
         }
-        acknowledgement.then(
-          (value) => callback(value as { id: string }),
-          errback,
-        );
+        acknowledgement.then((value) => {
+          const id =
+            isExternalRecord(value) && isExternalString(value.id)
+              ? value.id
+              : null;
+          if (id) callback({ id });
+          else errback(new Error("SFU producer response omitted its id"));
+        }, errback);
       },
     );
     sendTransport.on(
@@ -472,7 +516,7 @@ export class MediasoupClientSession {
       "connect",
       (
         { dtlsParameters }: { dtlsParameters: unknown },
-        callback: (value?: unknown) => void,
+        callback: (value?: MediaCommandResult) => void,
         errback: (error: Error) => void,
       ) => {
         const requestId = this.requestId("connect");
@@ -495,7 +539,9 @@ export class MediasoupClientSession {
             "SFU receive transport connection",
           );
         } catch (error) {
-          this.pending.get(requestId)?.reject(error);
+          this.pending
+            .get(requestId)
+            ?.reject(asError(error, "SFU receive transport connection failed"));
         }
         acknowledgement.then((value) => callback(value), errback);
       },
@@ -528,12 +574,12 @@ export class MediasoupClientSession {
       throw new Error(`${label} signaling unavailable`);
   }
 
-  rejectReadiness(error: unknown) {
+  rejectReadiness<T>(error: T) {
     const reject = this.readyReject;
     this.initializationRequestId = null;
     this.transportRequestIds.clear();
     this.resetReadiness();
-    reject?.(error);
+    reject?.(asError(error, "SFU readiness failed"));
   }
 
   connectionState() {
@@ -554,29 +600,6 @@ export class MediasoupClientSession {
   restartTransportIce(direction: MediasoupTransportDirection) {
     return restartMediasoupTransportIce(this, direction);
   }
-}
-
-export interface MediasoupClientSession extends MediasoupClientSessionLike {
-  publish: (
-    entry: import("./types/mediasoup-client.ts").MediasoupSourceEntry,
-  ) => Promise<unknown>;
-  requestConsumer: (producerId: string) => unknown;
-  createConsumer: (data: MediasoupMessage) => Promise<unknown>;
-  handleServerError: (data: Record<string, unknown>) => unknown;
-  closeConsumerByProducer: (producerId: string) => unknown;
-  setConsumerReceiving: (
-    entry: import("./types/mediasoup-client.ts").MediasoupConsumerEntry,
-    receiving: boolean,
-  ) => Promise<boolean>;
-  resetReadiness: () => void;
-  setJitterBufferConfig: (config: {
-    minDelayMs?: number;
-    targetDelayMs?: number;
-  }) => unknown;
-  addSource: (
-    entry: import("./types/mediasoup-client.ts").MediasoupSourceEntry,
-  ) => Promise<unknown>;
-  startSubscriptions?: () => Promise<unknown>;
 }
 
 Object.assign(

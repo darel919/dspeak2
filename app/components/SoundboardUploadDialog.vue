@@ -261,12 +261,14 @@ async function upload() {
   )
     return (error.value = "Files cannot exceed 5 MB.");
   try {
-    await store.upload(props.roomId, file.value, {
+    const metadata = {
       title: title.value,
       category: category.value || "General",
       icon: icon.value,
-      ...(iconImage.value ? { iconImage: iconImage.value } : {}),
-    });
+    };
+    if (iconImage.value)
+      Object.assign(metadata, { iconImage: iconImage.value });
+    await store.upload(props.roomId, file.value, metadata);
     reset();
     emit("uploaded");
     emit("close");

@@ -1,15 +1,13 @@
 import type { ApiErrorPayload } from "./types/api.ts";
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
 
-function parsePayload(value: unknown): ApiErrorPayload | null {
-  if (value && typeof value === "object" && !Array.isArray(value))
-    return value as ApiErrorPayload;
-  if (typeof value !== "string" || !value.trim()) return null;
+function parsePayload<T>(value: T): ApiErrorPayload | null {
+  if (isExternalRecord(value)) return value;
+  if (!isExternalString(value) || !value.trim()) return null;
 
   try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as ApiErrorPayload)
-      : null;
+    const parsed = JSON.parse(value);
+    return isExternalRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -25,7 +23,7 @@ function firstMessage(payload: ApiErrorPayload | null): string | undefined {
 
   return candidates.find(
     (message): message is string =>
-      typeof message === "string" && Boolean(message.trim()),
+      isExternalString(message) && Boolean(message.trim()),
   );
 }
 
@@ -39,8 +37,8 @@ function isHtmlDocument(value: string): boolean {
   );
 }
 
-export function apiErrorMessage(
-  value: unknown,
+export function apiErrorMessage<T>(
+  value: T,
   status: number | null | undefined,
   fallback = "Request failed",
 ): string {
@@ -48,7 +46,7 @@ export function apiErrorMessage(
   const message = firstMessage(payload);
   if (message) return message.trim();
 
-  if (!payload && typeof value === "string" && value.trim()) {
+  if (!payload && isExternalString(value) && value.trim()) {
     const text = value.trim();
     if (!isStackTrace(text) && !isHtmlDocument(text)) return text;
   }

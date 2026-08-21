@@ -1,6 +1,8 @@
 import { getSupabaseClient } from "../utils/supabase-client.ts";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { RealtimeChannelHandlers } from "./types/shared-utilities.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 export type RealtimeChannelLike = Pick<
   RealtimeChannel,
@@ -9,12 +11,18 @@ export type RealtimeChannelLike = Pick<
 
 interface RealtimeTopicEntry {
   topic: string;
-  handlers: Set<RealtimeChannelHandlers<unknown>>;
+  handlers: Set<RealtimeSubscriber>;
   channel: RealtimeChannelLike | null;
   closeChannel: (() => void) | null;
   status: string | null;
   closed: boolean;
   ready: Promise<RealtimeChannelLike | null> | null;
+}
+
+interface RealtimeSubscriber {
+  onMessage?: (payload: ExternalField) => void;
+  onSubscribe?: (status: string) => void;
+  onError?: (error: OwnedErrorValue, status: string) => void;
 }
 
 const topicEntries = new Map<string, RealtimeTopicEntry>();
@@ -35,9 +43,9 @@ export function getRealtimeClient() {
   return getSupabaseClient();
 }
 
-export async function openRealtimeChannel<TPayload = unknown>(
+export async function openRealtimeChannel<TPayload>(
   topic: string,
-  handlers: RealtimeChannelHandlers<TPayload> = {},
+  handlers: RealtimeChannelHandlers<TPayload>,
 ) {
   const supabaseClient = getRealtimeClient();
   if (!supabaseClient) return null;
@@ -72,15 +80,15 @@ export async function openRealtimeChannel<TPayload = unknown>(
         "broadcast",
         { event: "message" },
         (payload: Record<string, unknown>) => {
-          for (const subscriber of [...topicEntry.handlers])
+          for (const subscriber of Array.from(topicEntry.handlers))
             subscriber.onMessage?.(payload?.payload);
         },
       );
-      channel.subscribe((status: string, err?: unknown) => {
+      channel.subscribe((status: string, err?: OwnedErrorValue) => {
         if (topicEntry.closed) return;
         if (status === "SUBSCRIBED" || status === "SYNCED") {
           topicEntry.status = status;
-          for (const subscriber of [...topicEntry.handlers])
+          for (const subscriber of Array.from(topicEntry.handlers))
             subscriber.onSubscribe?.(status);
         }
         if (
@@ -104,9 +112,12 @@ export async function openRealtimeChannel<TPayload = unknown>(
 
   if (!entry) return null;
 
-  const subscriber: RealtimeChannelHandlers<unknown> = {
+  const subscriber: RealtimeSubscriber = {
     onMessage: handlers.onMessage
-      ? (payload) => handlers.onMessage?.(payload as TPayload)
+      ? (payload) => {
+          const decoded = handlers.decodePayload(payload);
+          if (decoded !== null) handlers.onMessage?.(decoded);
+        }
       : undefined,
     onSubscribe: handlers.onSubscribe,
     onError: handlers.onError,

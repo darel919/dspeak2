@@ -21,42 +21,54 @@ import type {
   VoiceMediaSessionLike,
 } from "./types/voice-media-actions.ts";
 import type { VoiceErrorLike } from "./types/shared-utilities.ts";
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 
-function voiceError(error: unknown): VoiceErrorLike & { name?: string } {
+type VoiceConnectOptions = { roomId?: string };
+
+function voiceError<T>(error: T): VoiceErrorLike & { name?: string } {
   if (error instanceof Error) {
-    return {
+    const details: VoiceErrorLike & { name?: string } = {
       name: error.name,
       message: error.message,
-      ...("code" in error && typeof error.code === "string"
-        ? { code: error.code }
-        : {}),
     };
+    if ("code" in error && isExternalString(error.code))
+      details.code = error.code;
+    return details;
   }
-  if (error && typeof error === "object") {
-    const value = error as Record<string, unknown>;
-    return {
-      ...(typeof value.name === "string" ? { name: value.name } : {}),
-      ...(typeof value.message === "string" ? { message: value.message } : {}),
-      ...(typeof value.code === "string" ? { code: value.code } : {}),
-      cause:
-        value.cause && typeof value.cause === "object"
-          ? (value.cause as { code?: string })
-          : null,
-    };
+  if (isExternalRecord(error)) {
+    const details: VoiceErrorLike & { name?: string } = { cause: null };
+    if (isExternalString(error.name)) details.name = error.name;
+    if (isExternalString(error.message)) details.message = error.message;
+    if (isExternalString(error.code)) details.code = error.code;
+    if (isExternalRecord(error.cause)) {
+      details.cause = isExternalString(error.cause.code)
+        ? { code: error.cause.code }
+        : null;
+    }
+    return details;
   }
   return {};
 }
 
-function isVoiceProducerLike(value: unknown): value is VoiceProducerLike {
-  if (!value || typeof value !== "object") return false;
+function isVoiceProducerLike<T>(value: T): value is T & VoiceProducerLike {
+  if (!isExternalRecord(value)) return false;
   if (
     "track" in value &&
     value.track != null &&
-    (typeof MediaStreamTrack === "undefined" ||
-      !(value.track instanceof MediaStreamTrack))
+    import.meta.client &&
+    !(value.track instanceof MediaStreamTrack)
   )
     return false;
-  return !("on" in value) || typeof value.on === "function";
+  return !("on" in value) || value.on instanceof Function;
+}
+
+function requireSession(
+  session: VoiceMediaSessionLike | null,
+): VoiceMediaSessionLike {
+  if (!session) throw new Error("Voice media session is unavailable");
+  return session;
 }
 
 export function createVoiceMediaActions({
@@ -96,14 +108,14 @@ export function createVoiceMediaActions({
   updateUserVoiceState,
   upsertUserProfile,
 }: VoiceMediaActionOptions) {
-  let voiceToggleOperation: Promise<unknown> = Promise.resolve();
-  let captureToggleOperation: Promise<unknown> = Promise.resolve();
+  let voiceToggleOperation: Promise<MediaCommandResult> = Promise.resolve();
+  let captureToggleOperation: Promise<MediaCommandResult> = Promise.resolve();
   const { confirm: confirmDialog } = useConfirmDialog();
 
   function createJoinTimeoutError() {
-    const timeout = new Error("Voice connection timed out");
-    (timeout as Error & { code?: string }).code = "VOICE_JOIN_TIMEOUT";
-    return timeout;
+    return Object.assign(new Error("Voice connection timed out"), {
+      code: "VOICE_JOIN_TIMEOUT",
+    });
   }
 
   function withVoiceJoinDeadline<T>(
@@ -125,13 +137,17 @@ export function createVoiceMediaActions({
     });
   }
 
-  function enqueueVoiceToggle(operation: () => unknown) {
+  function enqueueVoiceToggle(
+    operation: () => Promise<MediaCommandResult> | MediaCommandResult,
+  ) {
     const task = voiceToggleOperation.catch(() => {}).then(operation);
     voiceToggleOperation = task.catch(() => {});
     return task;
   }
 
-  function enqueueCaptureToggle(operation: () => unknown) {
+  function enqueueCaptureToggle(
+    operation: () => Promise<MediaCommandResult> | MediaCommandResult,
+  ) {
     const task = captureToggleOperation.catch(() => {}).then(operation);
     captureToggleOperation = task.catch(() => {});
     return task;
@@ -190,7 +206,7 @@ export function createVoiceMediaActions({
           error,
         );
       });
-    if (typeof document !== "undefined") {
+    if (import.meta.client) {
       try {
         const container = document.getElementById("webrtc-audio-global");
         if (container) {
@@ -219,9 +235,10 @@ export function createVoiceMediaActions({
   }
 
   async function waitForAudioSourceFlow(session: VoiceMediaSessionLike) {
-    if (typeof session?.getOutboundRtpStats !== "function") return true;
+    const getOutboundRtpStats = session?.getOutboundRtpStats;
+    if (!(getOutboundRtpStats instanceof Function)) return true;
     return waitForOutboundSourceFlow({
-      getStats: () => session.getOutboundRtpStats!(),
+      getStats: () => getOutboundRtpStats(),
       source: "audio",
       timeoutMs: session.getVoiceTransportTimeout?.() || VOICE_JOIN_TIMEOUT_MS,
     });
@@ -245,7 +262,7 @@ export function createVoiceMediaActions({
         leaveError,
       );
     } finally {
-      if (typeof document !== "undefined") {
+      if (import.meta.client) {
         try {
           const container = document.getElementById("webrtc-audio-global");
           if (container) {
@@ -256,7 +273,7 @@ export function createVoiceMediaActions({
               audio.remove();
             }
           }
-        } catch (_) {}
+        } catch {}
       }
 
       setCurrentChannel(null);
@@ -287,7 +304,7 @@ export function createVoiceMediaActions({
   }
 
   function restorePersistedVoiceState() {
-    if (typeof window === "undefined") return;
+    if (!import.meta.client) return;
     try {
       const persistedMic = localStorage.getItem(STORAGE_KEYS.voiceMicMuted);
       const persistedDeafen = localStorage.getItem(STORAGE_KEYS.voiceDeafened);
@@ -301,7 +318,7 @@ export function createVoiceMediaActions({
       );
       micMuted.value = preferences.micMuted;
       deafened.value = preferences.deafened;
-    } catch (_) {}
+    } catch {}
   }
 
   async function disposeFailedSession(session: VoiceMediaSessionLike | null) {
@@ -322,7 +339,7 @@ export function createVoiceMediaActions({
     connectedAt.value = null;
   }
 
-  function isNativeMicrophonePermissionError(permissionError: unknown) {
+  function isNativeMicrophonePermissionError<T>(permissionError: T) {
     const detailsValue = voiceError(permissionError);
     const details = [
       detailsValue.code,
@@ -342,10 +359,12 @@ export function createVoiceMediaActions({
 
   async function joinVoiceChannel(channelId: string) {
     if (nativeMediaInvalidated.value) {
-      const failure = new Error(
-        "The native media engine failed and dSpeak must be restarted.",
+      const failure = Object.assign(
+        new Error(
+          "The native media engine failed and dSpeak must be restarted.",
+        ),
+        { code: "MEDIA_WORKER_EXITED" },
       );
-      (failure as Error & { code?: string }).code = "MEDIA_WORKER_EXITED";
       throw failure;
     }
     if (
@@ -360,8 +379,10 @@ export function createVoiceMediaActions({
     const generation = ++joinGenerationState.value;
     const ensureCurrentJoin = () => {
       if (generation !== joinGenerationState.value) {
-        const cancelled = new Error("Voice connection was cancelled");
-        (cancelled as Error & { code?: string }).code = "VOICE_JOIN_CANCELLED";
+        const cancelled = Object.assign(
+          new Error("Voice connection was cancelled"),
+          { code: "VOICE_JOIN_CANCELLED" },
+        );
         throw cancelled;
       }
     };
@@ -406,11 +427,10 @@ export function createVoiceMediaActions({
       const joiningRoomId = resolveChannelRoomId(
         channelsStore.getChannelById(channelId),
       );
+      const connectOptions: VoiceConnectOptions = {};
+      if (joiningRoomId) connectOptions.roomId = joiningRoomId;
       await withVoiceJoinDeadline(
-        () =>
-          session!.connect(channelId, {
-            ...(joiningRoomId ? { roomId: joiningRoomId } : {}),
-          }),
+        () => requireSession(session).connect(channelId, connectOptions),
         deadlineAt,
       );
       ensureCurrentJoin();
@@ -425,7 +445,7 @@ export function createVoiceMediaActions({
           );
         } else {
           await withVoiceJoinDeadline(
-            () => session!.startAudioProduction(),
+            () => requireSession(session).startAudioProduction(),
             deadlineAt,
           );
         }
@@ -447,16 +467,17 @@ export function createVoiceMediaActions({
         () =>
           waitForVoiceTransportReady({
             getError: () => {
-              const value = unref(session!.error);
+              const value = unref(requireSession(session).error);
               if (value == null || value === "") return null;
-              return typeof value === "string" ? value : voiceError(value);
+              return isExternalString(value) ? value : voiceError(value);
             },
             isCurrent: () =>
               generation === joinGenerationState.value &&
               sfuComposable.value === session,
-            isReady: () => Boolean(unref(session!.joinReady)),
+            isReady: () => Boolean(unref(requireSession(session).joinReady)),
             timeoutMs: Math.min(
-              session!.getVoiceTransportTimeout?.() || VOICE_JOIN_TIMEOUT_MS,
+              requireSession(session).getVoiceTransportTimeout?.() ||
+                VOICE_JOIN_TIMEOUT_MS,
               VOICE_JOIN_TIMEOUT_MS,
             ),
           }),
@@ -465,7 +486,7 @@ export function createVoiceMediaActions({
       ensureCurrentJoin();
       if (!micMuted.value)
         await withVoiceJoinDeadline(
-          () => waitForAudioSourceFlow(session!),
+          () => waitForAudioSourceFlow(requireSession(session)),
           deadlineAt,
         );
       ensureCurrentJoin();
@@ -492,7 +513,7 @@ export function createVoiceMediaActions({
         muted: micMuted.value,
         provider: unref(session.activeProvider) || null,
       });
-    } catch (joinError: unknown) {
+    } catch (joinError) {
       const details = voiceError(joinError);
       const timedOut = details.code === "VOICE_JOIN_TIMEOUT";
       const nativeWorkerFatal = isNativeMediaWorkerFatalError(joinError);
@@ -501,7 +522,7 @@ export function createVoiceMediaActions({
         protocolUpdateRequired.value = true;
       if (nativeWorkerFatal) {
         invalidateAfterFatalMediaError();
-        playFatalError(joinError);
+        playFatalError(asError(joinError, "Voice join failed"));
       }
       await disposeFailedSession(session);
       if (timedOut) connecting.value = false;
@@ -514,14 +535,15 @@ export function createVoiceMediaActions({
       });
       console.error("[VoiceStore] Failed to join voice channel:", joinError);
       if (isFatalClientError(joinError) || nativeWorkerFatal) {
-        if (!nativeWorkerFatal) playFatalError(joinError);
+        if (!nativeWorkerFatal)
+          playFatalError(asError(joinError, "Voice join failed"));
         return;
       }
       error.value =
         voiceJoinErrorMessage(details, {
           includeDetails: import.meta.dev || isTauriRuntime(),
         }) || "Voice connection failed. Please try again.";
-      if (typeof window !== "undefined") {
+      if (import.meta.client) {
         const { useToast } = await import("~/composables/useToast");
         const { error: showError } = useToast();
         showError(error.value || "Voice connection failed", 3000);
@@ -533,10 +555,7 @@ export function createVoiceMediaActions({
   }
 
   async function ensureMicrophonePermission() {
-    if (
-      typeof navigator === "undefined" ||
-      !navigator.mediaDevices?.getUserMedia
-    )
+    if (!import.meta.client || !navigator.mediaDevices?.getUserMedia)
       throw new Error("Microphone access is not supported by this browser");
 
     if (navigator.permissions?.query) {
@@ -547,7 +566,7 @@ export function createVoiceMediaActions({
         if (status.state === "granted") return;
         if (status.state === "denied")
           throw new Error("Microphone permission is required to join the room");
-      } catch (permissionError: unknown) {
+      } catch (permissionError) {
         if (
           voiceError(permissionError).message ===
           "Microphone permission is required to join the room"
@@ -561,7 +580,7 @@ export function createVoiceMediaActions({
       permissionStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
-    } catch (permissionError: unknown) {
+    } catch (permissionError) {
       const details = voiceError(permissionError);
       if (
         details.name === "NotAllowedError" ||
@@ -589,12 +608,9 @@ export function createVoiceMediaActions({
       if (micMuted.value) {
         const start = Date.now();
         const waitMs = 5000;
-        while (
-          !Boolean(unref(session.transportReady)) &&
-          Date.now() - start < waitMs
-        )
+        while (!unref(session.transportReady) && Date.now() - start < waitMs)
           await new Promise((resolve) => setTimeout(resolve, 50));
-        if (!Boolean(unref(session.transportReady)))
+        if (!unref(session.transportReady))
           throw new Error("Voice transport not ready");
         let started = false;
         micMuted.value = false;
@@ -602,16 +618,24 @@ export function createVoiceMediaActions({
           const producer = await session.startAudioProduction();
           started = true;
           if (!connected.value || sfuComposable.value !== session) {
-            const closed = new Error("Voice media session closed");
-            (closed as Error & { code?: string }).code = "MEDIA_SESSION_CLOSED";
+            const closed = Object.assign(
+              new Error("Voice media session closed"),
+              {
+                code: "MEDIA_SESSION_CLOSED",
+              },
+            );
             throw closed;
           }
           if (isVoiceProducerLike(producer) && producer.track)
             producer.track.enabled = true;
           await waitForAudioSourceFlow(session);
           if (!connected.value || sfuComposable.value !== session) {
-            const closed = new Error("Voice media session closed");
-            (closed as Error & { code?: string }).code = "MEDIA_SESSION_CLOSED";
+            const closed = Object.assign(
+              new Error("Voice media session closed"),
+              {
+                code: "MEDIA_SESSION_CLOSED",
+              },
+            );
             throw closed;
           }
           micMuted.value = false;
@@ -634,7 +658,7 @@ export function createVoiceMediaActions({
       }
       mediaDebug("voice.mic-toggle-complete", { muted: micMuted.value });
       return true;
-    } catch (toggleError: unknown) {
+    } catch (toggleError) {
       const details = voiceError(toggleError);
       if (details.code === "MEDIA_SESSION_CLOSED") return false;
       if (details.code === "MEDIA_WORKER_EXITED") {
@@ -643,7 +667,7 @@ export function createVoiceMediaActions({
       }
       console.error("[VoiceStore] Error toggling microphone:", toggleError);
       error.value = details.message || String(toggleError);
-      if (typeof window !== "undefined") {
+      if (import.meta.client) {
         const { useToast } = await import("~/composables/useToast");
         const { error: showError } = useToast();
         showError(`Microphone error: ${error.value}`, 3000);
@@ -675,7 +699,7 @@ export function createVoiceMediaActions({
       sendParticipantVoiceState();
       await sfuComposable.value?.ensureAudioElements?.();
       return true;
-    } catch (toggleError: unknown) {
+    } catch (toggleError) {
       error.value =
         voiceError(toggleError).message || "Unable to update deafen state";
       return false;
@@ -696,7 +720,7 @@ export function createVoiceMediaActions({
       cameraEnabled.value = enable;
       syncLocalVoiceState();
       error.value = null;
-    } catch (toggleError: unknown) {
+    } catch (toggleError) {
       const details = voiceError(toggleError);
       if (generation !== cameraToggleGenerationState.value) return;
       if (details.code === "MEDIA_WORKER_EXITED") {
@@ -739,15 +763,17 @@ export function createVoiceMediaActions({
         syncLocalVoiceState();
       } else {
         screenSharing.value = false;
-        const producer = await session.startVideoProduction("screen", {
-          ...(captureSelection ? { captureSelection } : {}),
-          ...(options.explicitBrowserFallback
-            ? { explicitBrowserFallback: true }
-            : {}),
-          ...(captureSelection && captureSelection.mode !== "video"
-            ? { roomBitrateBps: effectiveSystemAudioBitrate.value * 1000 }
-            : {}),
-        });
+        const startOptions = { ...options };
+        if (captureSelection) startOptions.captureSelection = captureSelection;
+        if (options.explicitBrowserFallback)
+          startOptions.explicitBrowserFallback = true;
+        if (captureSelection && captureSelection.mode !== "video")
+          startOptions.roomBitrateBps =
+            effectiveSystemAudioBitrate.value * 1000;
+        const producer = await session.startVideoProduction(
+          "screen",
+          startOptions,
+        );
         if (!connected.value || sfuComposable.value !== session) return;
         screenSharing.value = true;
         if (
@@ -772,7 +798,7 @@ export function createVoiceMediaActions({
         }
       }
       error.value = null;
-    } catch (shareError: unknown) {
+    } catch (shareError) {
       const details = voiceError(shareError);
       if (details.code === "MEDIA_WORKER_EXITED") {
         invalidateAfterFatalMediaError();
@@ -816,15 +842,14 @@ export function createVoiceMediaActions({
               confirmLabel: "Continue",
             });
         if (!confirmed) return;
-        const producer = await session.startSystemAudioProduction({
-          ...(captureSelection ? { captureSelection } : {}),
-          ...(options.explicitBrowserFallback
-            ? { explicitBrowserFallback: true }
-            : {}),
-          ...(captureSelection
-            ? { roomBitrateBps: effectiveSystemAudioBitrate.value * 1000 }
-            : {}),
-        });
+        const startOptions = { ...options };
+        if (captureSelection) startOptions.captureSelection = captureSelection;
+        if (options.explicitBrowserFallback)
+          startOptions.explicitBrowserFallback = true;
+        if (captureSelection)
+          startOptions.roomBitrateBps =
+            effectiveSystemAudioBitrate.value * 1000;
+        const producer = await session.startSystemAudioProduction(startOptions);
         if (!connected.value || sfuComposable.value !== session) return;
         systemAudioSharing.value = true;
         const handleEnded = () => {
@@ -841,7 +866,7 @@ export function createVoiceMediaActions({
         }
       }
       error.value = null;
-    } catch (shareError: unknown) {
+    } catch (shareError) {
       const details = voiceError(shareError);
       if (details.code === "MEDIA_WORKER_EXITED") {
         invalidateAfterFatalMediaError();

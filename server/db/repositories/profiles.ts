@@ -8,6 +8,11 @@ import type {
   ProfileInsertInput,
   ProfileUpdateInput,
 } from "../../types/profile-repository.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../../shared/types/external.ts";
 
 export { EmailIdentityConflictError } from "../../auth/email-identity-conflict.ts";
 
@@ -39,15 +44,23 @@ async function findAvailableUsername(
   throw new Error("Unable to allocate a unique username");
 }
 
-function isUsernameConflict(error: unknown): boolean {
-  const value = error as {
-    constraint_name?: string;
-    cause?: { constraint_name?: string; code?: string };
-    code?: string;
+function conflictDetails(error: ExternalField) {
+  const value = parseExternalRecord(error);
+  const cause = parseExternalRecord(value?.cause);
+  return {
+    constraint:
+      parseExternalString(value?.constraint_name) ||
+      parseExternalString(cause?.constraint_name) ||
+      "",
+    sqlState:
+      parseExternalString(value?.code) ||
+      parseExternalString(cause?.code) ||
+      "",
   };
-  const constraint =
-    value.constraint_name || value.cause?.constraint_name || "";
-  const sqlState = value.code || value.cause?.code || "";
+}
+
+function isUsernameConflict(error: ExternalField): boolean {
+  const { constraint, sqlState } = conflictDetails(error);
   if (sqlState !== "23505") return false;
   return (
     constraint === "users_username_unique" ||
@@ -55,15 +68,8 @@ function isUsernameConflict(error: unknown): boolean {
   );
 }
 
-function isEmailConflict(error: unknown): boolean {
-  const value = error as {
-    constraint_name?: string;
-    cause?: { constraint_name?: string; code?: string };
-    code?: string;
-  };
-  const constraint =
-    value.constraint_name || value.cause?.constraint_name || "";
-  const sqlState = value.code || value.cause?.code || "";
+function isEmailConflict(error: ExternalField): boolean {
+  const { constraint, sqlState } = conflictDetails(error);
   if (sqlState !== "23505") return false;
   return constraint === "users_email_unique";
 }

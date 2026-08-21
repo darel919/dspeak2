@@ -1,4 +1,6 @@
-export function avatarFileName(value: unknown) {
+import type { ExternalField } from "./types/external.ts";
+
+export function avatarFileName(value: ExternalField) {
   const avatar = String(value || "").trim();
   if (!avatar) return "";
   if (!avatar.includes("/") && !avatar.includes("?")) return avatar;

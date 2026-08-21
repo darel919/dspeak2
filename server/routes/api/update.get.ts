@@ -2,13 +2,14 @@ import {
   createUnavailableSnapshot,
   getRepositoryUpdate,
 } from "../../utils/repository-update.ts";
+import { parseExternalString } from "../../../shared/types/external.ts";
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event);
   const query = getQuery(event);
   const clientBuild = {
-    ...(config.public?.appBuild || {}),
-    commit: typeof query.commit === "string" ? query.commit : null,
+    ...config.public?.appBuild,
+    commit: parseExternalString(query.commit),
   };
   const deployedBuild = config.public?.appBuild || {};
   try {

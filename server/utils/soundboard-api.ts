@@ -29,8 +29,13 @@ import type {
   SoundboardBody,
   SoundboardEvent,
 } from "../types/soundboard-api.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
-const uploadLocks = new Map<string, Promise<unknown>>();
+const uploadLocks = new Map<string, Promise<ExternalField>>();
 
 function broadcastVoiceChannelEvent(
   channelId: string,
@@ -40,7 +45,10 @@ function broadcastVoiceChannelEvent(
   return broadcastToChannel(channelId, { type, data });
 }
 
-function withRoomUploadLock(roomId: string, operation: () => Promise<unknown>) {
+function withRoomUploadLock(
+  roomId: string,
+  operation: () => Promise<ExternalField>,
+): Promise<ExternalField> {
   const previous = uploadLocks.get(roomId) || Promise.resolve();
   const result = previous.catch(() => {}).then(operation);
   uploadLocks.set(roomId, result);
@@ -243,13 +251,15 @@ async function broadcastLibraryUpdate(roomId: string) {
 
 async function updateClip(event: SoundboardEvent, userId: string) {
   const contentType = getHeader(event, "content-type") || "";
-  const body = (
-    contentType.includes("multipart/form-data")
-      ? Object.fromEntries((await readFormData(event)).entries())
-      : (await readBody(event)) || {}
-  ) as SoundboardBody;
-  const { clip, room } = await clipContext(String(body.id || ""), userId);
-  await requireClipManager(clip as SoundboardRecord, room, userId);
+  const rawBody = contentType.includes("multipart/form-data")
+    ? Object.fromEntries((await readFormData(event)).entries())
+    : (await readBody(event)) || {};
+  const body = parseExternalRecord(rawBody) ?? {};
+  const { clip, room } = await clipContext(
+    parseExternalString(body.id) || "",
+    userId,
+  );
+  await requireClipManager(clip, room, userId);
   const update: Record<string, unknown> = {};
   if (body.title !== undefined) {
     update.name = normalizeSoundboardText(body.title, 48);
@@ -414,7 +424,7 @@ export async function handleSoundboardApi(event: SoundboardEvent, suffix = "") {
   if (suffix === "icon" && method === "GET")
     return iconMedia(event, userId, String(query.id || ""));
   if (suffix === "trigger" && method === "POST")
-    return trigger(userId, ((await readBody(event)) || {}) as SoundboardBody);
+    return trigger(userId, parseExternalRecord(await readBody(event)) ?? {});
   throw createError({
     statusCode: 405,
     statusMessage: "Soundboard method not allowed",

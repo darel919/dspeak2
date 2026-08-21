@@ -11,7 +11,11 @@ export function createChatTransportActions(context: ChatStoreContext) {
         context.handleBackgroundSyncSuccess(event.data.pendingId);
     }
     if (event.data.type === "BACKGROUND_SYNC_FAILURE") {
-      if (event.data.pendingId && typeof event.data.status === "number")
+      if (
+        event.data.pendingId &&
+        event.data.status !== undefined &&
+        Number.isFinite(event.data.status)
+      )
         context.handleBackgroundSyncFailure(
           event.data.pendingId,
           event.data.status,
@@ -44,7 +48,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
     context.dependencies
       .useChannelsStore()
       .joinChannel(channelId)
-      .catch((joinError: unknown) => {
+      .catch((joinError) => {
         context.dependencies.debugLog(
           "[ChatStore] Failed to join channel membership:",
           joinError,
@@ -68,7 +72,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
     context.dependencies
       .useChannelsStore()
       .leaveChannel(channelId)
-      .catch((leaveError: unknown) => {
+      .catch((leaveError) => {
         context.dependencies.debugLog(
           "[ChatStore] Failed to leave channel membership:",
           leaveError,
@@ -369,7 +373,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
           }
         });
 
-      if (typeof window !== "undefined") {
+      if (import.meta.client) {
         try {
           const { usePushSubscription } =
             await import("../../composables/usePushSubscription");

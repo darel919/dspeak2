@@ -1,5 +1,7 @@
+import type { ExternalError } from "../../shared/types/external.ts";
+
 export async function terminateFailedStartup(
-  error: unknown,
+  error: ExternalError,
   {
     closeRuntime = async () => {},
     exit = process.exit,

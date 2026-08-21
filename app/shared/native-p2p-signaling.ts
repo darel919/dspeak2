@@ -4,10 +4,44 @@ import {
 } from "./native-p2p-common.ts";
 import { normalizeParticipantMediaCapabilities } from "./types/video-codec-capabilities.ts";
 import { selectBestPairCodec } from "./video-codec-routing.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+  type MediaCommandResult,
+} from "./types/boundary.ts";
 import type {
   NativeP2pConnectionState,
   NativeP2pSignalingMesh,
 } from "./types/native-p2p.ts";
+
+function recordValue<T>(value: T): ExternalObject | null {
+  return isExternalRecord(value) ? value : null;
+}
+
+function sessionDescription<T>(value: T): RTCSessionDescriptionInit | null {
+  const record = recordValue(value);
+  const type = record?.type;
+  if (type !== "offer" && type !== "answer" && type !== "rollback") return null;
+  const description: RTCSessionDescriptionInit = { type };
+  if (isExternalString(record?.sdp)) description.sdp = record.sdp;
+  return description;
+}
+
+function iceCandidate<T>(value: T): RTCIceCandidateInit | null {
+  const record = recordValue(value);
+  if (!record) return null;
+  const candidate: RTCIceCandidateInit = {};
+  if (isExternalString(record.candidate))
+    candidate.candidate = record.candidate;
+  if (isExternalString(record.sdpMid)) candidate.sdpMid = record.sdpMid;
+  if (isExternalNumber(record.sdpMLineIndex))
+    candidate.sdpMLineIndex = record.sdpMLineIndex;
+  if (isExternalString(record.usernameFragment))
+    candidate.usernameFragment = record.usernameFragment;
+  return Object.keys(candidate).length ? candidate : null;
+}
 
 export function signal(
   mesh: NativeP2pSignalingMesh,
@@ -30,8 +64,8 @@ export function sendControl(
     const delivered = mesh.sendSignal(payload);
     if (delivered === false) mesh.fail(failureReason);
     return delivered !== false;
-  } catch (error: unknown) {
-    mesh.fail("signaling-send-failed", error);
+  } catch (error) {
+    mesh.fail("signaling-send-failed", String(error));
     return false;
   }
 }
@@ -39,7 +73,7 @@ export function sendControl(
 export function enqueuePeerSignaling(
   mesh: NativeP2pSignalingMesh,
   state: NativeP2pConnectionState,
-  operation: () => Promise<unknown>,
+  operation: () => Promise<MediaCommandResult>,
   phase = "signal",
 ) {
   const previous = state.signalingOperation || Promise.resolve();
@@ -121,8 +155,8 @@ export function schedulePeerNegotiation(
       }
     },
     "negotiation",
-  ).catch((error: unknown) => {
-    mesh.fail("negotiation-failed", error);
+  ).catch((error) => {
+    mesh.fail("negotiation-failed", String(error));
     return false;
   });
 }
@@ -165,10 +199,7 @@ export async function receiveSignal(
   payload: Record<string, unknown>,
 ) {
   const { fromPeerId, epoch, signal: rawValue } = payload || {};
-  const value =
-    rawValue && typeof rawValue === "object"
-      ? (rawValue as Record<string, unknown>)
-      : null;
+  const value = recordValue(rawValue);
   const signalEpoch = Number(epoch);
   if (!Number.isSafeInteger(signalEpoch) || !value) return false;
   if (signalEpoch !== mesh.epoch || !mesh.connections.has(String(fromPeerId))) {
@@ -194,18 +225,12 @@ export async function applyPeerSignal(
   signalValue: Record<string, unknown>,
 ) {
   const pc = state.pc;
-  const capabilitiesSignal =
-    signalValue.capabilities && typeof signalValue.capabilities === "object"
-      ? (signalValue.capabilities as Record<string, unknown>)
-      : null;
+  const capabilitiesSignal = recordValue(signalValue.capabilities);
   if (capabilitiesSignal) {
-    state.remoteMediaCapabilities =
-      capabilitiesSignal.mediaCapabilities &&
-      typeof capabilitiesSignal.mediaCapabilities === "object"
-        ? normalizeParticipantMediaCapabilities(
-            capabilitiesSignal.mediaCapabilities,
-          )
-        : null;
+    const mediaCapabilities = recordValue(capabilitiesSignal.mediaCapabilities);
+    state.remoteMediaCapabilities = mediaCapabilities
+      ? normalizeParticipantMediaCapabilities(mediaCapabilities)
+      : null;
     if (state.capabilityWaitTimer) {
       clearTimeout(state.capabilityWaitTimer);
       state.capabilityWaitTimer = null;
@@ -223,25 +248,20 @@ export async function applyPeerSignal(
     schedulePeerNegotiation(mesh, state);
     return;
   }
-  const sourceSignal =
-    signalValue.source && typeof signalValue.source === "object"
-      ? (signalValue.source as Record<string, unknown>)
-      : null;
+  const sourceSignal = recordValue(signalValue.source);
   if (sourceSignal) {
     const source = String(sourceSignal.source || "");
     const trackId = String(sourceSignal.trackId || "");
     const sourceKey = `${state.peerId}:${source}`;
-    const ownerSource =
-      typeof sourceSignal.ownerSource === "string"
-        ? sourceSignal.ownerSource
-        : null;
+    const ownerSource = isExternalString(sourceSignal.ownerSource)
+      ? sourceSignal.ownerSource
+      : null;
     const generation = Number(sourceSignal.generation) || 0;
     const connectionEpoch = Number(sourceSignal.connectionEpoch) || 0;
     const previousGeneration = mesh.remoteSourceGenerations.get(sourceKey) || 0;
     const previousConnectionEpoch =
       mesh.remoteSourceConnectionEpochs.get(sourceKey) || 0;
 
-    // Lexicographic comparison: connectionEpoch first, then generation
     const isStale =
       connectionEpoch < previousConnectionEpoch ||
       (connectionEpoch === previousConnectionEpoch &&
@@ -289,10 +309,7 @@ export async function applyPeerSignal(
     }
     return;
   }
-  const removedSignal =
-    signalValue.sourceRemoved && typeof signalValue.sourceRemoved === "object"
-      ? (signalValue.sourceRemoved as Record<string, unknown>)
-      : null;
+  const removedSignal = recordValue(signalValue.sourceRemoved);
   if (removedSignal) {
     const source = String(removedSignal.source || "");
     const removedGeneration = Number(removedSignal.generation) || 0;
@@ -331,10 +348,7 @@ export async function applyPeerSignal(
     );
     return;
   }
-  const restoredSignal =
-    signalValue.sourceRestored && typeof signalValue.sourceRestored === "object"
-      ? (signalValue.sourceRestored as Record<string, unknown>)
-      : null;
+  const restoredSignal = recordValue(signalValue.sourceRestored);
   if (restoredSignal) {
     const source = String(restoredSignal.source || "");
     const restoredConnectionEpoch = Number(restoredSignal.connectionEpoch) || 0;
@@ -344,8 +358,6 @@ export async function applyPeerSignal(
     const currentConnectionEpoch =
       mesh.remoteSourceConnectionEpochs.get(sourceKey) || 0;
     const currentGeneration = mesh.remoteSourceGenerations.get(sourceKey) || 0;
-    // Only restore if the connection epoch matches or is newer,
-    // or if epoch matches and generation is newer
     const isStale =
       restoredConnectionEpoch < currentConnectionEpoch ||
       (restoredConnectionEpoch === currentConnectionEpoch &&
@@ -363,11 +375,7 @@ export async function applyPeerSignal(
     }
     return;
   }
-  const receivingSignal =
-    signalValue.sourceReceiving &&
-    typeof signalValue.sourceReceiving === "object"
-      ? (signalValue.sourceReceiving as Record<string, unknown>)
-      : null;
+  const receivingSignal = recordValue(signalValue.sourceReceiving);
   if (receivingSignal) {
     const source = String(receivingSignal.source || "");
     await mesh.setSenderReceiving(
@@ -377,10 +385,7 @@ export async function applyPeerSignal(
     );
     return;
   }
-  const description =
-    signalValue.description && typeof signalValue.description === "object"
-      ? (signalValue.description as RTCSessionDescriptionInit)
-      : null;
+  const description = sessionDescription(signalValue.description);
   if (description) {
     state.signalingStep = "description-start";
     const readyForOffer =
@@ -426,10 +431,7 @@ export async function applyPeerSignal(
     state.signalingStep = null;
     return;
   }
-  const candidate =
-    signalValue.candidate && typeof signalValue.candidate === "object"
-      ? (signalValue.candidate as RTCIceCandidateInit)
-      : null;
+  const candidate = iceCandidate(signalValue.candidate);
   if (candidate) {
     if (!pc.remoteDescription) {
       state.candidates.push(candidate);

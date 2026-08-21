@@ -1,3 +1,5 @@
+import { isExternalRecord, isExternalString } from "./boundary.ts";
+
 export interface AuthMetadata {
   id?: string | number;
   [key: string]: unknown;
@@ -13,17 +15,17 @@ export interface AuthSessionRecord {
   [key: string]: unknown;
 }
 
-export function isAuthSessionRecord(
-  value: unknown,
-): value is AuthSessionRecord {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
+export function isAuthSessionRecord<T>(
+  value: T,
+): value is T & AuthSessionRecord {
+  if (!isExternalRecord(value)) return false;
+  const record = value;
   const user = record.user;
-  if (!user || typeof user !== "object") return false;
-  const metadata = (user as Record<string, unknown>).user_metadata;
-  if (!metadata || typeof metadata !== "object") return false;
-  const id = (metadata as Record<string, unknown>).id;
-  return typeof id === "string" && id.length > 0;
+  if (!isExternalRecord(user)) return false;
+  const metadata = user.user_metadata;
+  if (!isExternalRecord(metadata)) return false;
+  const id = metadata.id;
+  return isExternalString(id) && id.length > 0;
 }
 
 export interface AuthTokenResponse {

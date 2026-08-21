@@ -3,6 +3,7 @@ import {
   classifyFatalClientError,
   type FatalClientErrorDescriptor,
 } from "~/shared/fatal-client-error.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 export function useFatalClientError() {
   const fatal = useState<FatalClientErrorDescriptor | null>(
@@ -18,7 +19,7 @@ export function useFatalClientError() {
     () => null,
   );
 
-  function report(error: unknown) {
+  function report(error: ExternalField) {
     const descriptor = classifyFatalClientError(error);
     if (!descriptor) return false;
     return reportDescriptor(descriptor);

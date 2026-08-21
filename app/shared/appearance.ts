@@ -12,7 +12,7 @@ export function normalizeAppearance(value: AppearanceInput = {}) {
         ? surfaceMode
         : "system",
     accent:
-      accent && ROOM_ACCENTS.includes(accent as (typeof ROOM_ACCENTS)[number])
+      accent && ROOM_ACCENTS.some((candidate) => candidate === accent)
         ? accent
         : DEFAULT_ROOM_ACCENT,
   };

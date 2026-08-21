@@ -17,6 +17,15 @@ import type {
   MediaCaptureSettings,
 } from "../app/shared/types/media-capture.ts";
 import { FakeMediaStream, FakeMediaStreamTrack } from "./helpers/fake-media.ts";
+import type { ExternalObject } from "../app/shared/types/boundary.ts";
+import type { MediaCommandResult } from "../app/shared/types/boundary.ts";
+import {
+  parseExternalBoolean,
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
+import type { ExternalField } from "../shared/types/external.ts";
 
 interface RegistryHandle {
   update: (publication: CloudflarePublication) => boolean;
@@ -37,6 +46,35 @@ interface TestPublication {
   closed: boolean;
   publicationRevision: number;
   [key: string]: unknown;
+}
+
+interface RevisionState {
+  value: string;
+}
+
+function parsePublication(value: ExternalField): CloudflarePublication | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  const publication: CloudflarePublication = {};
+  const stringFields = [
+    "trackName",
+    "peerId",
+    "userId",
+    "sessionId",
+    "source",
+    "ownerSource",
+  ] as const;
+  for (const field of stringFields) {
+    const parsed = parseExternalString(record[field]);
+    if (parsed !== null) publication[field] = parsed;
+  }
+  const closed = parseExternalBoolean(record.closed);
+  if (closed !== null) publication.closed = closed;
+  const generation = parseExternalNumber(record.generation);
+  if (generation !== null) publication.generation = generation;
+  const connectionEpoch = parseExternalNumber(record.connectionEpoch);
+  if (connectionEpoch !== null) publication.connectionEpoch = connectionEpoch;
+  return publication;
 }
 
 function createTestContext(
@@ -70,7 +108,7 @@ function createTestContext(
     onProviderRecoveryTopology: (_data: MediaMessage) => {},
     onP2pQualification: (_data: MediaMessage) => {},
     onOperationAck: (_operationId: string, _data?: MediaMessage) => {},
-    onOperationError: (_operationId: string, _error: unknown) => {},
+    onOperationError: (_operationId: string, _error: ExternalField) => {},
     onRoomRevisionApplied: (_roomRevision: string) => {},
     onSnapshotRequested: () => {},
     queueTargetedReconciliation: (
@@ -85,11 +123,10 @@ function createTestContext(
       queuedDigests.push(digest);
       queuedRevisions.push(publicationRevision ?? null);
       if (!Array.isArray(digest)) return;
-      const serverPublications: CloudflarePublication[] = [];
-      for (const entry of digest) {
-        if (!entry || typeof entry !== "object") continue;
-        serverPublications.push(entry as CloudflarePublication);
-      }
+      const serverPublications = digest.flatMap((entry) => {
+        const publication = parsePublication(entry);
+        return publication ? [publication] : [];
+      });
       const envelopeRevision = publicationRevision
         ? String(publicationRevision)
         : "0";
@@ -105,12 +142,12 @@ function createTestContext(
 }
 
 let reg: RegistryHandle;
-let lastApplied: { value: string };
+let lastApplied: RevisionState;
 let queuedDigests: unknown[][];
 let queuedRevisions: (string | number | null)[];
 let ctx: MediaMessageHandlersContext;
 let heartbeatAckHandler:
-  ((data: Record<string, unknown>) => Promise<unknown>) | null;
+  ((data: Record<string, unknown>) => Promise<MediaCommandResult>) | null;
 
 describe("stale heartbeat regression", () => {
   beforeEach(() => {
@@ -206,11 +243,11 @@ describe("media source controller tombstone resolution", () => {
       }),
       getAudioStereo: (_source: string) => false,
       mediaDevices: navigator.mediaDevices,
-      onMicrophoneFallback: (_details: unknown) => {},
-      onMicrophoneRestored: (_details: unknown) => {},
-      onSource: (_entry: unknown) => {},
+      onMicrophoneFallback: (_details: ExternalObject) => {},
+      onMicrophoneRestored: (_details: ExternalObject) => {},
+      onSource: (_entry: MediaCaptureEntry) => {},
       onSourceEnded: (
-        _entry: unknown,
+        _entry: MediaCaptureEntry,
         _details?: Record<string, unknown>,
       ) => {},
       startMicrophone: async (): Promise<MediaCaptureEntry> => {
@@ -248,7 +285,7 @@ describe("media source controller tombstone resolution", () => {
       startSharedAudioMeter: () => {},
       stopLocalVoiceDetection: () => {},
       stopSharedAudioMeter: () => {},
-      topologyState: ref({
+      topologyState: ref<TopologyState>({
         mode: "sfu",
         epoch: 1,
         peers: [],
@@ -256,7 +293,7 @@ describe("media source controller tombstone resolution", () => {
         canonicalMode: "sfu",
         activeTransport: "sfu",
         targetTransport: null,
-      } as TopologyState),
+      }),
       voiceStore: {
         micMuted: false,
         deafened: false,
@@ -405,7 +442,7 @@ describe("media source controller tombstone resolution", () => {
 
     let connectionEpoch = 1;
 
-    let sendFn: (message: unknown) => void = () => {};
+    let sendFn: (message: MediaMessage) => void = () => {};
     const controller = createMediaSourceController({
       capture: {},
       connected: { value: true },
@@ -424,7 +461,7 @@ describe("media source controller tombstone resolution", () => {
       producerFacade: () => {},
       refreshPublicMaps: () => {},
       reportSfuFailure: () => {},
-      send: (message: unknown) => sendFn(message),
+      send: (message: MediaMessage) => sendFn(message),
       startLocalVoiceDetection: () => {},
       startSharedAudioMeter: () => {},
       stopLocalVoiceDetection: () => {},
@@ -463,10 +500,13 @@ describe("media source controller tombstone resolution", () => {
 
     connectionEpoch = 2;
 
-    sendFn = (message: unknown) => {
-      const msg = message as { type: string; data?: { operationId?: string } };
-      if (msg.type === "media-sources" && msg.data?.operationId) {
-        controller.resolveOperationAck(msg.data.operationId);
+    sendFn = (message: MediaMessage) => {
+      const msg = parseExternalRecord(message);
+      const type = parseExternalString(msg?.type);
+      const data = parseExternalRecord(msg?.data);
+      const operationId = parseExternalString(data?.operationId);
+      if (type === "media-sources" && operationId) {
+        controller.resolveOperationAck(operationId);
       }
     };
 

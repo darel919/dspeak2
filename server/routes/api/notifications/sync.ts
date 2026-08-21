@@ -2,6 +2,7 @@ import { requireAuthenticatedUser } from "../../../utils/auth.ts";
 import { db } from "../../../db/client.ts";
 import { notifications } from "../../../db/schema/index.ts";
 import { eq, and, desc, gte, count } from "drizzle-orm";
+import { parseExternalRecord } from "../../../../shared/types/external.ts";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
@@ -44,9 +45,8 @@ export default defineEventHandler(async (event) => {
     items: notificationsList.map((n) => {
       let data: Record<string, unknown> = {};
       try {
-        const parsed: unknown = n.data ? JSON.parse(n.data) : {};
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-          data = parsed as Record<string, unknown>;
+        const parsed = parseExternalRecord(n.data ? JSON.parse(n.data) : {});
+        if (parsed) data = parsed;
       } catch {}
       return {
         id: n.id,

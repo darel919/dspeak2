@@ -107,8 +107,8 @@ export function shouldFailback(
 }
 
 export function createFailoverPlan(
-  currentRoute: unknown,
-  candidates: readonly unknown[],
+  currentRoute: ExternalField,
+  candidates: readonly ExternalField[],
   trigger: string,
 ) {
   return {
@@ -121,5 +121,6 @@ export function createFailoverPlan(
   };
 }
 import type { CircuitBreaker, RouteMetrics } from "./types/media.ts";
+import type { ExternalField } from "./types/external.ts";
 
 export type { CircuitBreaker } from "./types/media.ts";

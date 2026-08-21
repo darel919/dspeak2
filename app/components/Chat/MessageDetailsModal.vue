@@ -60,7 +60,7 @@
                         >{{ user.email }}</span
                       >
                       <span
-                        v-else-if="typeof user === 'string'"
+                        v-else-if="isExternalString(user)"
                         class="text-xs text-base-content/60 ml-2"
                         >ID: {{ user }}</span
                       >
@@ -141,6 +141,7 @@ import {
   messageChannelId,
 } from "../../shared/chat-messages";
 import { profileAssetUrl } from "../../shared/profile-assets.ts";
+import { isExternalString } from "../../shared/types/boundary.ts";
 
 const props = defineProps({
   show: {

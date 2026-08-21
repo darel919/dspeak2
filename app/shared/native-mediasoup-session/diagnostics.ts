@@ -141,7 +141,7 @@ export class NativeMediasoupDiagnosticsMethods {
         inboundFlowing: 0,
       };
     }
-    const sampleFlow = (key: string, report: unknown, type: string) => {
+    const sampleFlow = <T>(key: string, report: T, type: string) => {
       const current = nativeFlowing(report, type);
       if (
         !current ||
@@ -287,7 +287,7 @@ export class NativeMediasoupDiagnosticsMethods {
   }
 }
 
-export interface NativeMediasoupDiagnosticsMethods extends Omit<
+export type NativeMediasoupDiagnosticsContract = Omit<
   NativeMediasoupSfuSessionSurface,
   | "stats"
   | "diagnosticStats"
@@ -301,4 +301,5 @@ export interface NativeMediasoupDiagnosticsMethods extends Omit<
   | "iceConnectedBoth"
   | "isProducing"
   | "remoteProducersCount"
-> {}
+> &
+  NativeMediasoupDiagnosticsMethods;

@@ -6,6 +6,7 @@ import {
 import { mediaDebug, shortMediaId } from "../media-debug.ts";
 
 import { secondsToMilliseconds, sessionClosedError } from "./helpers.ts";
+import type { ExternalValue } from "../types/boundary.ts";
 import type { CloudflareSessionLike } from "../types/cloudflare-media.ts";
 export class CloudflareLifecycleMethods {
   connectionState(this: CloudflareSessionLike) {
@@ -90,7 +91,7 @@ export class CloudflareLifecycleMethods {
     }
     const sampleFlow = (
       key: string,
-      report: unknown,
+      report: ExternalValue,
       type: string,
       field: string,
       track: MediaStreamTrack | undefined,
@@ -117,13 +118,13 @@ export class CloudflareLifecycleMethods {
       return bytes > previous.bytes;
     };
     const readStats = async (
-      endpoint: { getStats?: () => Promise<unknown> } | undefined,
+      endpoint: { getStats?: () => Promise<ExternalValue> } | undefined,
       track: MediaStreamTrack,
     ) => {
       const peerConnection = this.peerConnection;
-      if (typeof endpoint?.getStats === "function")
+      if (endpoint?.getStats instanceof Function)
         return endpoint.getStats().catch(() => null);
-      if (peerConnection && typeof peerConnection.getStats === "function")
+      if (peerConnection && peerConnection.getStats instanceof Function)
         return peerConnection.getStats(track).catch(() => null);
       return null;
     };

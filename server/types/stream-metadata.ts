@@ -1,6 +1,8 @@
+import type { ExternalField } from "../../shared/types/external.ts";
+
 export interface StreamMetadataCollection {
-  getFirstListItem: (filter: string) => Promise<unknown>;
-  create: (data: Record<string, unknown>) => Promise<unknown>;
+  getFirstListItem: (filter: string) => Promise<ExternalField>;
+  create: (data: Record<string, unknown>) => Promise<ExternalField>;
 }
 
 export interface StreamMetadataDatabase {

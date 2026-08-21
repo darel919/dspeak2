@@ -12,13 +12,13 @@ export function getSupabaseClient() {
   const anonKey = config.public.supabaseAnonKey;
   if (!url || !anonKey) return null;
   const desktop = hasTauriRuntimeMarker();
+  const baseAuth = {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: !desktop,
+  };
   supabaseClient = createClient(url, anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: !desktop,
-      ...(desktop ? { flowType: "pkce" as const } : {}),
-    },
+    auth: desktop ? { ...baseAuth, flowType: "pkce" as const } : baseAuth,
     realtime: { params: { eventsPerSecond: 40 } },
   });
   return supabaseClient;

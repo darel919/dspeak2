@@ -1,3 +1,10 @@
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+  type ExternalValue,
+} from "./boundary.ts";
+
 export const VIDEO_CODEC_NAMES = ["H264", "H265", "VP8", "VP9", "AV1"] as const;
 
 export type VideoCodecName = (typeof VIDEO_CODEC_NAMES)[number];
@@ -9,10 +16,9 @@ export type RealtimeEfficiency =
 
 export type CodecPowerClass = "low" | "medium" | "high";
 
-export function normalizeVideoCodecName(value: unknown): VideoCodecName | null {
-  const raw = String(value || "")
-    .trim()
-    .toUpperCase();
+export function normalizeVideoCodecName<T>(value: T): VideoCodecName | null {
+  if (!isExternalString(value)) return null;
+  const raw = value.trim().toUpperCase();
   const suffix = raw.includes("/") ? raw.slice(raw.lastIndexOf("/") + 1) : raw;
   const normalized = suffix.replace(/[.\s-]/g, "");
   if (normalized === "H264") return "H264";
@@ -23,8 +29,8 @@ export function normalizeVideoCodecName(value: unknown): VideoCodecName | null {
   return null;
 }
 
-export function isVideoCodecName(value: unknown): value is VideoCodecName {
-  return normalizeVideoCodecName(value) !== null;
+export function isVideoCodecName<T>(value: T): value is T & VideoCodecName {
+  return isExternalString(value) && normalizeVideoCodecName(value) === value;
 }
 
 export interface CodecDirectionCapability {
@@ -48,10 +54,13 @@ export interface VideoCodecCapability {
   decode: CodecDirectionCapability;
 }
 
-export type VideoCodecCapabilities = Record<
-  VideoCodecName,
-  VideoCodecCapability
->;
+export interface VideoCodecCapabilities {
+  H264: VideoCodecCapability;
+  H265: VideoCodecCapability;
+  VP8: VideoCodecCapability;
+  VP9: VideoCodecCapability;
+  AV1: VideoCodecCapability;
+}
 
 export interface ConcurrentEncodeCapability {
   supported: boolean;
@@ -67,22 +76,21 @@ export interface ParticipantMediaCapabilities {
   probeVersion?: string;
 }
 
-const EFFICIENCY_RANK: Record<RealtimeEfficiency, number> = {
+const EFFICIENCY_RANK = {
   excellent: 5,
   good: 4,
   acceptable: 3,
   poor: 2,
   unusable: 0,
-};
+} satisfies Record<RealtimeEfficiency, number>;
 
-const DEFAULT_SOFTWARE_EFFICIENCY: Record<VideoCodecName, RealtimeEfficiency> =
-  {
-    H264: "acceptable",
-    H265: "poor",
-    VP8: "acceptable",
-    VP9: "poor",
-    AV1: "unusable",
-  };
+const DEFAULT_SOFTWARE_EFFICIENCY = {
+  H264: "acceptable",
+  H265: "poor",
+  VP8: "acceptable",
+  VP9: "poor",
+  AV1: "unusable",
+} satisfies Record<VideoCodecName, RealtimeEfficiency>;
 
 export function efficiencyRank(value: RealtimeEfficiency) {
   return EFFICIENCY_RANK[value] || 0;
@@ -113,51 +121,66 @@ export function emptyCodecDirectionCapability(): CodecDirectionCapability {
 }
 
 export function emptyVideoCodecCapabilities(): VideoCodecCapabilities {
-  return Object.fromEntries(
-    VIDEO_CODEC_NAMES.map((codec) => [
-      codec,
-      {
-        encode: emptyCodecDirectionCapability(),
-        decode: emptyCodecDirectionCapability(),
-      },
-    ]),
-  ) as VideoCodecCapabilities;
+  return {
+    H264: {
+      encode: emptyCodecDirectionCapability(),
+      decode: emptyCodecDirectionCapability(),
+    },
+    H265: {
+      encode: emptyCodecDirectionCapability(),
+      decode: emptyCodecDirectionCapability(),
+    },
+    VP8: {
+      encode: emptyCodecDirectionCapability(),
+      decode: emptyCodecDirectionCapability(),
+    },
+    VP9: {
+      encode: emptyCodecDirectionCapability(),
+      decode: emptyCodecDirectionCapability(),
+    },
+    AV1: {
+      encode: emptyCodecDirectionCapability(),
+      decode: emptyCodecDirectionCapability(),
+    },
+  };
 }
 
-function normalizeAcceleration(
-  value: unknown,
+function normalizeAcceleration<T>(
+  value: T,
   supported: boolean,
 ): CodecAcceleration {
   if (!supported) return "unsupported";
-  return value === "hardware" || value === "software" ? value : "software";
+  if (isExternalString(value)) {
+    if (value === "hardware") return "hardware";
+    if (value === "software") return "software";
+  }
+  return "software";
 }
 
-function normalizeEfficiency(
-  value: unknown,
+function normalizeEfficiency<T>(
+  value: T,
   supported: boolean,
   acceleration: CodecAcceleration,
   codec: VideoCodecName,
 ): RealtimeEfficiency {
   if (!supported || acceleration === "unsupported") return "unusable";
-  if (
-    value === "excellent" ||
-    value === "good" ||
-    value === "acceptable" ||
-    value === "poor" ||
-    value === "unusable"
-  )
-    return value;
+  if (isExternalString(value)) {
+    if (value === "excellent") return "excellent";
+    if (value === "good") return "good";
+    if (value === "acceptable") return "acceptable";
+    if (value === "poor") return "poor";
+    if (value === "unusable") return "unusable";
+  }
   return acceleration === "hardware"
     ? "good"
     : DEFAULT_SOFTWARE_EFFICIENCY[codec];
 }
 
-export function normalizeCodecDirectionCapability(
-  value: unknown,
+export function normalizeCodecDirectionCapability<T>(
+  value: T,
   codec: VideoCodecName,
 ): CodecDirectionCapability {
-  const source = value && typeof value === "object" ? value : {};
-  const record = source as Record<string, unknown>;
+  const record: Record<string, unknown> = isExternalRecord(value) ? value : {};
   const supported = record.supported === true;
   const acceleration = normalizeAcceleration(record.acceleration, supported);
   const normalized: CodecDirectionCapability = {
@@ -180,12 +203,12 @@ export function normalizeCodecDirectionCapability(
     "testedProfile",
     "failureReason",
   ] as const)
-    if (typeof record[key] === "string" && record[key])
+    if (isExternalString(record[key]) && record[key])
       normalized[key] = record[key];
   if (Array.isArray(record.testedProfiles)) {
     const testedProfiles = record.testedProfiles.filter(
       (profile): profile is string =>
-        typeof profile === "string" && profile.length > 0,
+        isExternalString(profile) && profile.length > 0,
     );
     if (testedProfiles.length) normalized.testedProfiles = testedProfiles;
   }
@@ -201,18 +224,14 @@ export function normalizeCodecDirectionCapability(
   return normalized;
 }
 
-export function normalizeVideoCodecCapabilities(
-  value: unknown,
+export function normalizeVideoCodecCapabilities<T>(
+  value: T,
 ): VideoCodecCapabilities {
-  const source = value && typeof value === "object" ? value : {};
-  const record = source as Record<string, unknown>;
+  const record: Record<string, unknown> = isExternalRecord(value) ? value : {};
   const result = emptyVideoCodecCapabilities();
   for (const codec of VIDEO_CODEC_NAMES) {
     const candidate = record[codec] || record[codec.toLowerCase()];
-    const candidateRecord =
-      candidate && typeof candidate === "object"
-        ? (candidate as Record<string, unknown>)
-        : {};
+    const candidateRecord = isExternalRecord(candidate) ? candidate : {};
     result[codec] = {
       encode: normalizeCodecDirectionCapability(candidateRecord.encode, codec),
       decode: normalizeCodecDirectionCapability(candidateRecord.decode, codec),
@@ -221,16 +240,14 @@ export function normalizeVideoCodecCapabilities(
   return result;
 }
 
-function legacyDirectionFromEntry(
-  entries: unknown,
+function legacyDirectionFromEntry<T>(
+  entries: T,
   codec: VideoCodecName,
 ): CodecDirectionCapability {
   const list = Array.isArray(entries) ? entries : [];
   const matches = list.filter(
     (entry): entry is Record<string, unknown> =>
-      Boolean(entry) &&
-      typeof entry === "object" &&
-      normalizeVideoCodecName(entry.codec) === codec,
+      isExternalRecord(entry) && normalizeVideoCodecName(entry.codec) === codec,
   );
   const hardware = matches.find((entry) => entry.hardware === true);
   const selected = hardware || matches[0];
@@ -253,31 +270,29 @@ function legacyDirectionFromEntry(
   );
 }
 
-function hasExplicitCodecDirection(
-  codecs: unknown,
+function hasExplicitCodecDirection<T>(
+  codecs: T,
   codec: VideoCodecName,
   direction: "encode" | "decode",
 ) {
-  if (!codecs || typeof codecs !== "object") return false;
-  const record = codecs as Record<string, unknown>;
+  if (!isExternalRecord(codecs)) return false;
+  const record = codecs;
   const candidate = record[codec] || record[codec.toLowerCase()];
   return Boolean(
-    candidate &&
-    typeof candidate === "object" &&
+    isExternalRecord(candidate) &&
     Object.prototype.hasOwnProperty.call(candidate, direction),
   );
 }
 
-export function normalizeParticipantMediaCapabilities(
-  value: unknown,
+export function normalizeParticipantMediaCapabilities<T>(
+  value: T,
 ): ParticipantMediaCapabilities {
-  const source = value && typeof value === "object" ? value : {};
-  const record = source as Record<string, unknown>;
-  const diagnostics =
-    record.videoCodecDiagnostics &&
-    typeof record.videoCodecDiagnostics === "object"
-      ? (record.videoCodecDiagnostics as Record<string, unknown>)
-      : record;
+  const record: ExternalObject = isExternalRecord(value) ? value : {};
+  const diagnostics: ExternalObject = isExternalRecord(
+    record.videoCodecDiagnostics,
+  )
+    ? record.videoCodecDiagnostics
+    : record;
   const rawCodecs =
     record.videoCodecs ||
     record.videoCodecCapabilities ||
@@ -306,50 +321,55 @@ export function normalizeParticipantMediaCapabilities(
   }
   const rawConcurrent =
     record.concurrentEncode || diagnostics.concurrentEncode || {};
-  const concurrentRecord =
-    rawConcurrent && typeof rawConcurrent === "object"
-      ? (rawConcurrent as Record<string, unknown>)
-      : {};
+  const concurrentRecord: Record<string, unknown> = isExternalRecord(
+    rawConcurrent,
+  )
+    ? rawConcurrent
+    : {};
   const maxHardwareSessions = Number(concurrentRecord.maxHardwareSessions);
-  const testedCodecPairs = Array.isArray(concurrentRecord.testedCodecPairs)
+  const rawCodecPairs = Array.isArray(concurrentRecord.testedCodecPairs)
     ? concurrentRecord.testedCodecPairs
-        .filter(
-          (pair): pair is unknown[] => Array.isArray(pair) && pair.length === 2,
-        )
-        .map((pair) => [
-          normalizeVideoCodecName(pair[0]),
-          normalizeVideoCodecName(pair[1]),
-        ])
-        .filter(
-          (pair): pair is [VideoCodecName, VideoCodecName] =>
-            pair[0] !== null && pair[1] !== null,
-        )
     : [];
-  return {
+  const testedCodecPairs = rawCodecPairs
+    .filter(
+      (pair: ExternalValue): pair is [ExternalValue, ExternalValue] =>
+        Array.isArray(pair) && pair.length === 2,
+    )
+    .map((pair) => [
+      normalizeVideoCodecName(pair[0]),
+      normalizeVideoCodecName(pair[1]),
+    ])
+    .filter(
+      (pair): pair is [VideoCodecName, VideoCodecName] =>
+        pair[0] !== null && pair[1] !== null,
+    );
+  const concurrentEncode: ConcurrentEncodeCapability = {
+    supported: concurrentRecord.supported === true,
+    confidence:
+      concurrentRecord.confidence === "tested" ||
+      concurrentRecord.confidence === "conservative-default" ||
+      concurrentRecord.confidence === "unknown"
+        ? concurrentRecord.confidence
+        : "unknown",
+  };
+  if (Number.isFinite(maxHardwareSessions) && maxHardwareSessions > 0)
+    concurrentEncode.maxHardwareSessions = Math.floor(maxHardwareSessions);
+  if (testedCodecPairs.length)
+    concurrentEncode.testedCodecPairs = testedCodecPairs;
+
+  const result: ParticipantMediaCapabilities = {
     videoCodecs: normalizedCodecs,
-    concurrentEncode: {
-      supported: concurrentRecord.supported === true,
-      ...(Number.isFinite(maxHardwareSessions) && maxHardwareSessions > 0
-        ? { maxHardwareSessions: Math.floor(maxHardwareSessions) }
-        : {}),
-      ...(testedCodecPairs.length ? { testedCodecPairs } : {}),
-      confidence:
-        concurrentRecord.confidence === "tested" ||
-        concurrentRecord.confidence === "conservative-default" ||
-        concurrentRecord.confidence === "unknown"
-          ? concurrentRecord.confidence
-          : "unknown",
-    },
+    concurrentEncode,
     source:
       record.source === "native-runtime-probe" ||
       record.source === "browser-probe" ||
       record.source === "fallback"
         ? record.source
         : "fallback",
-    ...(typeof record.probeVersion === "string"
-      ? { probeVersion: record.probeVersion }
-      : {}),
   };
+  if (isExternalString(record.probeVersion))
+    result.probeVersion = record.probeVersion;
+  return result;
 }
 
 export function efficientEncodeCodecs(

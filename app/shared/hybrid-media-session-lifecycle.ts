@@ -6,18 +6,25 @@ import type {
 } from "./types/hybrid-media-session-lifecycle.ts";
 import type { MediaMessage } from "./types/media-message-handlers.ts";
 import type { ChannelRecord } from "./types/channels.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type MediaCommandResult,
+} from "./types/boundary.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function isRecord<T>(value: T): value is T & Record<string, unknown> {
+  return isExternalRecord(value);
 }
 
 function channelRoomId(
   channel: ChannelRecord | null | undefined,
 ): string | null {
   const room = channel?.["room"];
-  if (typeof room === "string") return room;
-  if (room && typeof room === "object" && "id" in room)
-    return typeof room.id === "string" ? room.id : null;
+  if (isExternalString(room)) return room;
+  const roomRecord = isExternalRecord(room) ? room : null;
+  if (isExternalString(roomRecord?.id)) return roomRecord.id;
   return null;
 }
 
@@ -205,10 +212,9 @@ export function createHybridMediaSessionLifecycle({
     setConnectionPhase("socket-connecting");
     const channel = channelsStore.getChannelById(nextChannelId);
     const channelPolicy = channel?.mediaPolicy;
-    const connectionMode =
-      typeof channelPolicy?.connectionMode === "string"
-        ? channelPolicy.connectionMode
-        : "auto";
+    const connectionMode = isExternalString(channelPolicy?.connectionMode)
+      ? channelPolicy.connectionMode
+      : "auto";
     const roomId = options.roomId || getRoomId() || channelRoomId(channel);
     const supabaseClient = getSupabaseClient();
     const sessionResult = await supabaseClient?.auth.getSession();
@@ -340,12 +346,12 @@ export function createHybridMediaSessionLifecycle({
       queueTopology,
       registerHandler: (
         type: string,
-        handler: (data: MediaMessage) => unknown,
+        handler: (data: MediaMessage) => MediaCommandResult,
       ) => messageHandlers.set(type, handler),
       remoteProducersCount,
       onOperationAck: (operationId: string) =>
         mediaSessionSetup.resolveOperationAck(operationId),
-      onOperationError: (operationId: string, error: unknown) =>
+      onOperationError: (operationId: string, error: OwnedErrorValue) =>
         mediaSessionSetup.rejectOperationAck(operationId, error),
       onRoomRevisionApplied: (roomRevision: string) =>
         mediaSessionSetup.applyRoomRevision(roomRevision),
@@ -382,29 +388,28 @@ export function createHybridMediaSessionLifecycle({
         );
         sendParticipantVoiceState();
 
-        if (typeof mediaSessionSetup.processPendingRetirements === "function") {
+        if (mediaSessionSetup.processPendingRetirements) {
           void mediaSessionSetup.processPendingRetirements().catch(() => {});
         }
 
         const sfu = mediaSessionSetup.getSfu?.();
         if (
           sfu &&
-          typeof sfu === "object" &&
           "reannounceLocalPublications" in sfu &&
-          typeof sfu.reannounceLocalPublications === "function"
+          sfu.reannounceLocalPublications instanceof Function
         ) {
-          void sfu
-            .reannounceLocalPublications({
+          void sfu.reannounceLocalPublications
+            .call(sfu, {
               connectionEpoch: getConnectionEpoch(),
             })
-            .catch((err: unknown) => {
+            .catch((err: OwnedErrorValue) => {
               mediaDebug("reconnect.reannounce-failed", {
                 error: err instanceof Error ? err.message : String(err),
               });
             });
         }
       },
-      onServerHello: (data: unknown) => {
+      onServerHello: (data: MediaMessage) => {
         if (signaling.acceptServerHello(data))
           protocolState.value = signaling.getProtocolState();
       },
@@ -421,7 +426,7 @@ export function createHybridMediaSessionLifecycle({
       syncConnectedUsers,
       voiceStore,
     });
-    messageHandlers.set("cloudflare-response", (data: unknown) =>
+    messageHandlers.set("cloudflare-response", (data: MediaMessage) =>
       isRecord(data)
         ? getSfu()?.handle("cloudflare-response", data)
         : undefined,
@@ -430,14 +435,11 @@ export function createHybridMediaSessionLifecycle({
       "cloudflare-publication-available",
       (data: MediaMessage) => {
         mediaSessionSetup.queueCloudflarePublication(data);
-        const rawRevision =
-          data && typeof data === "object" && "publicationRevision" in data
-            ? data.publicationRevision
-            : undefined;
+        const rawRevision = data.publicationRevision;
         const rev =
-          typeof rawRevision === "string" && rawRevision !== ""
+          isExternalString(rawRevision) && rawRevision !== ""
             ? rawRevision
-            : typeof rawRevision === "number" &&
+            : isExternalNumber(rawRevision) &&
                 Number.isSafeInteger(rawRevision) &&
                 rawRevision >= 0
               ? String(rawRevision)

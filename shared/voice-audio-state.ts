@@ -16,18 +16,13 @@ const DEFAULT_SHARED_AUDIO_DUCKING = Object.freeze({
   effectivePercent: 100,
 });
 
-function finiteNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+function finiteNumber(value: ExternalField, fallback: number) {
+  const number = parseExternalNumber(value);
+  return number !== null ? number : fallback;
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? Object.fromEntries(Object.entries(value))
-    : {};
-}
-
-export function normalizeSharedAudioStats(stats: unknown) {
-  const values = record(stats);
+export function normalizeSharedAudioStats(stats: ExternalField) {
+  const values = parseExternalRecord(stats) ?? {};
   return {
     kbps: finiteNumber(values.kbps, DEFAULT_SHARED_AUDIO_STATS.kbps),
     level: finiteNumber(values.level, DEFAULT_SHARED_AUDIO_STATS.level),
@@ -35,8 +30,8 @@ export function normalizeSharedAudioStats(stats: unknown) {
   };
 }
 
-export function normalizeSharedAudioAttenuation(attenuation: unknown) {
-  const values = record(attenuation);
+export function normalizeSharedAudioAttenuation(attenuation: ExternalField) {
+  const values = parseExternalRecord(attenuation) ?? {};
   return {
     active: values.active === true,
     effectivePercent: finiteNumber(
@@ -54,8 +49,8 @@ export function normalizeSharedAudioAttenuation(attenuation: unknown) {
   };
 }
 
-export function normalizeSharedAudioDucking(ducking: unknown) {
-  const values = record(ducking);
+export function normalizeSharedAudioDucking(ducking: ExternalField) {
+  const values = parseExternalRecord(ducking) ?? {};
   return {
     active: values.active === true,
     effectivePercent: finiteNumber(
@@ -64,3 +59,8 @@ export function normalizeSharedAudioDucking(ducking: unknown) {
     ),
   };
 }
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  type ExternalField,
+} from "./types/external.ts";

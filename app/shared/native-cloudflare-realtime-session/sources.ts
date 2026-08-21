@@ -24,25 +24,128 @@ import type {
 } from "../types/native-cloudflare.ts";
 import type { NativeCloudflareSessionSurface } from "../types/native-cloudflare-session.ts";
 import type { VideoSettings } from "../types/video-settings.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "../types/boundary.ts";
 
-type NativeSessionDescriptionType = "offer" | "answer" | "pranswer";
+interface NativeCloudflareSourceParameters extends Record<string, unknown> {
+  active: boolean;
+  priority: string;
+  networkPriority: string;
+}
 
-function positiveMetadataNumber(value: unknown) {
+interface NativeCloudflareSessionDescription {
+  type?: string;
+  sdp?: string;
+}
+
+interface NativeCloudflarePublicationTarget {
+  width?: number;
+  height?: number;
+  fps?: number;
+  bitrate?: number;
+}
+
+interface NativeCloudflarePublicationExtras {
+  target?: NativeCloudflarePublicationTarget;
+  targetAdjusted?: boolean;
+  score?: number;
+}
+
+interface NativeCloudflarePublicationData
+  extends NativeCloudflareSourceEntry, NativeCloudflarePublicationExtras {}
+
+interface NativeCloudflareAddTrackRequest extends Record<string, unknown> {
+  p2pHandle: string | number | null;
+  source: string;
+  kind: string;
+  trackKey: string;
+  preferredCodec?: string;
+}
+
+function recordValue<T>(value: T): Record<string, unknown> {
+  return isExternalRecord(value) ? value : {};
+}
+
+function publicationData(
+  data: NativeCloudflareSourceEntry,
+  extras: NativeCloudflarePublicationExtras,
+): NativeCloudflarePublicationData {
+  const result: NativeCloudflarePublicationData = { ...data };
+  if (extras.target) result.target = { ...extras.target };
+  if (extras.targetAdjusted) result.targetAdjusted = true;
+  if (extras.score !== undefined) result.score = extras.score;
+  return result;
+}
+
+function resolutionValue<T>(value: T) {
+  const key = isExternalString(value) ? value : "";
+  return Object.entries(VIDEO_RESOLUTIONS).find(([name]) => name === key)?.[1];
+}
+
+function mergeSourceEntry(
+  entry: NativeCloudflareSourceEntry,
+  extra: Record<string, unknown>,
+): NativeCloudflareSourceEntry {
+  return {
+    ...entry,
+    ...extra,
+    source: String(extra.source || entry.source),
+  };
+}
+
+function parseNegotiationResponse<T>(
+  value: T,
+): NativeCloudflareNegotiationResponse {
+  const record = recordValue(value);
+  const response: NativeCloudflareNegotiationResponse = {};
+  if (isExternalRecord(record.sessionDescription)) {
+    const description: NativeCloudflareSessionDescription = {};
+    if (isExternalString(record.sessionDescription.type))
+      description.type = record.sessionDescription.type;
+    if (isExternalString(record.sessionDescription.sdp))
+      description.sdp = record.sessionDescription.sdp;
+    response.sessionDescription = description;
+  }
+  if (Array.isArray(record.tracks)) {
+    response.tracks = record.tracks.filter(isExternalRecord).map((track) => ({
+      trackName: isExternalString(track.trackName)
+        ? track.trackName
+        : undefined,
+      mid:
+        isExternalString(track.mid) || isExternalNumber(track.mid)
+          ? track.mid
+          : null,
+    }));
+  }
+  return response;
+}
+
+function positiveMetadataNumber<T>(value: T) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
 }
 
 function publicationTarget(publication: NativeCloudflarePublication) {
-  const nestedTarget =
-    publication.target && typeof publication.target === "object"
-      ? (publication.target as Record<string, unknown>)
-      : null;
-  const target: { width?: number; height?: number; fps?: number } = {};
+  const target = targetValue(publication.target);
+  const values: NativeCloudflarePublicationTarget = target || {};
   for (const key of ["width", "height", "fps"] as const) {
-    const value = positiveMetadataNumber(
-      nestedTarget?.[key] ?? publication[key],
-    );
-    if (value) target[key] = value;
+    const value = positiveMetadataNumber(target?.[key] ?? publication[key]);
+    if (value) values[key] = value;
+  }
+  return Object.keys(values).length ? values : undefined;
+}
+
+function targetValue<T>(
+  value: T,
+): NativeCloudflarePublicationTarget | undefined {
+  const record = recordValue(value);
+  const target: NativeCloudflarePublicationTarget = {};
+  for (const key of ["width", "height", "fps", "bitrate"] as const) {
+    const number = positiveMetadataNumber(record[key]);
+    if (number) target[key] = number;
   }
   return Object.keys(target).length ? target : undefined;
 }
@@ -56,10 +159,12 @@ function sourceVideoMetadata(
     entry.captureSelection,
     entry.videoSettings || undefined,
   );
-  const resolutionKey = String(
-    video.resolution || "",
-  ) as keyof typeof VIDEO_RESOLUTIONS;
-  const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+  const resolutionKey = isExternalString(video.resolution)
+    ? video.resolution
+    : "";
+  const resolution = Object.entries(VIDEO_RESOLUTIONS).find(
+    ([key]) => key === resolutionKey,
+  )?.[1];
   const width = Number(entry.width || video.width || resolution?.width || 1920);
   const height = Number(
     entry.height || video.height || resolution?.height || 1080,
@@ -81,8 +186,9 @@ function sourceVideoMetadata(
   };
 }
 
-function producerTrackKey(entry: NativeCloudflareSourceEntry) {
-  return String(entry.variantId || entry.source || "");
+function producerTrackKey<T>(entry: T) {
+  const record = recordValue(entry);
+  return String(record.variantId || record.source || "");
 }
 
 function sourceProducers(
@@ -106,20 +212,17 @@ function requireNativeSessionDescription(
   const sdp = description?.sdp;
   if (
     (type !== "offer" && type !== "answer" && type !== "pranswer") ||
-    typeof sdp !== "string" ||
+    !isExternalString(sdp) ||
     sdp.length === 0
   )
     throw new Error("Native Cloudflare session description is incomplete");
-  return { type: type as NativeSessionDescriptionType, sdp };
+  return { type, sdp };
 }
 
-function nativeVideoDescriptionFailure(error: unknown) {
-  if (!error || typeof error !== "object") return false;
-  const record = error as Record<string, unknown>;
-  const details =
-    record.details && typeof record.details === "object"
-      ? (record.details as Record<string, unknown>)
-      : {};
+function nativeVideoDescriptionFailure<T>(error: T) {
+  if (!isExternalRecord(error)) return false;
+  const record = error;
+  const details = isExternalRecord(record.details) ? record.details : {};
   const text = [
     record.code,
     record.message,
@@ -141,7 +244,7 @@ function nativeVideoDescriptionFailure(error: unknown) {
 function constrainedSoftwareVideoFallback(
   session: NativeCloudflareSessionSurface,
   entry: NativeCloudflareSourceEntry,
-) {
+): NativeCloudflareSourceEntry | null {
   if (sourceKind(entry) !== "video") return null;
   const requestedCodec = normalizeVideoCodecName(entry.codec);
   if (requestedCodec && requestedCodec !== "H264") return null;
@@ -177,6 +280,13 @@ function constrainedSoftwareVideoFallback(
     positiveMetadataNumber(entry.bitrate) || metadata.bitrate || 600_000,
     600_000,
   );
+  const target = {
+    ...targetValue(entry.target),
+    width,
+    height,
+    fps,
+    bitrate,
+  };
   return {
     ...entry,
     codec: "VP8" as const,
@@ -185,13 +295,7 @@ function constrainedSoftwareVideoFallback(
     height,
     fps,
     bitrate,
-    target: {
-      ...(entry.target || {}),
-      width,
-      height,
-      fps,
-      bitrate,
-    },
+    target,
     targetAdjusted: true,
   };
 }
@@ -226,7 +330,9 @@ async function rollbackUncommittedNativeTrack(
     .invoke("media_p2p_rollback_local_description", {
       p2pHandle: handle,
     })
-    .catch((error: unknown) => session.onError?.(error));
+    .catch((error) =>
+      session.onError?.(asError(error, "Native Cloudflare rollback failed")),
+    );
   if (
     session.closed ||
     session.handle !== handle ||
@@ -240,7 +346,11 @@ async function rollbackUncommittedNativeTrack(
       kind,
       trackKey,
     })
-    .catch((error: unknown) => session.onError?.(error));
+    .catch((error) =>
+      session.onError?.(
+        asError(error, "Native Cloudflare track removal failed"),
+      ),
+    );
   if (
     !serverTrackAccepted ||
     !mid ||
@@ -255,11 +365,11 @@ async function rollbackUncommittedNativeTrack(
       p2pHandle: handle,
     });
     session._assertCurrent(generation, handle);
-    const response = (await session.request("tracks-close", {
+    const response = await session.request("tracks-close", {
       tracks: [{ mid }],
       sessionDescription: { type: "offer", sdp: offer },
       force: false,
-    })) as NativeCloudflareNegotiationResponse;
+    });
     session._assertCurrent(generation, handle);
     if (response.sessionDescription) {
       const description = requireNativeSessionDescription(
@@ -271,8 +381,8 @@ async function rollbackUncommittedNativeTrack(
         sdpType: description.type,
       });
     }
-  } catch (error: unknown) {
-    session.onError?.(error);
+  } catch (error) {
+    session.onError?.(asError(error, "Native Cloudflare renegotiation failed"));
   }
 }
 
@@ -353,8 +463,8 @@ function shouldSubscribePublication(
   return candidateScore > currentScore;
 }
 
-export interface NativeCloudflareSourcesMethods extends NativeCloudflareSessionSurface {}
-export class NativeCloudflareSourcesMethods {
+export const nativeCloudflareSourcesMethods: Partial<NativeCloudflareSessionSurface> &
+  ThisType<NativeCloudflareSessionSurface> = {
   hasVariant(variantId: string) {
     const key = String(variantId || "");
     return Boolean(
@@ -363,7 +473,7 @@ export class NativeCloudflareSourcesMethods {
         (producer) => String(producer.variantId || "") === key,
       ),
     );
-  }
+  },
 
   async updateVariantMetadata(entry: NativeCloudflareSourceEntry) {
     if (!entry?.source) return false;
@@ -371,7 +481,7 @@ export class NativeCloudflareSourcesMethods {
     return this.enqueueSourceOperation(source, () =>
       this.enqueueNegotiation(() => this.updateVariantMetadataInternal(entry)),
     );
-  }
+  },
 
   async updateVariantMetadataInternal(entry: NativeCloudflareSourceEntry) {
     const source = String(entry.source || "");
@@ -385,7 +495,7 @@ export class NativeCloudflareSourcesMethods {
       : this.producers.get(source);
     if (!producer || sourceKind(producer) !== "video") return false;
     const base = this.sources.get(source) || {};
-    const normalized = {
+    const normalized: NativeCloudflareSourceEntry = {
       ...base,
       ...entry,
       source,
@@ -411,17 +521,12 @@ export class NativeCloudflareSourcesMethods {
       return false;
     normalized.codec = codec;
     const parametersReady = await this._setSourceParameters(
-      {
-        ...normalized,
-        ...producer,
-      } as NativeCloudflareSourceEntry,
+      mergeSourceEntry(normalized, producer),
       this.sessionGeneration,
     );
     if (!parametersReady) return false;
     const previous = { ...producer };
-    const score = Number(
-      entry.score ?? (entry as Record<string, unknown>).routingScore,
-    );
+    const score = Number(entry.score ?? recordValue(entry).routingScore);
     Object.assign(producer, {
       ownerSource: normalized.ownerSource || null,
       logicalStreamId: normalized.logicalStreamId || null,
@@ -448,30 +553,34 @@ export class NativeCloudflareSourcesMethods {
     if (
       !this.send?.({
         type: "cloudflare-publication",
-        data: {
-          trackName: producer.trackName,
-          source,
-          kind: "video",
-          ownerSource: normalized.ownerSource || null,
-          logicalStreamId: normalized.logicalStreamId || null,
-          generation: normalized.generation,
-          connectionEpoch: this.getControlConnectionEpoch(),
-          variantId: normalized.variantId,
-          codec: normalized.codec,
-          codecAcceleration: capability?.acceleration || null,
-          codecImplementation: capability?.implementation || null,
-          width: normalized.width,
-          height: normalized.height,
-          fps: normalized.fps,
-          bitrate: normalized.bitrate,
-          ...(normalized.target ? { target: { ...normalized.target } } : {}),
-          ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
-          receivers: Array.isArray(normalized.receivers)
-            ? [...normalized.receivers]
-            : [],
-          emergency: normalized.emergency === true,
-          ...(Number.isFinite(score) ? { score } : {}),
-        },
+        data: publicationData(
+          {
+            trackName: producer.trackName,
+            source,
+            kind: "video",
+            ownerSource: normalized.ownerSource || null,
+            logicalStreamId: normalized.logicalStreamId || null,
+            generation: normalized.generation,
+            connectionEpoch: this.getControlConnectionEpoch(),
+            variantId: normalized.variantId,
+            codec: normalized.codec,
+            codecAcceleration: capability?.acceleration || null,
+            codecImplementation: capability?.implementation || null,
+            width: normalized.width,
+            height: normalized.height,
+            fps: normalized.fps,
+            bitrate: normalized.bitrate,
+            receivers: Array.isArray(normalized.receivers)
+              ? [...normalized.receivers]
+              : [],
+            emergency: normalized.emergency === true,
+          },
+          {
+            target: normalized.target,
+            targetAdjusted: normalized.targetAdjusted === true,
+            score: Number.isFinite(score) ? score : undefined,
+          },
+        ),
       })
     ) {
       Object.assign(producer, previous);
@@ -479,7 +588,7 @@ export class NativeCloudflareSourcesMethods {
     }
     this._emitState();
     return producer;
-  }
+  },
 
   async addSource(entry: NativeCloudflareSourceEntry) {
     if (!entry?.source)
@@ -498,6 +607,7 @@ export class NativeCloudflareSourcesMethods {
         try {
           return await this.addSourceInternal(entry);
         } catch (error) {
+          let failure = error;
           const fallback = nativeVideoDescriptionFailure(error)
             ? constrainedSoftwareVideoFallback(this, entry)
             : null;
@@ -516,7 +626,7 @@ export class NativeCloudflareSourcesMethods {
               if (previousSourceMetadata)
                 this.sources.set(source, previousSourceMetadata);
               else this.sources.delete(source);
-              error = fallbackError;
+              failure = fallbackError;
             }
           }
           if (
@@ -537,13 +647,16 @@ export class NativeCloudflareSourcesMethods {
             this.sourceTransmission.delete(source);
             if (!hadExistingVideoFeed) this.localVideoFeeds.delete(source);
           }
-          throw error;
+          throw failure;
         }
       });
     });
-  }
+  },
 
-  enqueueSourceOperation(source: string, operation: () => Promise<unknown>) {
+  enqueueSourceOperation(
+    source: string,
+    operation: () => Promise<import("../types/boundary.ts").MediaCommandResult>,
+  ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
     const tracked = task.finally(() => {
@@ -553,7 +666,7 @@ export class NativeCloudflareSourcesMethods {
     this.sourceOperations.set(source, tracked);
     tracked.catch(() => {});
     return tracked;
-  }
+  },
 
   async addSourceInternal(entry: NativeCloudflareSourceEntry) {
     if (!entry?.source)
@@ -646,9 +759,7 @@ export class NativeCloudflareSourcesMethods {
         trackKey,
       });
       this._assertCurrent(generation);
-      const trackId = String(
-        (replacement as Record<string, unknown>)?.trackId || "",
-      );
+      const trackId = String(recordValue(replacement).trackId || "");
       if (!trackId)
         throw new Error("Native Cloudflare replacement track ID is missing");
       await this._setSourceParameters(normalized, generation);
@@ -678,28 +789,32 @@ export class NativeCloudflareSourcesMethods {
       if (
         !this.send?.({
           type: "cloudflare-publication",
-          data: {
-            trackName: previous.trackName,
-            source,
-            kind,
-            ownerSource: normalized.ownerSource || null,
-            logicalStreamId: normalized.logicalStreamId || null,
-            generation: normalized.generation,
-            connectionEpoch: this.getControlConnectionEpoch(),
-            variantId: normalized.variantId || null,
-            codec: normalized.codec || null,
-            codecAcceleration,
-            codecImplementation,
-            width: normalized.width,
-            height: normalized.height,
-            fps: normalized.fps,
-            bitrate: normalized.bitrate,
-            ...(normalized.target ? { target: { ...normalized.target } } : {}),
-            ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
-            receivers: normalized.receivers || [],
-            emergency: normalized.emergency === true,
-            score: normalized.score,
-          },
+          data: publicationData(
+            {
+              trackName: previous.trackName,
+              source,
+              kind,
+              ownerSource: normalized.ownerSource || null,
+              logicalStreamId: normalized.logicalStreamId || null,
+              generation: normalized.generation,
+              connectionEpoch: this.getControlConnectionEpoch(),
+              variantId: normalized.variantId || null,
+              codec: normalized.codec || null,
+              codecAcceleration,
+              codecImplementation,
+              width: normalized.width,
+              height: normalized.height,
+              fps: normalized.fps,
+              bitrate: normalized.bitrate,
+              receivers: normalized.receivers || [],
+              emergency: normalized.emergency === true,
+              score: normalized.score,
+            },
+            {
+              target: normalized.target,
+              targetAdjusted: normalized.targetAdjusted === true,
+            },
+          ),
         })
       )
         throw new Error("Media control is unavailable");
@@ -710,20 +825,18 @@ export class NativeCloudflareSourcesMethods {
     let candidateMid: string | null = null;
     let candidateServerTrackAccepted = false;
     const addCandidate = async () => {
-      const trackResult = await this.invoke("media_p2p_add_track", {
+      const request: NativeCloudflareAddTrackRequest = {
         p2pHandle: this.handle,
         source,
         kind,
         trackKey,
-        ...(kind === "video" && normalized.codec
-          ? { preferredCodec: normalized.codec }
-          : {}),
-      });
+      };
+      if (kind === "video" && normalized.codec)
+        request.preferredCodec = normalized.codec;
+      const trackResult = await this.invoke("media_p2p_add_track", request);
       candidateTrackAttached = true;
       this._assertCurrent(generation);
-      const trackId = String(
-        (trackResult as Record<string, unknown>)?.trackId || "",
-      );
+      const trackId = String(recordValue(trackResult).trackId || "");
       if (!trackId) throw new Error("Native Cloudflare track ID is missing");
       if (kind === "audio") {
         await this.invoke("media_p2p_set_audio_stereo", {
@@ -748,10 +861,12 @@ export class NativeCloudflareSourcesMethods {
         );
       candidateMid = mid;
       const trackName = requestIdentifier();
-      const response = (await this.request("tracks-new", {
-        sessionDescription: { type: "offer", sdp: offer },
-        tracks: [{ location: "local", mid, trackName }],
-      })) as NativeCloudflareNegotiationResponse;
+      const response = parseNegotiationResponse(
+        await this.request("tracks-new", {
+          sessionDescription: { type: "offer", sdp: offer },
+          tracks: [{ location: "local", mid, trackName }],
+        }),
+      );
       candidateServerTrackAccepted = true;
       this._assertCurrent(generation);
       if (response.sessionDescription) {
@@ -765,33 +880,37 @@ export class NativeCloudflareSourcesMethods {
         });
       }
       this._assertCurrent(generation);
-      const producer = {
-        source,
-        kind,
-        track: normalized.track || null,
-        trackId,
-        trackName,
-        mid,
-        id: trackName,
-        paused: this.sourceTransmission.get(source) === false,
-        native: true,
-        ownerSource: normalized.ownerSource || null,
-        logicalStreamId: normalized.logicalStreamId || null,
-        generation: normalized.generation,
-        variantId: normalized.variantId || null,
-        codec: normalized.codec || null,
-        codecAcceleration,
-        codecImplementation,
-        width: normalized.width,
-        height: normalized.height,
-        fps: normalized.fps,
-        bitrate: normalized.bitrate,
-        ...(normalized.target ? { target: { ...normalized.target } } : {}),
-        ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
-        receivers: normalized.receivers || [],
-        emergency: normalized.emergency === true,
-        score: normalized.score,
-      };
+      const producer = publicationData(
+        {
+          source,
+          kind,
+          track: normalized.track || null,
+          trackId,
+          trackName,
+          mid,
+          id: trackName,
+          paused: this.sourceTransmission.get(source) === false,
+          native: true,
+          ownerSource: normalized.ownerSource || null,
+          logicalStreamId: normalized.logicalStreamId || null,
+          generation: normalized.generation,
+          variantId: normalized.variantId || null,
+          codec: normalized.codec || null,
+          codecAcceleration,
+          codecImplementation,
+          width: normalized.width,
+          height: normalized.height,
+          fps: normalized.fps,
+          bitrate: normalized.bitrate,
+          receivers: normalized.receivers || [],
+          emergency: normalized.emergency === true,
+          score: normalized.score,
+        },
+        {
+          target: normalized.target,
+          targetAdjusted: normalized.targetAdjusted === true,
+        },
+      );
       if (variantId) this.producerVariants.set(trackKey, producer);
       else this.producers.set(source, producer);
       if (kind === "video") {
@@ -808,28 +927,32 @@ export class NativeCloudflareSourcesMethods {
       if (
         !this.send?.({
           type: "cloudflare-publication",
-          data: {
-            trackName,
-            source,
-            kind,
-            ownerSource: normalized.ownerSource || null,
-            logicalStreamId: normalized.logicalStreamId || null,
-            generation: normalized.generation,
-            connectionEpoch: this.getControlConnectionEpoch(),
-            variantId: normalized.variantId || null,
-            codec: normalized.codec || null,
-            codecAcceleration,
-            codecImplementation,
-            width: normalized.width,
-            height: normalized.height,
-            fps: normalized.fps,
-            bitrate: normalized.bitrate,
-            ...(normalized.target ? { target: { ...normalized.target } } : {}),
-            ...(normalized.targetAdjusted ? { targetAdjusted: true } : {}),
-            receivers: normalized.receivers || [],
-            emergency: normalized.emergency === true,
-            score: normalized.score,
-          },
+          data: publicationData(
+            {
+              trackName,
+              source,
+              kind,
+              ownerSource: normalized.ownerSource || null,
+              logicalStreamId: normalized.logicalStreamId || null,
+              generation: normalized.generation,
+              connectionEpoch: this.getControlConnectionEpoch(),
+              variantId: normalized.variantId || null,
+              codec: normalized.codec || null,
+              codecAcceleration,
+              codecImplementation,
+              width: normalized.width,
+              height: normalized.height,
+              fps: normalized.fps,
+              bitrate: normalized.bitrate,
+              receivers: normalized.receivers || [],
+              emergency: normalized.emergency === true,
+              score: normalized.score,
+            },
+            {
+              target: normalized.target,
+              targetAdjusted: normalized.targetAdjusted === true,
+            },
+          ),
         })
       ) {
         if (variantId) this.producerVariants.delete(trackKey);
@@ -855,14 +978,14 @@ export class NativeCloudflareSourcesMethods {
       }
       throw error;
     }
-  }
+  },
 
   async removeSource(source: string) {
     const key = String(source || "");
     return this.enqueueSourceOperation(key, () =>
       this.enqueueNegotiation(() => this.removeSourceInternal(key)),
     );
-  }
+  },
 
   async removeSourceInternal(source: string) {
     const key = String(source || "");
@@ -886,18 +1009,20 @@ export class NativeCloudflareSourcesMethods {
         await this.invoke("media_p2p_remove_track", {
           p2pHandle: handle,
           source: key,
-          trackKey: producerTrackKey(producer as NativeCloudflareSourceEntry),
+          trackKey: producerTrackKey(producer),
         });
       this._assertCurrent(generation, handle);
       const offer = await this.invoke("media_p2p_create_offer", {
         p2pHandle: handle,
       });
       this._assertCurrent(generation, handle);
-      const response = (await this.request("tracks-close", {
-        tracks: current.map((producer) => ({ mid: producer.mid })),
-        sessionDescription: { type: "offer", sdp: offer },
-        force: false,
-      })) as NativeCloudflareNegotiationResponse;
+      const response = parseNegotiationResponse(
+        await this.request("tracks-close", {
+          tracks: current.map((producer) => ({ mid: producer.mid })),
+          sessionDescription: { type: "offer", sdp: offer },
+          force: false,
+        }),
+      );
       this._assertCurrent(generation, handle);
       if (response.sessionDescription) {
         const description = requireNativeSessionDescription(
@@ -937,7 +1062,7 @@ export class NativeCloudflareSourcesMethods {
       throw error;
     }
     this._emitState();
-  }
+  },
 
   async removeVariant(variantId: string, force = false) {
     const key = String(variantId || "");
@@ -972,20 +1097,20 @@ export class NativeCloudflareSourcesMethods {
           await this.invoke("media_p2p_remove_track", {
             p2pHandle: handle,
             source,
-            trackKey: producerTrackKey(
-              candidate as NativeCloudflareSourceEntry,
-            ),
+            trackKey: producerTrackKey(candidate),
           });
           this._assertCurrent(generation, handle);
           const offer = await this.invoke("media_p2p_create_offer", {
             p2pHandle: handle,
           });
           this._assertCurrent(generation, handle);
-          const response = (await this.request("tracks-close", {
-            tracks: [{ mid: candidate.mid }],
-            sessionDescription: { type: "offer", sdp: offer },
-            force: false,
-          })) as NativeCloudflareNegotiationResponse;
+          const response = parseNegotiationResponse(
+            await this.request("tracks-close", {
+              tracks: [{ mid: candidate.mid }],
+              sessionDescription: { type: "offer", sdp: offer },
+              force: false,
+            }),
+          );
           this._assertCurrent(generation, handle);
           if (response.sessionDescription) {
             const description = requireNativeSessionDescription(
@@ -1029,7 +1154,7 @@ export class NativeCloudflareSourcesMethods {
         }
       }),
     );
-  }
+  },
 
   async retireVariants(logicalStreamId: string, desiredVariantIds: string[]) {
     const desired = new Set(desiredVariantIds.map(String));
@@ -1046,7 +1171,7 @@ export class NativeCloudflareSourcesMethods {
         String(producer.variantId || producer.source || ""),
       );
     return stale.length > 0;
-  }
+  },
 
   reannounceLocalPublications({
     connectionEpoch,
@@ -1060,14 +1185,12 @@ export class NativeCloudflareSourcesMethods {
       ...this.producerVariants.values(),
     ];
     for (const producer of allProducers) {
-      const p = producer as Record<string, unknown> & {
-        kind?: string;
-        track?: { kind?: string };
-      };
+      const p = producer;
+      const track = recordValue(p.track);
       const trackName = p.trackName;
       if (!trackName) continue;
       const source = p.source;
-      const kind = p.kind || (p.track?.kind === "audio" ? "audio" : "video");
+      const kind = p.kind || (track.kind === "audio" ? "audio" : "video");
       const ownerSource = p.ownerSource || null;
       const generation = p.generation || 0;
       const variantId = p.variantId || null;
@@ -1085,28 +1208,33 @@ export class NativeCloudflareSourcesMethods {
       const score = p.score;
       const sent = this.send?.({
         type: "cloudflare-publication",
-        data: {
-          trackName,
-          source,
-          kind,
-          ownerSource,
-          logicalStreamId: p.logicalStreamId || null,
-          generation,
-          connectionEpoch: this.controlConnectionEpoch,
-          variantId,
-          codec,
-          codecAcceleration,
-          codecImplementation,
-          width,
-          height,
-          fps,
-          bitrate,
-          ...(target ? { target } : {}),
-          ...(targetAdjusted ? { targetAdjusted } : {}),
-          receivers,
-          emergency,
-          score,
-        },
+        data: publicationData(
+          {
+            trackName,
+            source,
+            kind,
+            ownerSource,
+            logicalStreamId: p.logicalStreamId || null,
+            generation,
+            connectionEpoch: this.controlConnectionEpoch,
+            variantId,
+            codec,
+            codecAcceleration,
+            codecImplementation,
+            width,
+            height,
+            fps,
+            bitrate,
+            receivers,
+            emergency,
+            score,
+          },
+          {
+            target: targetValue(target),
+            targetAdjusted: targetAdjusted === true,
+            score: isExternalNumber(score) ? score : undefined,
+          },
+        ),
       });
       if (!sent) {
         mediaDebug("native-cloudflare.reannounce-send-failed", {
@@ -1116,29 +1244,29 @@ export class NativeCloudflareSourcesMethods {
       }
     }
     return Promise.resolve(true);
-  }
+  },
 
   async subscribe(
+    this: NativeCloudflareSessionSurface,
     publication: NativeCloudflarePublication,
     generation = this.sessionGeneration,
   ) {
     return this.subscribePublications([publication], generation);
-  }
+  },
 
-  async startSubscriptions() {
+  async startSubscriptions(this: NativeCloudflareSessionSurface) {
     await this.initialize();
     this.subscriptionsStarted = true;
-    const publications = [
-      ...this.publications.values(),
-    ] as NativeCloudflarePublication[];
+    const publications = [...this.publications.values()];
     for (let index = 0; index < publications.length; index += 64)
       await this.subscribePublications(
         publications.slice(index, index + 64),
         this.sessionGeneration,
       );
-  }
+  },
 
   subscribePublications(
+    this: NativeCloudflareSessionSurface,
     publications: NativeCloudflarePublication[],
     generation = this.sessionGeneration,
   ) {
@@ -1184,14 +1312,15 @@ export class NativeCloudflareSourcesMethods {
       this.subscriptionTasks.set(publication.trackName, tracked);
     tracked.catch(() => {});
     return tracked;
-  }
+  },
 
   async _subscribePublication(
+    this: NativeCloudflareSessionSurface,
     publication: NativeCloudflarePublication,
     generation: number,
   ) {
     return this._subscribePublicationBatch([publication], generation);
-  }
+  },
 
   async _subscribePublicationBatch(
     publications: NativeCloudflarePublication[],
@@ -1210,13 +1339,15 @@ export class NativeCloudflareSourcesMethods {
       !handle
     )
       return false;
-    const response = (await this.request("tracks-new", {
-      tracks: active.map((publication) => ({
-        location: "remote",
-        sessionId: publication.sessionId,
-        trackName: publication.trackName,
-      })),
-    })) as NativeCloudflareNegotiationResponse;
+    const response = parseNegotiationResponse(
+      await this.request("tracks-new", {
+        tracks: active.map((publication) => ({
+          location: "remote",
+          sessionId: publication.sessionId,
+          trackName: publication.trackName,
+        })),
+      }),
+    );
     this._assertCurrent(generation, handle);
     for (const publication of active) {
       if (this.publications.get(publication.trackName) !== publication)
@@ -1233,10 +1364,7 @@ export class NativeCloudflareSourcesMethods {
       const pending = this.pendingRemoteTrackEvents.get(mid) || [];
       this.pendingRemoteTrackEvents.delete(mid);
       for (const queued of pending)
-        this._handleTrackAdded(
-          (queued.payload || {}) as Record<string, unknown>,
-          queued.event || {},
-        );
+        this._handleTrackAdded(recordValue(queued.payload), queued.event || {});
     }
     this.lastReceivedConsumerParams = response;
     if (response.sessionDescription?.type === "offer") {
@@ -1264,7 +1392,7 @@ export class NativeCloudflareSourcesMethods {
       this._assertCurrent(generation, handle);
     }
     return true;
-  }
+  },
 
   async setSourceTransmission(source: string, enabled: boolean) {
     const key = String(source || "");
@@ -1273,26 +1401,24 @@ export class NativeCloudflareSourcesMethods {
     const producers = sourceProducers(this, key);
     if (!producers.length || !this.handle) return false;
     for (const producer of producers) {
+      const sourceRecord = this.sources.get(key) || {};
       await this._setSourceParameters(
-        {
-          ...(this.sources.get(key) || { source: key }),
-          ...producer,
-        } as NativeCloudflareSourceEntry,
+        mergeSourceEntry({ source: key }, { ...sourceRecord, ...producer }),
         this.sessionGeneration,
       );
       producer.paused = !value;
     }
     this._emitState();
     return true;
-  }
+  },
 
   async updateAudioBitrate(source: string, maxBitrate: number) {
     return this._updateBitrate(source, maxBitrate, "audio");
-  }
+  },
 
   async updateVideoBitrate(source: string, maxBitrate: number) {
     return this._updateBitrate(source, maxBitrate, "video");
-  }
+  },
 
   async updateVideoParameters(
     source: string,
@@ -1300,11 +1426,12 @@ export class NativeCloudflareSourcesMethods {
   ) {
     const entry = this.sources.get(String(source || ""));
     if (!entry || sourceKind(entry) !== "video") return false;
+    const videoSettings = entry.videoSettings || {};
     const next: VideoSettings = {
       resolution: "original",
       frameRate: 30,
       qualityPriority: "framerate",
-      ...(entry.videoSettings || {}),
+      ...videoSettings,
     };
     const maxBitrate = Number(parameters?.maxBitrate);
     const maxFramerate = Number(parameters?.maxFramerate);
@@ -1326,13 +1453,11 @@ export class NativeCloudflareSourcesMethods {
     let updated = false;
     for (const producer of producers)
       updated =
-        (await this._setSourceParameters({
-          ...entry,
-          ...producer,
-          videoSettings: next,
-        } as NativeCloudflareSourceEntry)) || updated;
+        (await this._setSourceParameters(
+          mergeSourceEntry(entry, { ...producer, videoSettings: next }),
+        )) || updated;
     return updated;
-  }
+  },
 
   async updateVariantVideoParameters(
     variantId: string,
@@ -1357,14 +1482,11 @@ export class NativeCloudflareSourcesMethods {
     );
     if (!Object.keys(overrides).length) return false;
     return this._setSourceParameters(
-      {
-        ...base,
-        ...producer,
-      } as NativeCloudflareSourceEntry,
+      mergeSourceEntry({ source }, { ...base, ...producer }),
       this.sessionGeneration,
       overrides,
     );
-  }
+  },
 
   async _updateBitrate(
     source: string,
@@ -1381,53 +1503,49 @@ export class NativeCloudflareSourcesMethods {
     )
       return false;
     if (kind === "audio") entry.audioBitrate = value;
-    else
-      entry.videoSettings = {
-        ...(entry.videoSettings || {}),
-        maxBitrate: value,
-      };
+    else {
+      entry.videoSettings = entry.videoSettings
+        ? { ...entry.videoSettings, maxBitrate: value }
+        : {
+            resolution: "original",
+            frameRate: 30,
+            qualityPriority: "framerate",
+            maxBitrate: value,
+          };
+    }
     const producers = sourceProducers(this, String(source || ""));
     let updated = false;
     for (const producer of producers)
       updated =
-        (await this._setSourceParameters({
-          ...entry,
-          ...producer,
-        } as NativeCloudflareSourceEntry)) || updated;
+        (await this._setSourceParameters(mergeSourceEntry(entry, producer))) ||
+        updated;
     return updated;
-  }
+  },
 
   async _setSourceParameters(
+    this: NativeCloudflareSessionSurface,
     entry: NativeCloudflareSourceEntry,
     generation = this.sessionGeneration,
     overrides: Record<string, unknown> = {},
   ) {
     if (!entry?.source || !this.handle) return false;
     this._assertCurrent(generation);
-    const parameters: Record<string, unknown> = {
+    const parameters: NativeCloudflareSourceParameters = {
       active: this.sourceTransmission.get(entry.source) !== false,
       priority: "high",
       networkPriority: "high",
     };
-    const captureSelection = entry.captureSelection as
-      | {
-          audio?: { maxBitrateBps?: number };
-          video?: { maxBitrateBps?: number };
-        }
-      | null
-      | undefined;
+    const captureSelection = recordValue(entry.captureSelection);
+    const captureAudio = recordValue(captureSelection.audio);
+    const captureVideo = recordValue(captureSelection.video);
     const kind = sourceKind(entry);
     if (kind === "video") {
-      const captureEntry = (this.sources.get(entry.source) ||
-        entry) as NativeCloudflareSourceEntry;
+      const captureEntry = this.sources.get(entry.source) || entry;
       const video = resolveNativeCaptureVideoSettings(
         captureEntry.captureSelection,
         captureEntry.videoSettings || undefined,
       );
-      const resolutionKey = String(
-        video.resolution || "",
-      ) as keyof typeof VIDEO_RESOLUTIONS;
-      const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+      const resolution = resolutionValue(video.resolution);
       const captureWidth =
         Number(captureEntry.width) || video.width || resolution?.width || 1920;
       const captureHeight =
@@ -1447,7 +1565,7 @@ export class NativeCloudflareSourcesMethods {
         Number(entry.target?.bitrate) ||
         Number(entry.bitrate) ||
         Number(video.maxBitrate) ||
-        Number(captureSelection?.video?.maxBitrateBps);
+        Number(captureVideo.maxBitrateBps);
       const options = buildVideoProduceOptions({
         width: captureWidth,
         height: captureHeight,
@@ -1477,24 +1595,21 @@ export class NativeCloudflareSourcesMethods {
       );
       const bitrate = Number(
         entry.audioBitrate ||
-          captureSelection?.audio?.maxBitrateBps ||
+          captureAudio.maxBitrateBps ||
           policy.maxBitrateBps,
       );
       if (Number.isFinite(bitrate) && bitrate > 0)
         parameters.maxBitrate = Math.floor(bitrate);
     }
     try {
+      const trackParameters = { ...parameters, ...overrides };
+      if (kind === "video" && entry.codec)
+        trackParameters.preferredCodec = entry.codec;
       await this.invoke("media_p2p_set_track_parameters", {
         p2pHandle: this.handle,
         source: entry.source,
         trackKey: producerTrackKey(entry),
-        parameters: {
-          ...parameters,
-          ...overrides,
-          ...(kind === "video" && entry.codec
-            ? { preferredCodec: entry.codec }
-            : {}),
-        },
+        parameters: trackParameters,
       });
       this._assertCurrent(generation);
       return true;
@@ -1504,5 +1619,5 @@ export class NativeCloudflareSourcesMethods {
       );
       return false;
     }
-  }
-}
+  },
+};

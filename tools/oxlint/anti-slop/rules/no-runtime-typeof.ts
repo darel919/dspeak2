@@ -50,10 +50,11 @@ export const noRuntimeTypeofRule = defineRule({
       UnaryExpression(node) {
         const option = context.options?.[0];
         const allowInTypeGuards =
-          typeof option === "object" &&
           option !== null &&
+          option !== undefined &&
           !Array.isArray(option) &&
-          option.allowInTypeGuards === true;
+          Object.getOwnPropertyDescriptor(option, "allowInTypeGuards")
+            ?.value === true;
         if (
           node.operator === "typeof" &&
           (!allowInTypeGuards || !isInsideTypeGuard(node))

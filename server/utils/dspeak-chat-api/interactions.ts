@@ -39,7 +39,7 @@ export function createChatInteractionsHandler(
       const emoji = String(requireValue(body.emoji, "Emoji is required"));
       if (
         emoji.length > 32 ||
-        !/^[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0f\u20e3\u{1f1e6}-\u{1f1ff}0-9#*]+$/u.test(
+        /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\u200d|\ufe0f|\u20e3|\p{Regional_Indicator}|[0-9#*])+$/u.test(
           emoji,
         )
       )

@@ -27,6 +27,8 @@ import type {
   VideoSettings,
   VideoSettingsInput,
 } from "../shared/types/video-settings.ts";
+import { isExternalRecord } from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 const MAX_ROOM_VOLUME_ENTRIES = 100;
 
@@ -112,19 +114,19 @@ export const useSettingsStore = defineStore("settings", () => {
     ref(Boolean(loadPersisted(STORAGE_KEYS.systemSoundsMuted, false))),
   );
 
-  function normalizePercent(value: unknown): number {
+  function normalizePercent(value: ExternalField): number {
     const numeric = Number(value);
     return Number.isFinite(numeric)
       ? Math.min(100, Math.max(0, Math.round(numeric)))
       : 100;
   }
 
-  function setSoundboardVolume(value: unknown): void {
+  function setSoundboardVolume(value: ExternalField): void {
     soundboardVolume.value = normalizePercent(value);
     persist(STORAGE_KEYS.soundboardVolume, soundboardVolume.value);
   }
 
-  function setRoomSoundboardVolume(roomId: string, value: unknown): void {
+  function setRoomSoundboardVolume(roomId: string, value: ExternalField): void {
     let next: SoundboardRoomVolumes = { ...soundboardRoomVolumes.value };
     if (value === null || value === undefined || value === "") {
       delete next[roomId];
@@ -147,28 +149,28 @@ export const useSettingsStore = defineStore("settings", () => {
       : soundboardVolume.value;
   }
 
-  function setSystemSoundTheme(value: unknown): void {
+  function setSystemSoundTheme(value: ExternalField): void {
     systemSoundTheme.value = normalizeSystemSoundTheme(value);
     persist(STORAGE_KEYS.systemSoundTheme, systemSoundTheme.value);
   }
 
-  function normalizeSystemSoundTheme(value: unknown): SystemSoundTheme {
+  function normalizeSystemSoundTheme(value: ExternalField): SystemSoundTheme {
     return value === "default" ? value : "default";
   }
 
-  function setSystemSoundVolume(value: unknown): void {
+  function setSystemSoundVolume(value: ExternalField): void {
     systemSoundVolume.value = normalizePercent(value);
     persist(STORAGE_KEYS.systemSoundVolume, systemSoundVolume.value);
   }
 
-  function setSystemSoundsMuted(value: unknown): void {
+  function setSystemSoundsMuted(value: ExternalField): void {
     systemSoundsMuted.value = Boolean(value);
     persist(STORAGE_KEYS.systemSoundsMuted, systemSoundsMuted.value);
   }
 
   const supported = computed(() => {
     if (
-      typeof navigator === "undefined" ||
+      !import.meta.client ||
       !navigator.mediaDevices ||
       !navigator.mediaDevices.getSupportedConstraints
     ) {
@@ -186,7 +188,10 @@ export const useSettingsStore = defineStore("settings", () => {
     };
   });
 
-  function setAudioSetting(key: keyof AudioSettings, value: unknown): void {
+  function setAudioSetting(
+    key: keyof AudioSettings,
+    value: ExternalField,
+  ): void {
     if (!(key in audio.value)) return;
     audio.value = { ...audio.value, [key]: !!value };
     persist("audioSettings", audio.value);
@@ -200,29 +205,29 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("microphoneGateSettings", microphoneGate.value);
   }
 
-  function setBroadcastMode(val: unknown): void {
+  function setBroadcastMode(val: ExternalField): void {
     broadcastMode.value = !!val;
     persist("broadcastMode", broadcastMode.value);
   }
 
-  function normalizeSharedAudioVolume(value: unknown): number {
+  function normalizeSharedAudioVolume(value: ExternalField): number {
     const numeric = Number(value);
     return Number.isFinite(numeric)
       ? Math.min(100, Math.max(0, Math.round(numeric)))
       : 100;
   }
 
-  function setSharedAudioVolume(value: unknown): void {
+  function setSharedAudioVolume(value: ExternalField): void {
     sharedAudioVolume.value = normalizeSharedAudioVolume(value);
     persist("sharedAudioVolume", sharedAudioVolume.value);
   }
 
-  function normalizeSystemAudioBitrate(value: unknown): number {
+  function normalizeSystemAudioBitrate(value: ExternalField): number {
     const numeric = Number(value);
     return SYSTEM_AUDIO_BITRATE_OPTIONS.includes(numeric) ? numeric : 128;
   }
 
-  function setSystemAudioBitrate(value: unknown): void {
+  function setSystemAudioBitrate(value: ExternalField): void {
     systemAudioBitrate.value = normalizeSystemAudioBitrate(value);
     persist("systemAudioBitrate", systemAudioBitrate.value);
   }
@@ -256,14 +261,14 @@ export const useSettingsStore = defineStore("settings", () => {
     persist("audioDeviceId", micDeviceId.value);
   }
 
-  function setOutputDeviceId(id: string | null): Promise<unknown> | void {
+  function setOutputDeviceId(id: string | null): Promise<void> | void {
     outputDeviceId.value = id || null;
     persist("audioOutputDeviceId", outputDeviceId.value);
 
-    if (typeof window !== "undefined") {
-      return import("./voice").then(({ useVoiceStore }) =>
-        useVoiceStore().applyOutputDevice?.(),
-      );
+    if (import.meta.client) {
+      return import("./voice").then(async ({ useVoiceStore }) => {
+        await useVoiceStore().applyOutputDevice?.();
+      });
     }
   }
 
@@ -290,32 +295,28 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function loadPersisted<T>(key: string, fallback: T): T {
     try {
-      if (typeof localStorage === "undefined") return fallback;
+      if (!import.meta.client) return fallback;
       const raw = localStorage.getItem(key);
       if (!raw) return fallback;
       const parsed = JSON.parse(raw);
-      if (
-        fallback &&
-        typeof fallback === "object" &&
-        !Array.isArray(fallback)
-      ) {
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if (isExternalRecord(fallback)) {
+        if (isExternalRecord(parsed)) {
           return { ...fallback, ...parsed };
         }
         return fallback;
       }
       return parsed;
-    } catch (_) {
+    } catch {
       return fallback;
     }
   }
 
   function persist<T>(key: string, value: T): void {
     try {
-      if (typeof localStorage === "undefined") return;
+      if (!import.meta.client) return;
       localStorage.setItem(key, JSON.stringify(value));
       reportBrowserStorageMetric(key, value);
-    } catch (_) {}
+    } catch {}
   }
 
   return {

@@ -12,10 +12,13 @@ import {
 } from "~~/shared/presence-status.ts";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import { isExternalRecord } from "../shared/types/boundary.ts";
 import type { PresenceRecord } from "../shared/types/presence.ts";
 import type { PresenceStatus } from "~~/shared/types/presence.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 import {
   isPresenceRecord,
+  parsePresenceChannelMessage,
   type PresenceActivityTimer,
   type PresenceChannel,
   type PresenceChannelMessage,
@@ -25,7 +28,7 @@ import {
 } from "../shared/types/presence-status.ts";
 
 function detectPlatform(isTauri: boolean): PresencePlatform {
-  if (typeof window === "undefined" || !isTauri) return "web";
+  if (!import.meta.client || !isTauri) return "web";
   if (isTauri) {
     const ua = navigator.userAgent.toLowerCase();
     if (ua.includes("mac")) return "macos";
@@ -143,10 +146,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
       if (!response.ok) return;
       const data: unknown = await response.json();
       const users =
-        data &&
-        typeof data === "object" &&
-        "users" in data &&
-        Array.isArray(data.users)
+        isExternalRecord(data) && Array.isArray(data.users)
           ? data.users.filter(isPresenceRecord)
           : [];
       if (users.length) {
@@ -175,6 +175,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
 
     intentDisconnect = false;
     openRealtimeChannel("global", {
+      decodePayload: parsePresenceChannelMessage,
       onMessage: (message: PresenceChannelMessage) => {
         if (
           message?.type === "status_updated" &&
@@ -345,7 +346,7 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     });
   }
 
-  function setStatus(status: unknown): void {
+  function setStatus(status: ExternalField): void {
     const normalized = normalizePresenceStatus(status);
     presenceOverride.value = normalized === "online" ? null : normalized;
     persist(STORAGE_KEYS.presenceOverride, presenceOverride.value);
@@ -353,13 +354,13 @@ export const usePresenceStatusStore = defineStore("presenceStatus", () => {
     sendStatus(normalized, Boolean(presenceOverride.value));
   }
 
-  function setAutomaticStatus(status: unknown): void {
+  function setAutomaticStatus(status: ExternalField): void {
     if (presenceOverride.value) return;
     effectiveStatus.value = resolveAutomaticPresence(null, status);
     sendStatus(effectiveStatus.value, false);
   }
 
-  function setIdleTimeout(ms: unknown): void {
+  function setIdleTimeout(ms: ExternalField): void {
     idleTimeout.value = normalizeIdleTimeout(ms);
     persist(STORAGE_KEYS.idleTimeout, idleTimeout.value);
   }

@@ -80,9 +80,7 @@ test("stale same-track heartbeat keeps the newer local incarnation in the canoni
     generation: 9,
   };
 
-  const { canonicalSnapshot, removed } = registry.reconcileExact([
-    staleIncoming,
-  ]);
+  const { canonicalSnapshot } = registry.reconcileExact([staleIncoming]);
 
   assert.deepEqual(canonicalSnapshot, [localNewer]);
   assert.ok(!registry.values().includes(staleIncoming));

@@ -44,25 +44,27 @@ export function createSFURoute(
   reason: string,
   providerId: string | null = null,
 ): SFURoute {
-  return {
+  const route: SFURoute = {
     kind: "sfu",
     provider,
-    ...(providerId ? { providerId } : {}),
     epoch,
     sourceRevision,
     reason,
   };
+  if (providerId) route.providerId = providerId;
+  return route;
 }
 
 export function normalizeMediaPathMetrics(
   raw: RawMediaPathMetrics,
 ): MediaPathMetrics {
-  const numberOrNull = (value: unknown) => {
-    if (value == null || value === "") return null;
-    const number = Number(value);
-    return Number.isFinite(number) ? number : null;
+  const numberOrNull = (value: ExternalField) => {
+    return parseExternalNumber(value);
   };
-  const milliseconds = (millisecondsValue: unknown, secondsValue: unknown) => {
+  const milliseconds = (
+    millisecondsValue: ExternalField,
+    secondsValue: ExternalField,
+  ) => {
     const seconds = numberOrNull(secondsValue);
     if (seconds != null) return seconds * 1000;
     return numberOrNull(millisecondsValue);
@@ -74,8 +76,8 @@ export function normalizeMediaPathMetrics(
       : numberOrNull(raw.packetLossPercent);
   const sampledAt = numberOrNull(raw.sampledAt);
   return {
-    routeId: String(raw.routeId || ""),
-    peerOrProvider: String(raw.peerOrProvider || ""),
+    routeId: parseExternalString(raw.routeId) ?? "",
+    peerOrProvider: parseExternalString(raw.peerOrProvider) ?? "",
     rttMs: milliseconds(raw.rttMs, raw.rttSeconds),
     jitterMs: milliseconds(raw.jitterMs, raw.jitterSeconds),
     packetLossPercent,
@@ -122,3 +124,8 @@ import type {
   SFUProvider as SFUProviderType,
   SFURoute,
 } from "./types/media.ts";
+import {
+  parseExternalNumber,
+  parseExternalString,
+  type ExternalField,
+} from "./types/external.ts";

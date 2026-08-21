@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { supabaseProjectRef } from "../app/shared/desktop-session-diagnostics.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 const serverUrl = process.env.DSPEAK_TEST_SERVER_URL || "";
 const accessToken = process.env.DSPEAK_TEST_TOKEN || "";
@@ -30,10 +34,10 @@ test(
       `expected 200, got ${response.status}: ${await response.text()}`,
     );
 
-    const payload = (await response.json()) as {
-      user?: { user_metadata?: Record<string, string> };
-    };
-    assert.ok(payload?.user?.user_metadata?.id, "session payload has user id");
+    const payload = parseExternalRecord(await response.json());
+    const user = parseExternalRecord(payload?.user);
+    const metadata = parseExternalRecord(user?.user_metadata);
+    assert.ok(parseExternalString(metadata?.id), "session payload has user id");
 
     if (configuredProjectRef) {
       const serverProjectRef = response.headers.get(
@@ -63,9 +67,9 @@ test(
     });
 
     assert.equal(response.status, 401);
-    const payload = (await response.json()) as { statusMessage?: string };
+    const payload = parseExternalRecord(await response.json());
     assert.equal(
-      payload.statusMessage,
+      parseExternalString(payload?.statusMessage),
       "DESKTOP_SUPABASE_PROJECT_MISMATCH",
       `expected PROJECT_MISMATCH, got ${payload.statusMessage}`,
     );
@@ -80,9 +84,10 @@ test(
   async () => {
     const parts = accessToken.split(".");
     if (parts.length !== 3) return;
-    const claims = JSON.parse(
-      Buffer.from(parts[1], "base64url").toString("utf8"),
-    ) as Record<string, unknown>;
+    const claims =
+      parseExternalRecord(
+        JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")),
+      ) ?? {};
     const tampered = [
       parts[0],
       Buffer.from(

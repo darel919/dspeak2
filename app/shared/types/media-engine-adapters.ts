@@ -1,3 +1,4 @@
+import type { MediaCommandResult } from "./boundary.ts";
 import type { useHybridMediaSession } from "../../composables/useHybridMediaSession.ts";
 import type { createMediaQoeReport } from "../media-qoe.ts";
 import type {
@@ -37,7 +38,7 @@ export interface MediaEngineFactoryOptions extends BrowserMediaEngineOptions {
 }
 
 export type BrowserMediaEngineSession = BrowserMediaSession & {
-  on?: (event: string, callback: (...args: unknown[]) => void) => () => void;
+  on?: (event: string, callback: (...args: object[]) => void) => () => void;
   initialize?: (config?: MediaEngineConfig) => Promise<void>;
   joinSession?: (input: JoinSessionInput) => Promise<void>;
   leaveSession?: () => Promise<void>;
@@ -50,12 +51,17 @@ export type BrowserMediaEngineSession = BrowserMediaSession & {
   getStats?: () => Promise<MediaStats>;
   setMediaCapabilities?: (
     capabilities: ParticipantMediaCapabilities | null,
-  ) => unknown;
+  ) => MediaCommandResult;
   shutdown?: () => Promise<void>;
   setMicrophoneDevice?: (deviceId: string) => Promise<void>;
   setOutputDevice?: (deviceId: string) => Promise<void>;
-  setLocalVideoPreview?: (source: string, enabled: boolean) => unknown;
-  setJitterBufferConfig?: (config?: Record<string, unknown>) => unknown;
+  setLocalVideoPreview?: (
+    source: string,
+    enabled: boolean,
+  ) => MediaCommandResult;
+  setJitterBufferConfig?: (
+    config?: Record<string, unknown>,
+  ) => MediaCommandResult;
   isScreenSharing?: () => boolean;
   isMicrophoneEnabled?: () => boolean;
   isCameraEnabled?: () => boolean;

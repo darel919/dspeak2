@@ -4,8 +4,9 @@ import type { messages, profiles } from "../db/schema/index.ts";
 import type { RoomMemberAccess } from "./room-authorization.ts";
 import type { PushNotificationInput } from "./push-delivery.ts";
 import type { MessageLike } from "../../shared/types/message.ts";
-import type { DSpeakProfileInput, DSpeakProfileRow } from "./dspeak-api.ts";
+import type { DSpeakProfileInput } from "./dspeak-api.ts";
 import type { AuthorizationRoom } from "./room-authorization.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 export type ChatMessageRow = InferSelectModel<typeof messages>;
 export type ChatProfileRow = InferSelectModel<typeof profiles>;
@@ -15,7 +16,7 @@ export type ChatRouteHandler = (
   suffix: string,
   userId: string,
   body: ChatRouteBody,
-) => Promise<unknown>;
+) => Promise<ExternalField>;
 export interface ChatAttachmentRecord {
   id: string;
   url: string;
@@ -47,15 +48,15 @@ export interface ChatApiDependencies {
   ) => Promise<URL>;
   broadcastToChannel: (
     channelId: string | number,
-    message: unknown,
+    message: ExternalField,
   ) => Promise<void>;
   broadcastToUser: (
     userId: string,
     message: Record<string, unknown>,
-  ) => unknown;
+  ) => ExternalField;
   canDeleteMessage: (
     message: MessageLike | null | undefined,
-    userId: unknown,
+    userId: ExternalField,
     permissions?: readonly string[],
     isRoomOwner?: boolean,
   ) => boolean;
@@ -87,7 +88,7 @@ export interface ChatApiDependencies {
   getQuery: (event: H3Event) => Record<string, string | undefined>;
   isMessageOwner: (
     message: MessageLike | null | undefined,
-    userId: unknown,
+    userId: ExternalField,
   ) => boolean;
   parseBody: (event: H3Event) => Promise<ChatRouteBody>;
   persistMessageNotifications: (input: PushNotificationInput) => Promise<{
@@ -97,15 +98,15 @@ export interface ChatApiDependencies {
   presentUser: (
     user: DSpeakProfileInput | null | undefined,
     detailed?: boolean,
-  ) => unknown;
+  ) => ExternalField;
   pushAllowedHosts: readonly string[];
   requireAuthenticatedUser: (event: H3Event) => Promise<string>;
   requireRoomMember: (
     room: AuthorizationRoom,
     userId: string,
   ) => Promise<RoomMemberAccess>;
-  requireValue: (value: unknown, message: string) => string;
-  sendPushTest: (userId: string, deviceId: string) => Promise<unknown>;
+  requireValue: (value: ExternalField, message: string) => string;
+  sendPushTest: (userId: string, deviceId: string) => Promise<ExternalField>;
   setResponseStatus: (event: H3Event, statusCode: number) => void;
   [key: string]: unknown;
 }
@@ -117,11 +118,11 @@ export interface ChatRouteDependencies extends ChatApiDependencies {
   ) => Promise<URL>;
   broadcastToChannel: (
     channelId: string | number,
-    message: unknown,
+    message: ExternalField,
   ) => Promise<void>;
   canDeleteMessage: (
     message: MessageLike | null | undefined,
-    userId: unknown,
+    userId: ExternalField,
     permissions?: readonly string[],
     isRoomOwner?: boolean,
   ) => boolean;
@@ -148,7 +149,7 @@ export interface ChatRouteDependencies extends ChatApiDependencies {
   getHeader: (event: H3Event, name: string) => string | undefined;
   isMessageOwner: (
     message: MessageLike | null | undefined,
-    userId: unknown,
+    userId: ExternalField,
   ) => boolean;
   persistMessageNotifications: (input: PushNotificationInput) => Promise<{
     notifications: number;
@@ -159,10 +160,10 @@ export interface ChatRouteDependencies extends ChatApiDependencies {
     rows: ChatMessageRow[],
   ) => Promise<Array<Record<string, unknown>>>;
   pushAllowedHosts: readonly string[];
-  sendPushTest: (userId: string, deviceId: string) => Promise<unknown>;
+  sendPushTest: (userId: string, deviceId: string) => Promise<ExternalField>;
   setResponseStatus: (event: H3Event, statusCode: number) => void;
   validateMessageAttachments: (
-    submittedAttachments: unknown,
+    submittedAttachments: ExternalField,
     channelId: string,
     userId: string,
     clientId?: string,

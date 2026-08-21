@@ -3,6 +3,7 @@ import type {
   MediasoupTransportDirection,
   MediasoupTransportState,
 } from "./types/mediasoup-client.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 
 export function handleMediasoupTransportRecovery(
   session: MediasoupClientSessionLike,
@@ -70,7 +71,9 @@ async function performMediasoupTransportIceRestart(
       `SFU ${direction} ICE restart`,
     );
   } catch (error) {
-    session.pending.get(requestId)?.reject(error);
+    session.pending
+      .get(requestId)
+      ?.reject(asError(error, "SFU ICE recovery failed"));
   }
   const iceParameters = await response;
   const current =

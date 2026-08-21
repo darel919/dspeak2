@@ -7,6 +7,11 @@ import type {
   PwaUpdateRuntime,
   PwaUpdateState,
 } from "../shared/types/pwa-update.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 const STARTUP_RESTART_GUARD = "dspeak-pwa-startup-restart";
 const INSTALL_WAIT_MS = 10000;
@@ -61,11 +66,11 @@ function workerVersion(worker: ServiceWorker | null): Promise<string | null> {
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     let timer: number | null = null;
-    const finish = (version: unknown) => {
+    const finish = (version: ExternalField) => {
       if (timer) window.clearTimeout(timer);
       channel.port1.close();
       channel.port2.close();
-      resolve(typeof version === "string" && version ? version : null);
+      resolve(isExternalString(version) && version ? version : null);
     };
 
     channel.port1.onmessage = (event) => {
@@ -149,7 +154,8 @@ export function usePwaUpdate() {
       const storedGuard = sessionStorage.getItem(STARTUP_RESTART_GUARD);
       if (!storedGuard || storedGuard === "attempted") return null;
       const parsedGuard = JSON.parse(storedGuard);
-      return typeof parsedGuard?.version === "string"
+      return isExternalRecord(parsedGuard) &&
+        isExternalString(parsedGuard.version)
         ? parsedGuard.version
         : null;
     } catch (error) {
@@ -279,9 +285,11 @@ export function usePwaUpdate() {
     activeRuntime.activationWorker = worker;
     activeRuntime.refreshing.value = mode === "active";
     worker.postMessage({ type: "SKIP_WAITING" });
-    await waitForState(worker, ["activated", "redundant"], ACTIVATION_WAIT_MS);
-
-    const workerState = worker.state as ServiceWorkerState;
+    const workerState = await waitForState(
+      worker,
+      ["activated", "redundant"],
+      ACTIVATION_WAIT_MS,
+    );
     if (
       workerState === "activated" ||
       activeRuntime.registration?.active === worker

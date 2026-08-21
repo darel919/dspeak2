@@ -1166,7 +1166,7 @@ describe("NativeCloudflareRealtimeSession", () => {
     session.closed = false;
     session.sessionId = "cloudflare-session";
     session.subscriptionsStarted = true;
-    const registry = new Map<string, unknown>();
+    const registry = new Map<string, CloudflarePublication>();
 
     const oldX = {
       peerId: "peer-1",
@@ -1192,9 +1192,9 @@ describe("NativeCloudflareRealtimeSession", () => {
       releaseSubscribeX = resolve;
     });
     const subscribeCalls: string[] = [];
-    session.subscribe = async (publication: {
-      trackName?: unknown;
-    }): Promise<unknown> => {
+    session.subscribe = async (
+      publication: CloudflarePublication,
+    ): Promise<boolean> => {
       const trackName = String(publication.trackName);
       subscribeCalls.push(trackName);
       session.subscribedTrackNames.add(trackName);
@@ -1212,7 +1212,7 @@ describe("NativeCloudflareRealtimeSession", () => {
       [oldX],
       [],
       () => stale,
-      () => [...registry.values()] as CloudflarePublication[],
+      () => [...registry.values()],
     );
 
     registry.set(newY.trackName, newY);
@@ -1238,7 +1238,7 @@ describe("NativeCloudflareRealtimeSession", () => {
     session.closed = false;
     session.sessionId = "cloudflare-session";
     session.subscriptionsStarted = true;
-    const registry = new Map<string, unknown>();
+    const registry = new Map<string, CloudflarePublication>();
 
     const oldX = {
       peerId: "peer-1",
@@ -1254,9 +1254,9 @@ describe("NativeCloudflareRealtimeSession", () => {
     const gateX = new Promise<void>((resolve) => {
       releaseSubscribeX = resolve;
     });
-    session.subscribe = async (publication: {
-      trackName?: unknown;
-    }): Promise<unknown> => {
+    session.subscribe = async (
+      publication: CloudflarePublication,
+    ): Promise<boolean> => {
       const trackName = String(publication.trackName);
       if (trackName === "screen-X") await gateX;
       return true;
@@ -1267,7 +1267,7 @@ describe("NativeCloudflareRealtimeSession", () => {
       [oldX],
       [],
       () => stale,
-      () => [...registry.values()] as CloudflarePublication[],
+      () => [...registry.values()],
     );
 
     stale = true;
@@ -1288,7 +1288,7 @@ describe("NativeCloudflareRealtimeSession", () => {
     session.closed = false;
     session.sessionId = "cloudflare-session";
     session.subscriptionsStarted = true;
-    const registry = new Map<string, unknown>();
+    const registry = new Map<string, CloudflarePublication>();
 
     const oldX = {
       peerId: "peer-1",
@@ -1323,9 +1323,9 @@ describe("NativeCloudflareRealtimeSession", () => {
       releaseSubscribeX = resolve;
     });
     const subscribeCalls: string[] = [];
-    session.subscribe = async (publication: {
-      trackName?: unknown;
-    }): Promise<unknown> => {
+    session.subscribe = async (
+      publication: CloudflarePublication,
+    ): Promise<boolean> => {
       const trackName = String(publication.trackName);
       subscribeCalls.push(trackName);
       session.subscribedTrackNames.add(trackName);
@@ -1338,7 +1338,7 @@ describe("NativeCloudflareRealtimeSession", () => {
       [oldX],
       [],
       () => stale,
-      () => [...registry.values()] as CloudflarePublication[],
+      () => [...registry.values()],
     );
 
     registry.set(newY.trackName, newY);
@@ -1370,7 +1370,7 @@ describe("NativeCloudflareRealtimeSession", () => {
     session.closed = false;
     session.sessionId = "cloudflare-session";
     session.subscriptionsStarted = true;
-    const registry = new Map<string, unknown>();
+    const registry = new Map<string, CloudflarePublication>();
 
     const oldX = {
       peerId: "peer-1",
@@ -1409,9 +1409,9 @@ describe("NativeCloudflareRealtimeSession", () => {
       releaseSubscribeY = resolve;
     });
     const subscribeCalls: string[] = [];
-    session.subscribe = async (publication: {
-      trackName?: unknown;
-    }): Promise<unknown> => {
+    session.subscribe = async (
+      publication: CloudflarePublication,
+    ): Promise<boolean> => {
       const trackName = String(publication.trackName);
       subscribeCalls.push(trackName);
       session.subscribedTrackNames.add(trackName);
@@ -1425,7 +1425,7 @@ describe("NativeCloudflareRealtimeSession", () => {
       [oldX],
       [],
       () => stale,
-      () => [...registry.values()] as CloudflarePublication[],
+      () => [...registry.values()],
     );
 
     registry.set(newY.trackName, newY);

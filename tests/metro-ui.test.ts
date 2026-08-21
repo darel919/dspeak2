@@ -381,7 +381,7 @@ test("notification dropdown renders above navbar call controls", async () => {
     "app/components/NotificationCenter.vue",
     "utf8",
   );
-  assert.doesNotMatch(navbar, /navbar[^\"]*overflow-hidden/);
+  assert.doesNotMatch(navbar, /navbar[^"]*overflow-hidden/);
   assert.match(notifications, /dropdown dropdown-end relative z-30/);
   assert.match(notifications, /dropdown-content metro-pane z-50/);
 });
@@ -598,13 +598,16 @@ test("room rail tooltips preview connected voice participants", async () => {
   assert.match(channels, /existing\?\.connecting/);
   assert.match(
     channels,
-    /applyVoicePresence\(\s*message\.data as VoicePresenceSnapshot,\s*normalizedRoomId,\s*\)/,
+    /const snapshot = parseVoicePresenceSnapshot\(message\.data\)[\s\S]*?applyVoicePresence\(snapshot, normalizedRoomId\)/,
   );
   assert.match(
     channels,
     /openRealtimeChannel(?:<[\s\S]*?>)?\(`room:\$\{normalizedRoomId\}`/,
   );
-  assert.match(channels, /function syncVoicePresenceRooms\(roomIds: unknown\)/);
+  assert.match(
+    channels,
+    /function syncVoicePresenceRooms\(roomIds: ExternalField\)/,
+  );
 });
 
 test("voice channel participant rows own a channel-specific context menu", async () => {
@@ -642,7 +645,7 @@ test("channel deletion reports server failures instead of failing silently", asy
     source,
     /channelMenuElement\.value\?\.contains\(event\.target\)/,
   );
-  assert.match(source, /toastSuccess\(`Deleted #\$\{channel\.name\}\.\`\);/);
+  assert.match(source, /toastSuccess\(`Deleted #\$\{channel\.name\}\.`\);/);
   assert.match(source, /toastError\(message\);/);
   assert.doesNotMatch(
     source,
@@ -739,7 +742,7 @@ test("room accent changes persist and propagate immediately", async () => {
   assert.match(rooms, /applyRealtimeRoomUpdate/);
   assert.match(presence, /message\?\.type === "room_updated"/);
   assert.match(api, /type: "room_updated"/);
-  assert.match(api, /data\.attenuation = normalizeAttenuation/);
+  assert.match(api, /update\.attenuation = normalizeAttenuation/);
   assert.match(api, /A room member must have at least one role/);
   assert.match(api, /Assigned roles must belong to this room/);
 });

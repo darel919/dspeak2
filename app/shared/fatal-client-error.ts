@@ -1,6 +1,8 @@
 export const FATAL_CLIENT_ERROR_MESSAGE =
   "We encountered a fatal error and cannot recover. Please refresh the page.";
 
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+
 export type FatalClientErrorKind = "client-runtime" | "native-media-worker";
 
 export type FatalRecoveryAction = "refresh-page" | "restart-app";
@@ -25,33 +27,27 @@ const FATAL_CLIENT_ERROR_PATTERNS = [
   /chunkloaderror/i,
 ];
 
-export function isFatalClientError(error: unknown) {
-  const record =
-    error && typeof error === "object"
-      ? (error as { name?: unknown; message?: unknown })
-      : null;
+export function isFatalClientError<T>(error: T) {
+  const record = isExternalRecord(error) ? error : null;
   const message =
     error instanceof Error
       ? `${error.name} ${error.message}`
-      : typeof error === "string"
+      : isExternalString(error)
         ? error
-        : `${record?.name || ""} ${record?.message || ""}`;
+        : `${String(record?.name || "")} ${String(record?.message || "")}`;
 
   return FATAL_CLIENT_ERROR_PATTERNS.some((pattern) => pattern.test(message));
 }
 
-function errorCode(error: unknown) {
-  if (!error || typeof error !== "object") return null;
-  const record = error as Record<string, unknown>;
-  const nested =
-    record.error && typeof record.error === "object"
-      ? (record.error as Record<string, unknown>)
-      : null;
+function errorCode<T>(error: T) {
+  const record = isExternalRecord(error) ? error : null;
+  if (!record) return null;
+  const nested = isExternalRecord(record.error) ? record.error : null;
   const code = record.code ?? nested?.code;
-  return typeof code === "string" ? code : null;
+  return isExternalString(code) ? code : null;
 }
 
-export function isNativeMediaWorkerFatalError(error: unknown) {
+export function isNativeMediaWorkerFatalError<T>(error: T) {
   return errorCode(error) === NATIVE_MEDIA_WORKER_FATAL_CODE;
 }
 
@@ -83,14 +79,11 @@ export function clientRuntimeFatalDescriptor(
   };
 }
 
-export function classifyFatalClientError(
-  error: unknown,
+export function classifyFatalClientError<T>(
+  error: T,
 ): FatalClientErrorDescriptor | null {
   if (isNativeMediaWorkerFatalError(error)) {
-    const details =
-      error && typeof error === "object"
-        ? (error as Record<string, unknown>)
-        : {};
+    const details = isExternalRecord(error) ? error : {};
     return nativeMediaWorkerFatalDescriptor(details);
   }
   if (isFatalClientError(error)) return clientRuntimeFatalDescriptor();

@@ -1,17 +1,17 @@
-export function normalizeParticipantVoiceState(value: unknown) {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    !("muted" in value) ||
-    !("deafened" in value) ||
-    typeof value.muted !== "boolean" ||
-    typeof value.deafened !== "boolean"
-  ) {
-    return null;
-  }
+import {
+  parseExternalBoolean,
+  parseExternalRecord,
+  type ExternalField,
+} from "./types/external.ts";
+
+export function normalizeParticipantVoiceState(value: ExternalField) {
+  const record = parseExternalRecord(value);
+  const muted = parseExternalBoolean(record?.muted);
+  const deafened = parseExternalBoolean(record?.deafened);
+  if (muted === null || deafened === null) return null;
 
   return {
-    muted: value.muted,
-    deafened: value.deafened,
+    muted,
+    deafened,
   };
 }

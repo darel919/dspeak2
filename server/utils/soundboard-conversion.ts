@@ -12,6 +12,10 @@ import type {
   SoundboardConversionOperation,
   SoundboardConversionResult,
 } from "../types/soundboard-conversion.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+} from "../../shared/types/external.ts";
 
 const ALLOWED_TYPES = new Set([
   "audio/mpeg",
@@ -180,14 +184,11 @@ async function convert(file: File): Promise<SoundboardConversionResult> {
       bytes,
       duration: Math.min(duration, SOUNDBOARD_MAX_DURATION_SECONDS),
     };
-  } catch (error: unknown) {
-    if (
-      error &&
-      typeof error === "object" &&
-      "statusCode" in error &&
-      error.statusCode
-    )
-      throw error;
+  } catch (error) {
+    const statusCode = parseExternalNumber(
+      parseExternalRecord(error)?.statusCode,
+    );
+    if (statusCode !== null) throw error;
     throw createError({
       statusCode: 500,
       statusMessage: "Soundboard conversion failed",
@@ -269,14 +270,11 @@ async function convertIcon(file: File): Promise<Buffer> {
         statusMessage: "Icon conversion produced invalid ICO media",
       });
     return bytes;
-  } catch (error: unknown) {
-    if (
-      error &&
-      typeof error === "object" &&
-      "statusCode" in error &&
-      error.statusCode
-    )
-      throw error;
+  } catch (error) {
+    const statusCode = parseExternalNumber(
+      parseExternalRecord(error)?.statusCode,
+    );
+    if (statusCode !== null) throw error;
     throw createError({
       statusCode: 500,
       statusMessage: "Soundboard icon conversion failed",

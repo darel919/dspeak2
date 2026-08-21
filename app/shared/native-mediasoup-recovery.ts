@@ -1,3 +1,4 @@
+import { asError } from "./native-mediasoup-utils.ts";
 import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
 
 export function handleNativeMediasoupTransportRecovery(
@@ -68,7 +69,9 @@ async function performNativeMediasoupTransportIceRestart(
       `SFU ${direction} ICE restart`,
     );
   } catch (error) {
-    session.pending.get(requestId)?.reject(error);
+    session.pending
+      .get(requestId)
+      ?.reject(asError(error, `SFU ${direction} ICE restart failed`));
   }
   const iceParameters = await response;
   const current =

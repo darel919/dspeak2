@@ -39,13 +39,13 @@ export function createStartupReadiness({
   }
 
   async function waitForIdle(
-    settle?: () => unknown,
+    settle?: () => Promise<void> | void,
     { timeoutMs = STARTUP_READINESS_TIMEOUT_MS }: StartupWaitOptions = {},
   ) {
     const startedAt = Date.now();
     while (accepting) {
       const observedGeneration = generation;
-      const pending = Promise.all([...tasks.values()]);
+      const pending = Promise.all(tasks.values());
       const remaining = Math.max(timeoutMs - (Date.now() - startedAt), 0);
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {

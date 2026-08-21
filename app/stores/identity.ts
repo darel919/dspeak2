@@ -2,18 +2,19 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { publicDisplayName } from "~~/shared/user-profile.ts";
 import { useAuthStore } from "./auth";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 import type {
   IdentityApiResult,
   IdentityProfile,
   IdentityRequestOptions,
 } from "../shared/types/identity.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeIdentityProfile(value: unknown): IdentityProfile {
-  if (!isRecord(value) || typeof value.id !== "string" || !value.id)
+function normalizeIdentityProfile(value: ExternalField): IdentityProfile {
+  if (!isExternalRecord(value) || !isExternalString(value.id) || !value.id)
     throw new TypeError("Identity profile response is invalid");
   return {
     ...Object.fromEntries(Object.entries(value)),
@@ -21,20 +22,20 @@ function normalizeIdentityProfile(value: unknown): IdentityProfile {
   };
 }
 
-function normalizeIdentityApiResult(value: unknown): IdentityApiResult {
-  if (!isRecord(value)) return {};
-  const nicknames = isRecord(value.nicknames)
+function normalizeIdentityApiResult(value: ExternalField): IdentityApiResult {
+  if (!isExternalRecord(value)) return {};
+  const nicknames = isExternalRecord(value.nicknames)
     ? Object.fromEntries(
         Object.entries(value.nicknames).flatMap(([key, nickname]) =>
-          typeof nickname === "string" ? [[key, nickname]] : [],
+          isExternalString(nickname) ? [[key, nickname]] : [],
         ),
       )
     : undefined;
-  return {
-    ...Object.fromEntries(Object.entries(value)),
-    ...(typeof value.nickname === "string" ? { nickname: value.nickname } : {}),
-    ...(nicknames ? { nicknames } : {}),
-  };
+  const result = Object.fromEntries(Object.entries(value));
+  if (isExternalString(value.nickname))
+    Object.assign(result, { nickname: value.nickname });
+  if (nicknames) Object.assign(result, { nicknames });
+  return result;
 }
 
 export const useIdentityStore = defineStore("identity", () => {
@@ -48,7 +49,7 @@ export const useIdentityStore = defineStore("identity", () => {
   function request(
     path: string,
     options: IdentityRequestOptions = {},
-  ): Promise<unknown> {
+  ): Promise<ExternalField> {
     const userId = authStore.getUserData()?.id;
     if (!userId) throw new Error("You must be signed in");
     return $fetch(`${config.public.apiPath}/profile${path}`, {
@@ -119,7 +120,7 @@ export const useIdentityStore = defineStore("identity", () => {
     user: IdentityProfile | null | undefined,
   ): IdentityProfile {
     if (!user?.id) return user || { id: "" };
-    return { ...user, ...(publicProfiles.value.get(String(user.id)) || {}) };
+    return { ...user, ...publicProfiles.value.get(String(user.id)) };
   }
 
   function displayName(user: IdentityProfile | null | undefined): string {

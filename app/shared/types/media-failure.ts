@@ -1,3 +1,5 @@
+import { isExternalString } from "./boundary.ts";
+
 export interface MediaFailure {
   code: string;
   scope:
@@ -197,13 +199,12 @@ export interface OperationError extends Error {
 export function createOperationError(
   data: Record<string, unknown>,
 ): OperationError {
-  const error = new Error(
-    `${data.code}: ${
-      typeof data.error === "string" ? data.error : "operation rejected"
-    }`,
-  ) as OperationError;
-  error.code = String(data.code);
-  error.retryable = data.retryable === true;
-  error.canonicalState = data.canonicalState;
-  return error;
+  const message = isExternalString(data.error)
+    ? data.error
+    : "operation rejected";
+  return Object.assign(new Error(`${data.code}: ${message}`), {
+    code: String(data.code),
+    retryable: data.retryable === true,
+    canonicalState: data.canonicalState,
+  });
 }

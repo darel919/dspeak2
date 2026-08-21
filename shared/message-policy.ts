@@ -1,11 +1,16 @@
 import type { MessageLike } from "./types/message.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "./types/external.ts";
 
 export function isMessageOwner(
   message: MessageLike | null | undefined,
-  userId: unknown,
+  userId: ExternalField,
 ) {
-  const senderId =
-    typeof message?.sender === "string" ? message.sender : message?.sender?.id;
+  const senderRecord = parseExternalRecord(message?.sender);
+  const senderId = parseExternalString(message?.sender) ?? senderRecord?.id;
   return (
     Boolean(userId) &&
     String(senderId || message?.sender || "") === String(userId)
@@ -14,7 +19,7 @@ export function isMessageOwner(
 
 export function canEditMessage(
   message: MessageLike | null | undefined,
-  userId: unknown,
+  userId: ExternalField,
 ) {
   return (
     isMessageOwner(message, userId) &&
@@ -24,7 +29,7 @@ export function canEditMessage(
 
 export function canDeleteMessage(
   message: MessageLike | null | undefined,
-  userId: unknown,
+  userId: ExternalField,
   permissions: readonly string[] = [],
   isRoomOwner = false,
 ) {

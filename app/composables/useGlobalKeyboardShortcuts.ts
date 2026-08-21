@@ -19,11 +19,11 @@ export function useGlobalKeyboardShortcuts() {
     return voiceStorePromise;
   }
 
-  function runVoiceAction(action: (voiceStore: VoiceStore) => unknown) {
+  function runVoiceAction(action: (voiceStore: VoiceStore) => void): void {
     if (!authStore.getUserData()) return;
     void loadVoiceStore()
       .then(action)
-      .catch((error: unknown) => console.error("[Keyboard shortcuts]", error));
+      .catch((error) => console.error("[Keyboard shortcuts]", error));
   }
 
   function init() {

@@ -35,7 +35,7 @@ describe("media-control-client", () => {
     __resetDeviceIdCacheForTesting();
     let stored = null;
     const storage = {
-      getItem: (k) => stored,
+      getItem: (_k) => stored,
       setItem: (k, v) => {
         stored = v;
       },
@@ -71,7 +71,7 @@ describe("media-control-client", () => {
     let stored = "persisted-id";
     let fail = true;
     const storage: Storage = {
-      getItem: (k) => {
+      getItem: (_k) => {
         if (fail) throw new Error("storage unavailable");
         return stored;
       },

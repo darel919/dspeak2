@@ -11,8 +11,37 @@ import type {
   FriendRecord,
   FriendRequestRecord,
 } from "../shared/types/friends.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import {
+  parseExternalNumber,
+  type ExternalField,
+} from "~~/shared/types/external.ts";
 
 const FRIEND_REQUESTS_TTL_MS = 5000;
+
+function parseFriendRecord(value: ExternalField): FriendRecord | null {
+  if (!isExternalRecord(value)) return null;
+  const stringId = isExternalString(value.id) ? value.id : null;
+  const numericId = stringId === null ? parseExternalNumber(value.id) : null;
+  if (stringId !== null) return { ...value, id: stringId };
+  if (numericId !== null) return { ...value, id: numericId };
+  return null;
+}
+
+function parseFriendApiResult(value: ExternalField): FriendApiResult {
+  if (!isExternalRecord(value)) return {};
+  const items = Array.isArray(value.items)
+    ? value.items
+        .map(parseFriendRecord)
+        .filter((item): item is FriendRecord => item !== null)
+    : undefined;
+  const result = { ...value };
+  if (items) Object.assign(result, { items });
+  return result;
+}
 
 export const useFriendsStore = defineStore("friends", () => {
   const friends = ref<FriendRecord[]>([]);
@@ -57,7 +86,7 @@ export const useFriendsStore = defineStore("friends", () => {
       );
     }
 
-    return (await response.json()) as FriendApiResult;
+    return parseFriendApiResult(await response.json());
   }
 
   async function fetchFriends() {
@@ -117,9 +146,7 @@ export const useFriendsStore = defineStore("friends", () => {
       error.value = null;
       try {
         const result = await apiFetch("?type=requests", { method: "GET" });
-        const items = Array.isArray(result?.items)
-          ? (result.items as FriendRequestRecord[])
-          : [];
+        const items = Array.isArray(result?.items) ? result.items : [];
         if (requestState.version === friendRequestsVersion) {
           friendRequests.value = items;
           friendRequestsFetchedAt = Date.now();
@@ -163,11 +190,12 @@ export const useFriendsStore = defineStore("friends", () => {
     });
     invalidateFriendRequests();
     if (result?.status === "pending" && result?.id) {
-      const request = result as FriendRequestRecord;
-      sentRequests.value = [
-        request,
-        ...sentRequests.value.filter((item) => item.id !== request.id),
-      ];
+      const request = parseFriendRecord(result);
+      if (request)
+        sentRequests.value = [
+          request,
+          ...sentRequests.value.filter((item) => item.id !== request.id),
+        ];
     }
     return result;
   }
@@ -249,11 +277,12 @@ export const useFriendsStore = defineStore("friends", () => {
     });
     invalidateFriendRequests();
     if (result?.status === "pending" && result?.id) {
-      const request = result as FriendRequestRecord;
-      sentRequests.value = [
-        request,
-        ...sentRequests.value.filter((item) => item.id !== request.id),
-      ];
+      const request = parseFriendRecord(result);
+      if (request)
+        sentRequests.value = [
+          request,
+          ...sentRequests.value.filter((item) => item.id !== request.id),
+        ];
     }
     return result;
   }

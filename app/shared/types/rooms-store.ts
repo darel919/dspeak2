@@ -1,3 +1,5 @@
+import { isExternalRecord, isExternalString } from "./boundary.ts";
+
 export interface RoomOwner {
   id: string;
   [key: string]: unknown;
@@ -25,11 +27,6 @@ export interface RoomDetailsResponse extends RoomRecord {
   [key: string]: unknown;
 }
 
-export function isRoomRecord(value: unknown): value is RoomRecord {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    "id" in value &&
-    typeof value.id === "string"
-  );
+export function isRoomRecord<T>(value: T): value is T & RoomRecord {
+  return isExternalRecord(value) && "id" in value && isExternalString(value.id);
 }

@@ -1,27 +1,72 @@
 import {
   buildVideoProduceOptions,
+  isVideoResolution,
   resolveNativeCaptureVideoSettings,
   VIDEO_RESOLUTIONS,
 } from "../video-settings.ts";
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 import type { NativeSourceEntry } from "../types/native-mediasoup-session.ts";
+import { isExternalRecord } from "../types/boundary.ts";
 
 const CLOUDFLARE_REQUEST_TIMEOUT_MS = 15000;
 
-function positiveVideoMetadata(value: unknown) {
+function positiveVideoMetadata<T>(value: T) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
 }
+
+type NativeProducerEncoding = {
+  maxBitrate?: number;
+  maxFramerate?: number;
+  scaleResolutionDownBy?: number;
+  priority?: string;
+  networkPriority?: string;
+};
+
+type NativeProducerAppData = {
+  source: string;
+  logicalStreamId?: string;
+  generation?: number;
+  variantId?: string;
+  codec?: string;
+  producerKey?: string;
+  ownerSource?: string;
+  captureSelection?: NativeSourceEntry["captureSelection"];
+  receivers?: string[];
+  emergency?: boolean;
+  routingScore?: number;
+  target?: NativeSourceEntry["target"];
+  targetAdjusted?: boolean;
+  encodings?: NativeProducerEncoding[];
+  codecOptions?:
+    | {
+        opusDtx: boolean;
+        opusFec: boolean;
+        opusNack: boolean;
+        opusStereo: boolean;
+        opusPtime: number;
+      }
+    | {
+        videoGoogleStartBitrate: number;
+      };
+  codecParameters?: Record<string, unknown>;
+  codecAcceleration?: string | null;
+  codecImplementation?: string | null;
+  degradationPreference?: string;
+  width?: number | null;
+  height?: number | null;
+  fps?: number | null;
+  bitrate?: number | null;
+};
 
 function nativeVideoMetadata(entry: NativeSourceEntry) {
   const video = resolveNativeCaptureVideoSettings(
     entry.captureSelection,
     entry.videoSettings || undefined,
   );
-  const resolutionKey = String(
-    video.resolution || "",
-  ) as keyof typeof VIDEO_RESOLUTIONS;
-  const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+  const resolution = isVideoResolution(video.resolution)
+    ? VIDEO_RESOLUTIONS[video.resolution]
+    : undefined;
   const width = Number(entry.width || video.width || resolution?.width || 1920);
   const height = Number(
     entry.height || video.height || resolution?.height || 1080,
@@ -35,8 +80,7 @@ function nativeVideoMetadata(entry: NativeSourceEntry) {
     maxBitrate: video.maxBitrate,
     lowSpec: video.lowSpec === true,
   });
-  const encoding = options.encodings?.[0] as
-    Record<string, unknown> | undefined;
+  const encoding = options.encodings?.[0];
   return {
     width: positiveVideoMetadata(width),
     height: positiveVideoMetadata(height),
@@ -48,36 +92,27 @@ function nativeVideoMetadata(entry: NativeSourceEntry) {
 function nativeProducerAppData(
   entry: NativeSourceEntry,
   kind: "audio" | "video",
-): Record<string, unknown> {
-  const appData: Record<string, unknown> = {
-    source: entry.source,
-    ...(entry.logicalStreamId
-      ? { logicalStreamId: entry.logicalStreamId }
-      : {}),
-    ...(Number.isFinite(Number(entry.generation))
-      ? { generation: Math.max(1, Math.floor(Number(entry.generation))) }
-      : {}),
-    ...(entry.variantId ? { variantId: entry.variantId } : {}),
-    ...(entry.codec ? { codec: entry.codec } : {}),
-    ...(entry.producerKey ? { producerKey: entry.producerKey } : {}),
-    ...(entry.ownerSource ? { ownerSource: entry.ownerSource } : {}),
-    ...(entry.captureSelection
-      ? { captureSelection: entry.captureSelection }
-      : {}),
-    ...(Array.isArray(entry.receivers) ? { receivers: entry.receivers } : {}),
-    ...(entry.emergency === true ? { emergency: true } : {}),
-    ...(Number.isFinite(Number(entry.routingScore))
-      ? { routingScore: Number(entry.routingScore) }
-      : {}),
-    ...(entry.target ? { target: entry.target } : {}),
-    ...(entry.targetAdjusted ? { targetAdjusted: true } : {}),
-  };
+): NativeProducerAppData {
+  const appData: NativeProducerAppData = { source: entry.source };
+  if (entry.logicalStreamId) appData.logicalStreamId = entry.logicalStreamId;
+  const generation = Number(entry.generation);
+  if (Number.isFinite(generation))
+    appData.generation = Math.max(1, Math.floor(generation));
+  if (entry.variantId) appData.variantId = entry.variantId;
+  if (entry.codec) appData.codec = entry.codec;
+  if (entry.producerKey) appData.producerKey = entry.producerKey;
+  if (entry.ownerSource) appData.ownerSource = entry.ownerSource;
+  if (entry.captureSelection) appData.captureSelection = entry.captureSelection;
+  if (Array.isArray(entry.receivers)) appData.receivers = entry.receivers;
+  if (entry.emergency === true) appData.emergency = true;
+  const routingScore = Number(entry.routingScore);
+  if (Number.isFinite(routingScore)) appData.routingScore = routingScore;
+  if (entry.target) appData.target = entry.target;
+  if (entry.targetAdjusted) appData.targetAdjusted = true;
   if (kind === "audio") {
-    const audioSelection =
-      entry.captureSelection?.audio &&
-      typeof entry.captureSelection.audio === "object"
-        ? (entry.captureSelection.audio as Record<string, unknown>)
-        : null;
+    const audioSelection = isExternalRecord(entry.captureSelection?.audio)
+      ? entry.captureSelection.audio
+      : null;
     const policy = getAudioCodecPolicy(
       entry.source === "screen-audio" ? "shared-audio" : "microphone",
       entry.audioStereo === true,
@@ -88,15 +123,13 @@ function nativeProducerAppData(
         entry.roomBitrateBps ||
         policy.maxBitrateBps,
     );
-    appData.encodings = [
-      {
-        ...(Number.isFinite(maxBitrate) && maxBitrate > 0
-          ? { maxBitrate: Math.floor(maxBitrate) }
-          : {}),
-        priority: "high",
-        networkPriority: "high",
-      },
-    ];
+    const audioEncoding: NativeProducerEncoding = {
+      priority: "high",
+      networkPriority: "high",
+    };
+    if (Number.isFinite(maxBitrate) && maxBitrate > 0)
+      audioEncoding.maxBitrate = Math.floor(maxBitrate);
+    appData.encodings = [audioEncoding];
     appData.codecOptions = {
       opusDtx: false,
       opusFec: true,
@@ -113,10 +146,9 @@ function nativeProducerAppData(
     entry.captureSelection,
     entry.videoSettings || undefined,
   );
-  const resolutionKey = String(
-    video.resolution || "",
-  ) as keyof typeof VIDEO_RESOLUTIONS;
-  const resolution = VIDEO_RESOLUTIONS[resolutionKey];
+  const resolution = isVideoResolution(video.resolution)
+    ? VIDEO_RESOLUTIONS[video.resolution]
+    : undefined;
   const captureWidth =
     Number(video.width) ||
     Number(resolution?.width) ||
@@ -130,8 +162,7 @@ function nativeProducerAppData(
   const captureFrameRate = Number(video.frameRate) || Number(entry.fps) || 30;
   const captureBitrate =
     Number(video.maxBitrate) || Number(entry.bitrate) || undefined;
-  const target =
-    entry.target && typeof entry.target === "object" ? entry.target : {};
+  const target = entry.target || {};
   const targetWidth = Number(target.width) || captureWidth;
   const targetHeight = Number(target.height) || captureHeight;
   const targetFrameRate = Number(target.fps) || captureFrameRate;
@@ -145,10 +176,10 @@ function nativeProducerAppData(
     maxBitrate: captureBitrate,
     lowSpec: video.lowSpec === true,
   });
-  const encodings = options.encodings as Array<Record<string, unknown>>;
+  const encodings = options.encodings;
   appData.encodings = encodings;
   const encoding = encodings[0];
-  if (encoding && typeof encoding === "object") {
+  if (encoding) {
     encoding.maxFramerate = Math.min(
       Number(encoding.maxFramerate) || targetFrameRate,
       targetFrameRate,

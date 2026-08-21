@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CloudflareRealtimeSession } from "../app/shared/cloudflare-realtime-session.ts";
 import type { CloudflarePublication } from "../app/shared/types/cloudflare-media.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 function session() {
   return new CloudflareRealtimeSession({ send() {}, iceServers: [] });
@@ -471,13 +475,23 @@ test("Cloudflare applies high-quality video sender settings before negotiation",
   assert.equal(applied.degradationPreference, "maintain-resolution");
 });
 
+interface RetiredTrackEvent {
+  track: { id: string; kind: "video" };
+  transceiver: { mid: string };
+}
+
+type PeerConnectionListener = (event?: RetiredTrackEvent) => void;
+
 class FakePeerConnection {
+  connectionState: RTCPeerConnectionState;
+  readonly listeners: Map<string, PeerConnectionListener>;
+
   constructor() {
     this.connectionState = "new";
     this.listeners = new Map();
   }
 
-  addEventListener(type, listener) {
+  addEventListener(type: string, listener: PeerConnectionListener) {
     this.listeners.set(type, listener);
   }
 
@@ -501,10 +515,12 @@ test("retired Cloudflare peer cannot report a closed state to the session", asyn
   let client: CloudflareRealtimeSession;
   client = new CloudflareRealtimeSession({
     send(message) {
-      const request = message.data as Record<string, unknown>;
+      const request = parseExternalRecord(message.data);
+      const requestId = parseExternalString(request?.requestId);
+      if (!requestId) return false;
       queueMicrotask(() =>
         client.handle("cloudflare-response", {
-          requestId: request.requestId,
+          requestId,
           result: { sessionId: "cloudflare-session" },
         }),
       );
@@ -523,11 +539,9 @@ test("retired Cloudflare peer cannot report a closed state to the session", asyn
     await client.initialize();
     const peerConnection = client.peerConnection;
     assert.ok(peerConnection);
+    assert.ok(peerConnection instanceof EmittingPeerConnection);
     client.closeMedia();
-    const retiredPeerConnection = peerConnection as unknown as {
-      listeners: Map<string, (event: unknown) => void>;
-    };
-    retiredPeerConnection.listeners.get("track")?.({
+    peerConnection.listeners.get("track")?.({
       track: { id: "retired-track", kind: "video" },
       transceiver: { mid: "0" },
     });
@@ -594,8 +608,14 @@ test("Cloudflare batches queued publications after local bootstrap", async () =>
     );
     assert.equal(subscriptionRequests.length, 1);
     assert.equal(subscriptionRequests[0].data.body.tracks.length, 2);
-    assert.equal(client.remoteByMid.get("remote-mid-0"), publication);
-    assert.equal(client.remoteByMid.get("remote-mid-1"), audioPublication);
+    assert.equal(
+      client.remoteByMid.get("remote-mid-0"),
+      client.publications.get(publication.trackName),
+    );
+    assert.equal(
+      client.remoteByMid.get("remote-mid-1"),
+      client.publications.get(audioPublication.trackName),
+    );
     await client.startSubscriptions();
     assert.equal(
       requests.filter((entry) => entry.data.operation === "tracks-new").length,

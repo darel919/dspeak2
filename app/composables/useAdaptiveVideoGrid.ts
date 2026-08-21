@@ -60,7 +60,7 @@ export function calculateAdaptiveVideoGrid(
   };
   let bestArea = -1;
   let bestUnusedCells = Infinity;
-  let bestShapeDiff = Infinity;
+  let bestAspectDiff = Infinity;
 
   for (let columns = 1; columns <= count; columns += 1) {
     const rows = Math.ceil(count / columns);
@@ -78,7 +78,7 @@ export function calculateAdaptiveVideoGrid(
 
     const area = tileWidth * tileHeight;
     const unusedCells = rows * columns - count;
-    const shapeDiff = Math.abs(
+    const aspectDiff = Math.abs(
       containerWidth / containerHeight -
         (tileWidth * columns) / (tileHeight * rows),
     );
@@ -86,16 +86,16 @@ export function calculateAdaptiveVideoGrid(
     const areaBetter = area > bestArea + SCORE_EPSILON;
     const areaEqual = Math.abs(area - bestArea) <= SCORE_EPSILON;
     const unusedBetter = unusedCells < bestUnusedCells;
-    const shapeBetter = shapeDiff < bestShapeDiff - SCORE_EPSILON;
+    const aspectBetter = aspectDiff < bestAspectDiff - SCORE_EPSILON;
 
     if (
       areaBetter ||
       (areaEqual && unusedBetter) ||
-      (areaEqual && !unusedBetter && shapeBetter)
+      (areaEqual && !unusedBetter && aspectBetter)
     ) {
       bestArea = area;
       bestUnusedCells = unusedCells;
-      bestShapeDiff = shapeDiff;
+      bestAspectDiff = aspectDiff;
       bestLayout = {
         columns,
         rows,
@@ -124,7 +124,7 @@ export function useAdaptiveVideoGrid(
     observer?.disconnect();
     observer = null;
 
-    if (typeof ResizeObserver === "undefined" || !element) return;
+    if (!("ResizeObserver" in globalThis) || !element) return;
 
     observer = new ResizeObserver(([entry]) => {
       if (!entry) return;

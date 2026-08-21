@@ -2,6 +2,10 @@ import {
   isDesktopCaptureSelection,
   type DesktopCaptureSelection,
 } from "../../shared/desktop-capture.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
 import type {
   NativeCaptureRequest,
   NativeMediaFlags,
@@ -87,15 +91,14 @@ export function isSourceAwareCaptureRequest(
   const selection = getCaptureSelection(request);
   if (selection) return true;
   const source = request?.source;
-  if (!source || typeof source !== "object" || Array.isArray(source))
-    return false;
+  if (!isExternalRecord(source)) return false;
   return (
     "sourceId" in source &&
-    typeof source.sourceId === "string" &&
+    isExternalString(source.sourceId) &&
     "sourceType" in source &&
-    typeof source.sourceType === "string" &&
+    isExternalString(source.sourceType) &&
     "sourceKey" in source &&
-    typeof source.sourceKey === "string"
+    isExternalString(source.sourceKey)
   );
 }
 

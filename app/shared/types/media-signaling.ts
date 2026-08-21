@@ -1,4 +1,7 @@
-export type MediaRecord = { [key: string]: unknown };
+import type { ExternalObject, ExternalValue } from "./boundary.ts";
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+
+export type MediaRecord = ExternalObject;
 
 export type SignalingMessage = MediaRecord & {
   type?: string;
@@ -13,7 +16,7 @@ export type SignalingProtocol = {
   closeCode: number;
   closeReason: string;
   contractRevision: number;
-  isServerHello: (data: unknown) => data is ServerHello;
+  isServerHello: (data: ExternalValue) => data is ServerHello;
   version: number;
 };
 
@@ -25,7 +28,7 @@ export type SignalingLocation = {
 export type PendingReady = {
   candidate: WebSocket;
   resolve: (value?: void) => void;
-  reject: (error: unknown) => void;
+  reject: (error: OwnedErrorValue) => void;
   timeout: ReturnType<typeof setTimeout>;
   promise: Promise<void> | null;
 };
@@ -37,10 +40,10 @@ export type MediaSignalingSocketOptions = {
   connectionTimeoutMs: number;
   defaultHeartbeatIntervalMs: number;
   defaultHeartbeatTimeoutMs: number;
-  handleMessage: (data: unknown) => void;
+  handleMessage: (data: ExternalValue) => void;
   isIntentionalClose: () => boolean;
   onClose: (event: CloseEvent, protocolRejected: boolean) => void;
-  onError: (error: unknown) => void;
+  onError: (error: OwnedErrorValue) => void;
   onOpen: () => void;
   onProtocolRejected: (event: CloseEvent) => void;
   onReconnect?: () => void | Promise<void>;
@@ -52,6 +55,6 @@ export type MediaSignalingSocketOptions = {
 };
 
 export type DispatchMediaSignalingOptions = {
-  getHandler: (type: string) => ((data: MediaRecord) => unknown) | undefined;
-  onFailure: (error: unknown) => void;
+  getHandler: (type: string) => ((data: ExternalValue) => void) | undefined;
+  onFailure: (error: ExternalValue) => void;
 };

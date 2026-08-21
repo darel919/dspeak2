@@ -13,6 +13,18 @@ import type {
   CloudflareSubscriptionBatchOptions,
   CloudflareSubscriptionGuardPhase,
 } from "../types/cloudflare-media.ts";
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
+
+interface CloudflarePublicationData extends CloudflarePublication {
+  target?: Record<string, unknown>;
+  targetAdjusted?: boolean;
+}
 
 import {
   MAX_TRACKS_PER_REQUEST,
@@ -79,7 +91,7 @@ export class CloudflareSourcesMethods {
   enqueueSourceOperation(
     this: CloudflareSessionLike,
     source: string,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
@@ -116,33 +128,34 @@ export class CloudflareSourcesMethods {
         current.track = entry.track;
         current.ownerSource = entry.ownerSource || null;
         current.generation = entry.generation;
-        if (typeof this.send === "function") {
+        if (this.send) {
+          const publicationData: CloudflarePublicationData = {
+            trackName: current.trackName,
+            source: entry.source,
+            kind: "video",
+            ownerSource: entry.ownerSource || null,
+            logicalStreamId: current.logicalStreamId || null,
+            generation: entry.generation,
+            connectionEpoch: this.getControlConnectionEpoch?.() || 0,
+            variantId: current.variantId || null,
+            codec: current.codec || null,
+            codecAcceleration: current.codecAcceleration || null,
+            codecImplementation: current.codecImplementation || null,
+            width: current.width ?? 0,
+            height: current.height ?? 0,
+            fps: current.fps ?? 0,
+            bitrate: current.bitrate ?? 0,
+            receivers: current.receivers || [],
+            emergency: current.emergency === true,
+            score: current.score ?? 0,
+          };
+          if (isExternalRecord(current.target))
+            publicationData.target = current.target;
+          if (current.targetAdjusted === true)
+            publicationData.targetAdjusted = true;
           this.send({
             type: "cloudflare-publication",
-            data: {
-              trackName: current.trackName,
-              source: entry.source,
-              kind: "video",
-              ownerSource: entry.ownerSource || null,
-              logicalStreamId: current.logicalStreamId || null,
-              generation: entry.generation,
-              connectionEpoch: this.getControlConnectionEpoch?.() || 0,
-              variantId: current.variantId || null,
-              codec: current.codec || null,
-              codecAcceleration: current.codecAcceleration || null,
-              codecImplementation: current.codecImplementation || null,
-              width: current.width ?? 0,
-              height: current.height ?? 0,
-              fps: current.fps ?? 0,
-              bitrate: current.bitrate ?? 0,
-              ...(current.target ? { target: current.target } : {}),
-              ...(current.targetAdjusted
-                ? { targetAdjusted: current.targetAdjusted }
-                : {}),
-              receivers: current.receivers || [],
-              emergency: current.emergency === true,
-              score: current.score ?? 0,
-            },
+            data: publicationData,
           });
         }
       } catch (error) {
@@ -175,12 +188,18 @@ export class CloudflareSourcesMethods {
         const encodings = Array.isArray(parameters.encodings)
           ? parameters.encodings
           : [];
-        if (!encodings[0] || typeof encodings[0] !== "object")
-          encodings[0] = {};
+        if (!encodings[0]) encodings[0] = {};
         parameters.encodings = encodings;
         encodings[0].maxBitrate = entry.audioBitrate || policy.maxBitrateBps;
-        encodings[0].priority = policy.priority as RTCPriorityType;
-        encodings[0].networkPriority = policy.priority as RTCPriorityType;
+        const priority: RTCPriorityType =
+          policy.priority === "very-low" ||
+          policy.priority === "low" ||
+          policy.priority === "medium" ||
+          policy.priority === "high"
+            ? policy.priority
+            : "high";
+        encodings[0].priority = priority;
+        encodings[0].networkPriority = priority;
         try {
           await sender.setParameters(parameters);
         } catch {}
@@ -244,7 +263,7 @@ export class CloudflareSourcesMethods {
         this.sessionGeneration === generation
       ) {
         if (tracksNewSucceeded && createdTrackName && createdMid) {
-          let compensationError: unknown = null;
+          let compensationError: Error | string | null = null;
           try {
             const sessionDescription =
               await getLocalSessionDescription(peerConnection);
@@ -258,7 +277,7 @@ export class CloudflareSourcesMethods {
                 closeResult.sessionDescription,
               );
           } catch (error) {
-            compensationError = error;
+            compensationError = error instanceof Error ? error : String(error);
             mediaDebug("cloudflare.tracks-close-compensation-failed", {
               source: entry.source,
               trackName: createdTrackName,
@@ -424,18 +443,12 @@ export class CloudflareSourcesMethods {
         compensationTokens.set(binding.mid, token);
         transceivers.set(binding.mid, {
           transceiver,
-          previousDirection:
-            typeof transceiver.direction === "string"
-              ? transceiver.direction
-              : null,
+          previousDirection: transceiver.direction,
         });
         this.remoteCompensationOwners.set(binding.mid, {
           token,
           transceiver,
-          previousDirection:
-            typeof transceiver.direction === "string"
-              ? transceiver.direction
-              : null,
+          previousDirection: transceiver.direction,
         });
       }
     }
@@ -947,10 +960,7 @@ export class CloudflareSourcesMethods {
       try {
         await entry.sender.setParameters(parameters);
       } catch (error) {
-        const errorName =
-          error && typeof error === "object" && "name" in error
-            ? String(error.name)
-            : "";
+        const errorName = error instanceof Error ? error.name : "";
         if (
           [
             "InvalidModificationError",
@@ -1010,18 +1020,16 @@ export class CloudflareSourcesMethods {
         height: settings.height,
         frameRate:
           settings.frameRate ||
-          (typeof requested.frameRate === "number"
+          (isExternalNumber(requested.frameRate)
             ? requested.frameRate
             : undefined),
-        qualityPriority:
-          typeof requested.qualityPriority === "string"
-            ? requested.qualityPriority
-            : undefined,
+        qualityPriority: isExternalString(requested.qualityPriority)
+          ? requested.qualityPriority
+          : undefined,
         screen: entry.source === "screen",
-        maxBitrate:
-          typeof requested.maxBitrate === "number"
-            ? requested.maxBitrate
-            : null,
+        maxBitrate: isExternalNumber(requested.maxBitrate)
+          ? requested.maxBitrate
+          : null,
       }),
     );
   }
@@ -1050,10 +1058,7 @@ export class CloudflareSourcesMethods {
     sourceOrReceiving: string | boolean,
     receivingValue?: boolean,
   ) {
-    if (
-      typeof sourceOrReceiving === "boolean" &&
-      receivingValue === undefined
-    ) {
+    if (isExternalBoolean(sourceOrReceiving) && receivingValue === undefined) {
       const entry = this.consumers.get(String(userIdOrKey));
       return entry
         ? this.setRemoteReceiving(

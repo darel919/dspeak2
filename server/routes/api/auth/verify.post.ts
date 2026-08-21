@@ -13,7 +13,7 @@ export default defineEventHandler(async (event) => {
   try {
     const payload = await verifySupabaseAccessToken(accessToken);
     return { user: { id: payload.sub, email: payload.email } };
-  } catch (error) {
+  } catch {
     throw createError({
       statusCode: 401,
       statusMessage: "Invalid or expired token",

@@ -8,41 +8,47 @@ import {
   nativeOnlyError,
 } from "./native-media-engine-common.ts";
 import { normalizeNativeStatsSnapshot } from "../../shared/native-mediasoup-diagnostics.ts";
+import {
+  isExternalBoolean,
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
 import type {
   MediaDeviceInfo,
   MediaSignalMessage,
   MediaStats,
 } from "../../shared/media/types.ts";
+import type {
+  NativeCapabilities,
+  NativeCaptureRequest,
+} from "../../shared/types/native-media.ts";
+import type { MediaCommandResult } from "../../shared/types/boundary.ts";
+import { normalizeParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
+import { parseThrownError } from "../../utils/external-values.ts";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeMediaDevices(value: unknown): MediaDeviceInfo[] {
+function normalizeMediaDevices(value: MediaCommandResult): MediaDeviceInfo[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((candidate) => {
-    if (!isRecord(candidate)) return [];
-    if (typeof candidate.deviceId !== "string") return [];
-    if (typeof candidate.kind !== "string") return [];
-    return [
-      {
-        deviceId: candidate.deviceId,
-        label: typeof candidate.label === "string" ? candidate.label : "",
-        kind: candidate.kind,
-        ...(typeof candidate.groupId === "string"
-          ? { groupId: candidate.groupId }
-          : {}),
-      },
-    ];
+    if (!isExternalRecord(candidate)) return [];
+    if (!isExternalString(candidate.deviceId)) return [];
+    if (!isExternalString(candidate.kind)) return [];
+    const device = {
+      deviceId: candidate.deviceId,
+      label: isExternalString(candidate.label) ? candidate.label : "",
+      kind: candidate.kind,
+    };
+    if (isExternalString(candidate.groupId))
+      Object.assign(device, { groupId: candidate.groupId });
+    return [device];
   });
 }
 
 export async function handleSignal(
   engine: NativeMediaEngine,
   message: MediaSignalMessage,
-): Promise<unknown> {
-  const data = isRecord(message.data) ? message.data : {};
+): Promise<MediaCommandResult> {
+  const data = isExternalRecord(message.data) ? message.data : {};
   if (!engine.flags.nativeRtc || !hasNativeCapability(engine.flags)) {
     if (engine.nativeOnly) throw nativeOnlyError("signaling");
     return engine.browserEngine.handleSignal?.(message);
@@ -61,30 +67,36 @@ export async function getDevices(
     try {
       const devices = await engine._invoke("media_prepare_devices");
       return normalizeMediaDevices(devices);
-    } catch (error: unknown) {
-      if (engine.nativeOnly) throw error;
+    } catch (error) {
+      if (engine.nativeOnly) throw parseThrownError(error);
       return engine.browserEngine.getDevices?.() || [];
     }
   }
   return engine
     ._invoke("media_get_devices")
     .then(normalizeMediaDevices)
-    .catch((error: unknown) => {
-      if (engine.nativeOnly) throw error;
+    .catch((error) => {
+      if (engine.nativeOnly) throw parseThrownError(error);
       return engine.browserEngine.getDevices?.() || [];
     });
 }
 
 export async function getCaptureSources(
   engine: NativeMediaEngine,
-): Promise<unknown[]> {
+): Promise<NativeCaptureRequest[]> {
   if (!engine.flags.nativeRtc || !engine.flags.nativeBackendReady) {
     if (engine.nativeOnly) throw nativeOnlyError("capture source enumeration");
     return [];
   }
   return engine
     ._invoke("media_list_capture_sources")
-    .then((sources) => (Array.isArray(sources) ? sources : []))
+    .then((sources) =>
+      Array.isArray(sources)
+        ? sources.filter((source): source is NativeCaptureRequest =>
+            isExternalRecord(source),
+          )
+        : [],
+    )
     .catch(() => []);
 }
 
@@ -95,7 +107,7 @@ export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
   }
   const statsSnapshot = engine.getWebRTCStatsSnapshot();
   return statsSnapshot
-    .then((stats: unknown) => {
+    .then((stats: MediaCommandResult) => {
       const snapshot = normalizeNativeStatsSnapshot(
         Array.isArray(stats)
           ? {
@@ -106,12 +118,12 @@ export async function getStats(engine: NativeMediaEngine): Promise<MediaStats> {
             }
           : stats,
       );
-      const normalizedSnapshot = isRecord(snapshot) ? snapshot : {};
+      const normalizedSnapshot = isExternalRecord(snapshot) ? snapshot : {};
       emitQoe(engine, normalizedSnapshot);
       return normalizedSnapshot;
     })
-    .catch((error: unknown) => {
-      if (engine.nativeOnly) throw error;
+    .catch((error) => {
+      if (engine.nativeOnly) throw parseThrownError(error);
       return engine.browserEngine.getStats?.() || {};
     });
 }
@@ -133,9 +145,42 @@ export function emitQoe(engine: NativeMediaEngine, stats: MediaStats): void {
 
 export async function getNativeCapabilities(
   engine: NativeMediaEngine,
-): Promise<unknown> {
+): Promise<NativeCapabilities> {
   if (!engine.flags.nativeRtc) return {};
-  return engine._invoke("media_get_capabilities");
+  const capabilities = await engine._invoke("media_get_capabilities");
+  return parseNativeCapabilities(capabilities);
+}
+
+export function parseNativeCapabilities<T>(value: T): NativeCapabilities {
+  if (!isExternalRecord(value)) return {};
+  const capabilities: NativeCapabilities = {};
+  const flagNames = [
+    "nativeRtc",
+    "nativeBackendReady",
+    "nativeScreenShare",
+    "nativeScreenAudio",
+    "nativeP2P",
+    "nativeSfu",
+    "nativeMicrophone",
+    "nativeCamera",
+    "nativeAudioReceive",
+    "nativeVideoReceive",
+  ];
+  for (const flagName of flagNames) {
+    const flag = value[flagName];
+    if (isExternalBoolean(flag)) capabilities[flagName] = flag;
+  }
+  if (isExternalRecord(value.videoCodecDiagnostics))
+    capabilities.videoCodecDiagnostics = value.videoCodecDiagnostics;
+  if (isExternalRecord(value.videoCodecCapabilities))
+    capabilities.videoCodecCapabilities = value.videoCodecCapabilities;
+  if (isExternalRecord(value.concurrentEncode))
+    capabilities.concurrentEncode = value.concurrentEncode;
+  if (isExternalRecord(value.mediaCapabilities))
+    capabilities.mediaCapabilities = normalizeParticipantMediaCapabilities(
+      value.mediaCapabilities,
+    );
+  return capabilities;
 }
 
 export function getCapabilities(engine: NativeMediaEngine) {

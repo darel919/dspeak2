@@ -68,6 +68,13 @@ import type {
   DSpeakProfileInput,
   DSpeakRoomRow,
 } from "../types/dspeak-api.ts";
+import {
+  parseExternalError,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+  type ExternalRecord,
+} from "../../shared/types/external.ts";
 
 function noop() {}
 
@@ -78,21 +85,21 @@ function profileAvatar(user: DSpeakProfileInput | null | undefined) {
   return `/api/assets/avatar?userId=${encodeURIComponent(userId)}&fileName=${encodeURIComponent(key)}`;
 }
 
-function requireValue(value: unknown, message: string): string {
+function requireValue(value: ExternalField, message: string): string {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
   return String(value);
 }
 
 function structuredValue(
-  value: unknown,
+  value: ExternalField,
   fallback: Record<string, unknown> = {},
-): Record<string, unknown> {
-  if (value && typeof value === "object")
-    return value as Record<string, unknown>;
-  if (typeof value !== "string") return fallback;
+): ExternalRecord {
+  const record = parseExternalRecord(value);
+  if (record) return record;
+  const text = parseExternalString(value);
+  if (text === null) return fallback;
   try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" ? parsed : fallback;
+    return parseExternalRecord(JSON.parse(text)) ?? fallback;
   } catch {
     return fallback;
   }
@@ -133,7 +140,7 @@ function presentPublicProfile(user: DSpeakProfileInput | null | undefined) {
 
 function presentChannel(channel: DSpeakChannelRow) {
   const mediaPolicy = normalizeMediaPolicy(
-    channel.mediaPolicy as Parameters<typeof normalizeMediaPolicy>[0],
+    parseExternalRecord(channel.mediaPolicy) ?? {},
   );
   const isMedia = ["voice", "stage"].includes(channel.type);
   const inRoom = (channel.inRoom || []).map(String);
@@ -153,16 +160,13 @@ function presentChannel(channel: DSpeakChannelRow) {
   };
 }
 
-async function parseBody(event: DSpeakEvent): Promise<Record<string, unknown>> {
+async function parseBody(event: DSpeakEvent): Promise<ExternalRecord> {
   const type = getHeader(event, "content-type") || "";
   if (type.includes("multipart/form-data")) {
     const form = await readFormData(event);
     return Object.fromEntries(form.entries());
   }
-  const body: unknown = await readBody(event);
-  return body && typeof body === "object"
-    ? (body as Record<string, unknown>)
-    : {};
+  return parseExternalRecord(await readBody(event)) ?? {};
 }
 
 async function roomDetails(room: DSpeakRoomRow, userId: string | null = null) {
@@ -380,37 +384,31 @@ export async function handleDspeakApi(event: DSpeakEvent) {
       statusCode: 404,
       statusMessage: "dSpeak endpoint not found",
     });
-  } catch (error: unknown) {
-    const details =
-      error && typeof error === "object"
-        ? (error as Record<string, unknown>)
-        : {};
-    if (details.statusCode) throw error;
-    if (Number(details.status) >= 400 && Number(details.status) < 500) {
+  } catch (error) {
+    const errorDetails = parseExternalError(error);
+    const details = parseExternalRecord(error) ?? {};
+    const response = parseExternalRecord(details.response);
+    const status = errorDetails.statusCode || errorDetails.status || 0;
+    if (errorDetails.statusCode) throw error;
+    if (status >= 400 && status < 500) {
       console.error("[dSpeak API] client error caught in catch-all handler", {
         domain,
         suffix,
         method: event.method,
         path: getRequestURL(event).pathname,
-        status: Number(details.status),
-        statusMessage: details.message || details.statusMessage,
-        responseData:
-          details.response && typeof details.response === "object"
-            ? (details.response as Record<string, unknown>).data ||
-              details.response
-            : details.response,
-        errorUrl: details.url,
-        url:
-          details.response && typeof details.response === "object"
-            ? (details.response as Record<string, unknown>).url
-            : undefined,
+        status,
+        statusMessage:
+          errorDetails.message || parseExternalString(details.statusMessage),
+        responseData: response?.data || details.response,
+        errorUrl: parseExternalString(details.url),
+        url: parseExternalString(response?.url),
       });
       throw createError({
-        statusCode: Number(details.status),
+        statusCode: status,
         statusMessage:
-          Number(details.status) === 404
+          status === 404
             ? "Resource not found"
-            : Number(details.status) === 409
+            : status === 409
               ? "Resource conflict"
               : "Invalid request",
       });

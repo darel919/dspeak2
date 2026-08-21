@@ -1,4 +1,9 @@
 import type { RtpSenderSettings } from "./types/shared-utilities.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
 
 export async function applyRtpSenderSettings(
   sender: RTCRtpSender,
@@ -9,6 +14,7 @@ export async function applyRtpSenderSettings(
   if (!parameters.encodings?.length) return false;
   const requested = options.encodings?.[0] || {};
   const encoding = parameters.encodings[0];
+  if (!encoding) return false;
 
   for (const key of [
     "maxBitrate",
@@ -18,23 +24,27 @@ export async function applyRtpSenderSettings(
     "scaleResolutionDownBy",
   ]) {
     const value = requested[key];
-    if (value != null)
-      (encoding as RTCRtpEncodingParameters & Record<string, unknown>)[key] =
-        value;
+    if (value != null && (isExternalNumber(value) || isExternalString(value)))
+      Object.assign(encoding, { [key]: value });
   }
-  if (options.degradationPreference)
-    parameters.degradationPreference =
-      options.degradationPreference as RTCDegradationPreference;
+  if (
+    options.degradationPreference === "balanced" ||
+    options.degradationPreference === "maintain-framerate" ||
+    options.degradationPreference === "maintain-resolution"
+  )
+    parameters.degradationPreference = options.degradationPreference;
 
   try {
     await sender.setParameters(parameters);
-  } catch (error: unknown) {
+  } catch (error) {
     const errorName =
       error instanceof DOMException
         ? error.name
-        : error && typeof error === "object" && "name" in error
-          ? String(error.name)
-          : "";
+        : error instanceof Error
+          ? error.name
+          : isExternalRecord(error) && isExternalString(error.name)
+            ? error.name
+            : "";
     if (
       [
         "InvalidModificationError",

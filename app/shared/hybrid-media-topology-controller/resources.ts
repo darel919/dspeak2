@@ -5,14 +5,15 @@ import type {
   TopologyResourceHelpersContext,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
+import { isExternalString } from "../types/boundary.ts";
 
 function isTopologySourceEntry(
   value: Record<string, unknown>,
 ): value is TopologySourceEntry {
   return (
-    typeof value.source === "string" &&
-    typeof MediaStreamTrack !== "undefined" &&
-    value.track instanceof MediaStreamTrack
+    isExternalString(value.source) &&
+    globalThis.MediaStreamTrack instanceof Function &&
+    value.track instanceof globalThis.MediaStreamTrack
   );
 }
 
@@ -47,7 +48,8 @@ export function createTopologyResourceHelpers({
 }: TopologyResourceHelpersContext) {
   function ensureP2p() {
     const existing = getP2pMesh();
-    if (existing || typeof RTCPeerConnection === "undefined") return existing;
+    if (existing || !(globalThis.RTCPeerConnection instanceof Function))
+      return existing;
     const mesh = new NativeP2pMesh({
       iceServers: getIceServers(),
       sendSignal: (payload) =>
@@ -73,9 +75,9 @@ export function createTopologyResourceHelpers({
           provider: "p2p",
         });
       },
-      onFailure: (reason: string, error: unknown = null) =>
+      onFailure: (reason: string, error: Error | string | null = null) =>
         send({ type: "p2p-failed", data: { reason, error } }),
-      onSnapshot: (snapshot: unknown) =>
+      onSnapshot: (snapshot: Record<string, unknown>[]) =>
         updateP2pStats(Array.isArray(snapshot) ? snapshot : []),
       getAudioStereo,
       mediaCapabilities: getMediaCapabilities(),

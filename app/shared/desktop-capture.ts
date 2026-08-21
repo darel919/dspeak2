@@ -28,6 +28,13 @@ export const NATIVE_CAPTURE_BACKENDS = Object.freeze([
   "windowsGraphicsCapture",
   "wasapiProcessLoopback",
 ]);
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
+import type { ExternalValue } from "./types/boundary.ts";
 
 type CaptureKind = (typeof DESKTOP_CAPTURE_KINDS)[number];
 type CaptureMode = (typeof DESKTOP_CAPTURE_MODES)[number];
@@ -71,6 +78,49 @@ interface NativeCaptureCapability {
   sources: unknown[];
 }
 
+type DesktopCaptureResult =
+  object | string | number | boolean | null | undefined;
+
+interface DesktopCaptureApi {
+  invoke: (
+    command: string,
+    payload: ExternalValue,
+  ) => Promise<DesktopCaptureResult>;
+}
+
+interface DesktopCaptureEvent {
+  payload: DesktopCaptureResult;
+}
+
+type DesktopCaptureHandler<TPayload> = (payload: TPayload) => void;
+
+function parseDesktopCaptureResult(value: ExternalValue): DesktopCaptureResult {
+  if (
+    value == null ||
+    isExternalRecord(value) ||
+    Array.isArray(value) ||
+    isExternalString(value) ||
+    isExternalNumber(value) ||
+    isExternalBoolean(value)
+  )
+    return value;
+  return null;
+}
+
+function captureKind<T>(value: T): CaptureKind | null {
+  return isExternalString(value) &&
+    DESKTOP_CAPTURE_KINDS.some((kind) => kind === value)
+    ? value
+    : null;
+}
+
+function captureMode<T>(value: T): CaptureMode | null {
+  return isExternalString(value) &&
+    DESKTOP_CAPTURE_MODES.some((mode) => mode === value)
+    ? value
+    : null;
+}
+
 const DEFAULT_NATIVE_CAPTURE_REASON =
   "Native capture support was not reported by the platform backend.";
 
@@ -80,7 +130,7 @@ function normalizeNativeCaptureCapability(
   return {
     available: value?.available === true,
     reason:
-      typeof value?.reason === "string" && value.reason.length > 0
+      isExternalString(value?.reason) && value.reason.length > 0
         ? value.reason
         : DEFAULT_NATIVE_CAPTURE_REASON,
     sources: Array.isArray(value?.sources) ? value.sources : [],
@@ -90,20 +140,17 @@ function normalizeNativeCaptureCapability(
 export function normalizeNativeCaptureCapabilities(
   value: UnknownRecord | null | undefined,
 ) {
-  const capture =
-    value?.capture && typeof value.capture === "object"
-      ? (value.capture as UnknownRecord)
-      : {};
-  return Object.fromEntries(
-    NATIVE_CAPTURE_BACKENDS.map((backend) => [
-      backend,
-      normalizeNativeCaptureCapability(
-        capture[backend] && typeof capture[backend] === "object"
-          ? (capture[backend] as UnknownRecord)
-          : null,
-      ),
-    ]),
-  ) as Record<string, NativeCaptureCapability>;
+  const capture = isExternalRecord(value?.capture) ? value.capture : {};
+  const capabilities: Record<string, NativeCaptureCapability> =
+    Object.fromEntries(
+      NATIVE_CAPTURE_BACKENDS.map((backend) => [
+        backend,
+        normalizeNativeCaptureCapability(
+          isExternalRecord(capture[backend]) ? capture[backend] : null,
+        ),
+      ]),
+    );
+  return capabilities;
 }
 
 export function getNativeCaptureCapability(
@@ -166,37 +213,35 @@ export function captureSourceKey(sourceType: string, sourceId: string) {
   return `${sourceType}:${sourceId}`;
 }
 
-export function isDesktopCaptureSelection(
-  value: unknown,
-): value is DesktopCaptureSelection {
-  const record =
-    value && typeof value === "object" ? (value as UnknownRecord) : null;
+export function isDesktopCaptureSelection<T>(
+  value: T,
+): value is T & DesktopCaptureSelection {
+  if (!isExternalRecord(value)) return false;
+  const source = isExternalRecord(value.source) ? value.source : null;
+  const audio = isExternalRecord(value.audio) ? value.audio : null;
+  const sourceType = captureKind(value.sourceType);
+  const mode = captureMode(value.mode);
   return Boolean(
-    record &&
-    typeof record.sourceId === "string" &&
-    typeof record.sourceType === "string" &&
-    DESKTOP_CAPTURE_KINDS.includes(record.sourceType as CaptureKind) &&
-    typeof record.sourceKey === "string" &&
-    record.sourceKey === captureSourceKey(record.sourceType, record.sourceId) &&
-    typeof record.mode === "string" &&
-    DESKTOP_CAPTURE_MODES.includes(record.mode as CaptureMode) &&
-    record.audio &&
-    typeof record.audio === "object" &&
-    (record.audio as UnknownRecord).channels === 2 &&
-    (record.audio as UnknownRecord).sampleRate === 48000 &&
-    (record.audio as UnknownRecord).stereo === true &&
-    (record.audio as UnknownRecord).excludeSelfAudio === true &&
-    record.excludeSelf === true &&
-    record.source &&
-    typeof record.source === "object" &&
-    (record.source as UnknownRecord).sourceId === record.sourceId &&
-    (record.source as UnknownRecord).sourceType === record.sourceType &&
-    (record.source as UnknownRecord).sourceKey === record.sourceKey,
+    isExternalString(value.sourceId) &&
+    sourceType &&
+    isExternalString(value.sourceKey) &&
+    value.sourceKey === captureSourceKey(sourceType, value.sourceId) &&
+    mode &&
+    audio &&
+    audio.channels === 2 &&
+    audio.sampleRate === 48000 &&
+    audio.stereo === true &&
+    audio.excludeSelfAudio === true &&
+    value.excludeSelf === true &&
+    source &&
+    source.sourceId === value.sourceId &&
+    source.sourceType === sourceType &&
+    source.sourceKey === value.sourceKey,
   );
 }
 
-export function assertDesktopCaptureSelection(
-  value: unknown,
+export function assertDesktopCaptureSelection<T>(
+  value: T,
   operation = "capture",
 ): DesktopCaptureSelection {
   if (isDesktopCaptureSelection(value)) return value;
@@ -209,8 +254,8 @@ export function assertDesktopCaptureSelection(
   );
 }
 
-export function assertDesktopCaptureMode(
-  value: unknown,
+export function assertDesktopCaptureMode<T>(
+  value: T,
   allowedModes: CaptureMode | CaptureMode[],
   operation = "capture",
 ) {
@@ -227,50 +272,46 @@ export function assertDesktopCaptureMode(
   );
 }
 
-export function nativeCaptureFailure(
-  error: unknown,
+export function nativeCaptureFailure<TError, TSelection>(
+  error: TError,
   {
     operation = "capture",
     selection = null,
-  }: { operation?: string; selection?: unknown } = {},
+  }: { operation?: string; selection?: TSelection | null } = {},
 ) {
   if (error instanceof DesktopCaptureError) return error;
-  const errorRecord =
-    error && typeof error === "object" ? (error as UnknownRecord) : null;
-  const nestedError =
-    errorRecord?.error && typeof errorRecord.error === "object"
-      ? (errorRecord.error as UnknownRecord)
-      : null;
-  const nestedMessage =
-    typeof errorRecord?.error === "string" ? errorRecord.error : null;
-  const message =
-    typeof error === "string"
-      ? error
-      : typeof errorRecord?.message === "string"
-        ? errorRecord.message
-        : typeof nestedError?.message === "string"
-          ? nestedError.message
-          : nestedMessage || "Native desktop capture is unavailable.";
+  const errorRecord = isExternalRecord(error) ? error : null;
+  const nestedError = isExternalRecord(errorRecord?.error)
+    ? errorRecord.error
+    : null;
+  const nestedMessage = isExternalString(errorRecord?.error)
+    ? errorRecord.error
+    : null;
+  const message = isExternalString(error)
+    ? error
+    : isExternalString(errorRecord?.message)
+      ? errorRecord.message
+      : isExternalString(nestedError?.message)
+        ? nestedError.message
+        : nestedMessage || "Native desktop capture is unavailable.";
   const details = errorRecord?.details || nestedError?.details || null;
   return new DesktopCaptureError(message, {
-    code:
-      typeof errorRecord?.code === "string"
-        ? errorRecord.code
-        : typeof nestedError?.code === "string"
-          ? nestedError.code
-          : DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNAVAILABLE,
-    operation:
-      typeof errorRecord?.operation === "string"
-        ? errorRecord.operation
-        : typeof nestedError?.operation === "string"
-          ? nestedError.operation
-          : operation,
+    code: isExternalString(errorRecord?.code)
+      ? errorRecord.code
+      : isExternalString(nestedError?.code)
+        ? nestedError.code
+        : DESKTOP_CAPTURE_ERROR_CODES.NATIVE_UNAVAILABLE,
+    operation: isExternalString(errorRecord?.operation)
+      ? errorRecord.operation
+      : isExternalString(nestedError?.operation)
+        ? nestedError.operation
+        : operation,
     details: details || (selection ? { selection } : null),
   });
 }
 
-export function desktopCaptureRequest(
-  selection: unknown,
+export function desktopCaptureRequest<T>(
+  selection: T,
   options: {
     operation?: string;
     roomBitrateBps?: number;
@@ -288,18 +329,16 @@ export function desktopCaptureRequest(
     Number.isFinite(requestedBitrate) && requestedBitrate > 0
       ? Math.floor(requestedBitrate)
       : null;
-  const captureSelection = {
-    ...validatedSelection,
-    ...(options.video
-      ? { video: { ...validatedSelection.video, ...options.video } }
-      : {}),
-    ...(roomBitrateBps
-      ? {
-          roomBitrateBps,
-          audio: { ...validatedSelection.audio, maxBitrateBps: roomBitrateBps },
-        }
-      : {}),
-  };
+  const captureSelection = { ...validatedSelection };
+  if (options.video)
+    captureSelection.video = { ...validatedSelection.video, ...options.video };
+  if (roomBitrateBps) {
+    captureSelection.roomBitrateBps = roomBitrateBps;
+    captureSelection.audio = {
+      ...validatedSelection.audio,
+      maxBitrateBps: roomBitrateBps,
+    };
+  }
   return {
     captureSelection,
     source: captureSelection.source,
@@ -315,24 +354,16 @@ export function desktopCaptureRequest(
   };
 }
 
-export function normalizeCaptureSource(source: unknown): CaptureSource | null {
-  const record =
-    source && typeof source === "object" ? (source as UnknownRecord) : null;
+export function normalizeCaptureSource<T>(source: T): CaptureSource | null {
+  const record = isExternalRecord(source) ? source : null;
   if (!record) return null;
-  const sourceType =
-    typeof record.sourceType === "string" &&
-    DESKTOP_CAPTURE_KINDS.includes(record.sourceType as CaptureKind)
-      ? (record.sourceType as CaptureKind)
-      : typeof record.kind === "string" &&
-          DESKTOP_CAPTURE_KINDS.includes(record.kind as CaptureKind)
-        ? (record.kind as CaptureKind)
-        : null;
+  const sourceType = captureKind(record.sourceType) || captureKind(record.kind);
   const sourceId = String(record.sourceId || record.id || "");
   if (!sourceType || !sourceId) return null;
-  const capabilities =
-    record.capabilities && typeof record.capabilities === "object"
-      ? (record.capabilities as UnknownRecord)
-      : {};
+  const capabilities = isExternalRecord(record.capabilities)
+    ? record.capabilities
+    : {};
+  const bounds = isExternalRecord(record.bounds) ? record.bounds : null;
   return {
     sourceId,
     sourceType,
@@ -342,15 +373,14 @@ export function normalizeCaptureSource(source: unknown): CaptureSource | null {
     appId: record.appId ? String(record.appId) : null,
     displayId: record.displayId ? String(record.displayId) : null,
     thumbnail: record.thumbnail ? String(record.thumbnail) : null,
-    bounds:
-      record.bounds && typeof record.bounds === "object"
-        ? {
-            x: Number((record.bounds as UnknownRecord).x) || 0,
-            y: Number((record.bounds as UnknownRecord).y) || 0,
-            width: Number((record.bounds as UnknownRecord).width) || 0,
-            height: Number((record.bounds as UnknownRecord).height) || 0,
-          }
-        : null,
+    bounds: bounds
+      ? {
+          x: Number(bounds.x) || 0,
+          y: Number(bounds.y) || 0,
+          width: Number(bounds.width) || 0,
+          height: Number(bounds.height) || 0,
+        }
+      : null,
     capabilities: {
       video: capabilities.video === true && sourceType !== "system-audio",
       audio: capabilities.audio === true,
@@ -368,15 +398,15 @@ export function normalizeCaptureSource(source: unknown): CaptureSource | null {
   };
 }
 
-export function normalizeCaptureSources(sources: unknown) {
+export function normalizeCaptureSources<T>(sources: T) {
   return (Array.isArray(sources) ? sources : [])
     .map(normalizeCaptureSource)
     .filter((source): source is CaptureSource => source !== null)
     .filter((source) => source.available && source.selfExcluded);
 }
 
-export function createDesktopCaptureSelection(
-  source: unknown,
+export function createDesktopCaptureSelection<T>(
+  source: T,
   mode: CaptureMode,
   options: {
     audio?: UnknownRecord;
@@ -408,7 +438,7 @@ export function createDesktopCaptureSelection(
       : Number.isFinite(maxBitrateBps) && maxBitrateBps > 0
         ? maxBitrateBps
         : null;
-  return {
+  const selection: DesktopCaptureSelection = {
     source: {
       sourceId: normalized.sourceId,
       sourceType: normalized.sourceType,
@@ -417,34 +447,37 @@ export function createDesktopCaptureSelection(
     sourceId: normalized.sourceId,
     sourceType: normalized.sourceType,
     sourceKey: normalized.sourceKey,
-    ...(normalized.bounds ? { bounds: normalized.bounds } : {}),
     mode,
     excludeSelf: true,
-    video: { ...DESKTOP_CAPTURE_VIDEO_POLICY, ...(options.video || {}) },
+    video: { ...DESKTOP_CAPTURE_VIDEO_POLICY, ...options.video },
     audio: {
       ...DESKTOP_CAPTURE_AUDIO_POLICY,
       stereo: normalized.capabilities.stereo,
-      ...(resolvedBitrateBps ? { maxBitrateBps: resolvedBitrateBps } : {}),
     },
     excludeSelfAudio: DESKTOP_CAPTURE_AUDIO_POLICY.excludeSelfAudio,
-    ...(resolvedBitrateBps ? { roomBitrateBps: resolvedBitrateBps } : {}),
   };
+  if (normalized.bounds) selection.bounds = normalized.bounds;
+  if (resolvedBitrateBps) {
+    selection.audio.maxBitrateBps = resolvedBitrateBps;
+    selection.roomBitrateBps = resolvedBitrateBps;
+  }
+  return selection;
 }
 
-export function desktopCaptureInvoke(
-  invoke: (command: string, payload: unknown) => unknown,
+export function desktopCaptureInvoke<TPayload extends ExternalValue, TResult>(
+  invoke: (command: string, payload: TPayload) => TResult,
   command: string,
-  payload: unknown = {},
-) {
-  if (typeof invoke !== "function")
+  payload: TPayload,
+): TResult | Promise<never> {
+  if (!(invoke instanceof Function))
     return Promise.reject(new Error("Desktop capture is unavailable"));
   return invoke(command, payload);
 }
 
 export function hasTauriRuntimeMarker() {
+  const browserWindow = globalThis.window;
   return Boolean(
-    typeof window !== "undefined" &&
-    (window.__TAURI__ || window.__TAURI_INTERNALS__),
+    browserWindow?.__TAURI__ || browserWindow?.__TAURI_INTERNALS__,
   );
 }
 
@@ -453,19 +486,21 @@ export async function isDesktopClient() {
   if (hasTauriRuntimeMarker()) return true;
   try {
     const { isTauri } = await import("@tauri-apps/api/core");
-    return typeof isTauri === "function" && isTauri();
+    return isTauri instanceof Function && isTauri();
   } catch {
     return false;
   }
 }
 
-export async function getDesktopCaptureApi() {
+export async function getDesktopCaptureApi(): Promise<DesktopCaptureApi | null> {
   if (!(await isDesktopClient())) return null;
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     return {
-      invoke: (command: string, payload: unknown = {}) =>
-        invoke("media_worker_invoke", { command, payload }),
+      invoke: async (command: string, payload: ExternalValue = {}) =>
+        parseDesktopCaptureResult(
+          await invoke("media_worker_invoke", { command, payload }),
+        ),
     };
   } catch {
     return null;
@@ -474,8 +509,8 @@ export async function getDesktopCaptureApi() {
 
 export async function invokeNativeDesktopMedia(
   command: string,
-  payload: unknown = {},
-) {
+  payload: ExternalValue = {},
+): Promise<DesktopCaptureResult> {
   const api = await getDesktopCaptureApi();
   if (!api) throw new Error("Native desktop media is unavailable");
   return api.invoke(command, payload);
@@ -483,14 +518,13 @@ export async function invokeNativeDesktopMedia(
 
 export async function listenNativeDesktopMedia(
   eventName: string,
-  handler: (payload: unknown) => void,
+  handler: DesktopCaptureHandler<DesktopCaptureResult>,
 ) {
   if (!(await isDesktopClient())) return null;
   try {
     const { listen } = await import("@tauri-apps/api/event");
-    return await listen(eventName, ({ payload }: { payload: unknown }) => {
-      handler(payload);
-    });
+    const handleEvent = (event: DesktopCaptureEvent) => handler(event.payload);
+    return await listen<DesktopCaptureResult>(eventName, handleEvent);
   } catch {
     return null;
   }

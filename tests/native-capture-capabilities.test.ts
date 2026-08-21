@@ -5,6 +5,7 @@ import {
   getNativeCaptureCapability,
   normalizeNativeCaptureCapabilities,
 } from "../app/shared/desktop-capture.ts";
+import { parseExternalString } from "../shared/types/external.ts";
 
 const unsupportedLinux = {
   nativeRtc: false,
@@ -103,7 +104,7 @@ describe("native capture capability contract", () => {
 
     for (const capability of Object.values(normalized)) {
       assert.equal(capability.available, false);
-      assert.equal(typeof capability.reason, "string");
+      assert.equal(parseExternalString(capability.reason), capability.reason);
       assert.ok(capability.reason.length > 0);
       assert.deepEqual(capability.sources, []);
     }

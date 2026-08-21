@@ -6,6 +6,10 @@ import type {
   VideoCodecName,
 } from "../app/shared/types/video-codec-capabilities.ts";
 import type { CodecRoutingPlan } from "../app/shared/video-codec-routing.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 function capabilities(
   encode: VideoCodecName[],
@@ -13,6 +17,7 @@ function capabilities(
 ): ParticipantMediaCapabilities {
   const names = ["H264", "H265", "VP8", "VP9", "AV1"] as const;
   return {
+    /* SAFETY: The fixed codec tuple supplies every video-codec key with the required direction fields. */
     videoCodecs: Object.fromEntries(
       names.map((codec) => [
         codec,
@@ -302,6 +307,7 @@ describe("native publisher codec variants", () => {
       id: "base-producer",
       source: "camera",
       kind: "video",
+      /* SAFETY: The source was inserted immediately above and remains present until this producer fixture is constructed. */
       entry: session.sources.get("camera") as NonNullable<
         ReturnType<typeof session.sources.get>
       >,
@@ -681,7 +687,8 @@ describe("native publisher codec variants", () => {
     };
     session.providerSignaling = {
       send: (message) => {
-        providerMessages.push(message as Record<string, unknown>);
+        const record = parseExternalRecord(message);
+        if (record) providerMessages.push(record);
         return true;
       },
       close: () => {},
@@ -718,14 +725,11 @@ describe("native publisher codec variants", () => {
     };
     assert.equal(await session.applyCodecRoutingPlan(routedPlan), true);
     assert.equal(session.producers.get("camera")?.id, "stable-h264");
-    assert.deepEqual(
-      (
-        providerMessages.find(
-          (message) => message.type === "update-producer-metadata",
-        )?.data as Record<string, unknown>
-      )?.receivers,
-      ["dave"],
+    const updateMessage = providerMessages.find(
+      (message) => message.type === "update-producer-metadata",
     );
+    const updateData = parseExternalRecord(updateMessage?.data);
+    assert.deepEqual(updateData?.receivers, ["dave"]);
 
     assert.equal(
       session.handleCodecMigrationState({
@@ -747,13 +751,12 @@ describe("native publisher codec variants", () => {
           payload.source === "camera",
       ),
     );
-    assert.ok(
-      providerMessages.some(
-        (message) =>
-          message.type === "close-producer" &&
-          (message.data as Record<string, unknown>)?.producerId ===
-            "stable-h264",
-      ),
+    const closeMessage = providerMessages.find(
+      (message) => message.type === "close-producer",
+    );
+    assert.equal(
+      parseExternalString(parseExternalRecord(closeMessage?.data)?.producerId),
+      "stable-h264",
     );
   });
 
@@ -775,7 +778,8 @@ describe("native publisher codec variants", () => {
     };
     session.providerSignaling = {
       send: (message) => {
-        providerMessages.push(message as Record<string, unknown>);
+        const record = parseExternalRecord(message);
+        if (record) providerMessages.push(record);
         return true;
       },
       close: () => {},

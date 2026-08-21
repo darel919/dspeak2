@@ -6,7 +6,7 @@ export const INVITE_EXPIRY_OPTIONS = Object.freeze([
   { label: "7 days", seconds: 7 * 24 * 60 * 60 },
 ]);
 
-export function encodeInvitePayload(payload: unknown) {
+export function encodeInvitePayload(payload: ExternalValue) {
   const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
   let binary = "";
@@ -18,19 +18,20 @@ export function encodeInvitePayload(payload: unknown) {
 }
 
 export function decodeInvitePayload(
-  value: unknown,
+  value: ExternalField,
 ): Record<string, unknown> | null {
-  if (typeof value !== "string" || !value || value.length > 4096) return null;
+  const encoded = parseExternalString(value);
+  if (!encoded || encoded.length > 4096) return null;
   try {
-    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+    const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
     const binary = atob(padded);
     const bytes = Uint8Array.from(binary, (character) =>
       character.charCodeAt(0),
     );
-    const payload: unknown = JSON.parse(new TextDecoder().decode(bytes));
-    if (!payload || typeof payload !== "object") return null;
-    const record = payload as Record<string, unknown>;
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    const record = parseExternalRecord(payload);
+    if (record === null) return null;
     if (
       !record.id ||
       !record.createdBy ||
@@ -45,9 +46,15 @@ export function decodeInvitePayload(
   }
 }
 
-export function validateInviteExpiry(seconds: unknown) {
+export function validateInviteExpiry(seconds: ExternalField) {
   const value = Number(seconds);
   return INVITE_EXPIRY_OPTIONS.some((option) => option.seconds === value)
     ? value
     : null;
 }
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+  type ExternalValue,
+} from "./types/external.ts";

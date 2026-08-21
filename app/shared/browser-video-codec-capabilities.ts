@@ -7,6 +7,7 @@ import {
   type VideoCodecName,
   VIDEO_CODEC_NAMES,
 } from "./types/video-codec-capabilities.ts";
+import { isExternalRecord } from "./types/boundary.ts";
 
 type BrowserCodecEntry = {
   mimeType?: unknown;
@@ -34,22 +35,21 @@ export interface BrowserVideoCodecProbeEnvironment {
   mediaCapabilities?: BrowserMediaCapabilitiesApi | null;
 }
 
-const CODEC_MIME_TYPES: Record<VideoCodecName, string[]> = {
+const CODEC_MIME_TYPES = {
   H264: ["video/h264"],
   H265: ["video/h265", "video/hevc"],
   VP8: ["video/vp8"],
   VP9: ["video/vp9"],
   AV1: ["video/av1"],
-};
+} satisfies Record<VideoCodecName, string[]>;
 
-const DEFAULT_SOFTWARE_EFFICIENCY: Record<VideoCodecName, RealtimeEfficiency> =
-  {
-    H264: "acceptable",
-    H265: "poor",
-    VP8: "acceptable",
-    VP9: "poor",
-    AV1: "unusable",
-  };
+const DEFAULT_SOFTWARE_EFFICIENCY = {
+  H264: "acceptable",
+  H265: "poor",
+  VP8: "acceptable",
+  VP9: "poor",
+  AV1: "unusable",
+} satisfies Record<VideoCodecName, RealtimeEfficiency>;
 
 const PROBE_WIDTH = 1280;
 const PROBE_HEIGHT = 720;
@@ -65,11 +65,8 @@ function browserApi(
     environment.mediaCapabilities
   )
     return environment;
-  const sender = (globalThis as { RTCRtpSender?: BrowserRtpCapabilitiesApi })
-    .RTCRtpSender;
-  const receiver = (
-    globalThis as { RTCRtpReceiver?: BrowserRtpCapabilitiesApi }
-  ).RTCRtpReceiver;
+  const sender = globalThis.RTCRtpSender;
+  const receiver = globalThis.RTCRtpReceiver;
   const mediaCapabilities: BrowserMediaCapabilitiesApi | undefined =
     globalThis.navigator?.mediaCapabilities;
   return { sender, receiver, mediaCapabilities };
@@ -86,8 +83,8 @@ function codecEntries(
   } catch {}
   const mimeTypes = CODEC_MIME_TYPES[codec];
   return entries.filter((value): value is BrowserCodecEntry => {
-    if (!value || typeof value !== "object") return false;
-    const mimeType = String((value as BrowserCodecEntry).mimeType || "")
+    if (!isExternalRecord(value)) return false;
+    const mimeType = String(value.mimeType || "")
       .trim()
       .toLowerCase();
     return (
@@ -129,8 +126,7 @@ async function queryDirection(
           ? await mediaCapabilities.encodingInfo?.({ type: "webrtc", video })
           : await mediaCapabilities.decodingInfo?.({ type: "webrtc", video });
       if (!result) continue;
-      const info: BrowserCapabilityInfo =
-        result && typeof result === "object" ? result : {};
+      const info: BrowserCapabilityInfo = result;
       if (!best || (info.supported === true && best.supported !== true))
         best = info;
       if (info.supported === true && info.smooth !== false) break;
@@ -156,10 +152,9 @@ function directionCapability(
         ? entries.length > 0
         : info?.supported === true;
   if (!supported) {
-    return {
-      ...emptyCodecDirectionCapability(),
-      ...(error ? { failureReason: error } : {}),
-    };
+    const unavailable = emptyCodecDirectionCapability();
+    if (error) unavailable.failureReason = error;
+    return unavailable;
   }
   const powerEfficient = info?.powerEfficient === true;
   const smooth = info?.smooth !== false;
@@ -170,7 +165,7 @@ function directionCapability(
     : smooth
       ? DEFAULT_SOFTWARE_EFFICIENCY[codec]
       : "poor";
-  return {
+  const result: CodecDirectionCapability = {
     supported: true,
     acceleration: powerEfficient ? "hardware" : "software",
     implementation: powerEfficient
@@ -181,11 +176,11 @@ function directionCapability(
     maxHeight: PROBE_HEIGHT,
     maxFps: PROBE_FPS,
     tested: info !== null,
-    ...(entries[0]?.sdpFmtpLine
-      ? { testedProfile: String(entries[0].sdpFmtpLine) }
-      : {}),
-    ...(error ? { failureReason: error } : {}),
   };
+  if (entries[0]?.sdpFmtpLine)
+    result.testedProfile = String(entries[0].sdpFmtpLine);
+  if (error) result.failureReason = error;
+  return result;
 }
 
 export async function probeBrowserVideoCodecCapabilities(
@@ -193,10 +188,8 @@ export async function probeBrowserVideoCodecCapabilities(
 ): Promise<ParticipantMediaCapabilities> {
   const api = browserApi(environment);
   const videoCodecs = emptyVideoCodecCapabilities();
-  const senderCapabilitiesAvailable =
-    typeof api.sender?.getCapabilities === "function";
-  const receiverCapabilitiesAvailable =
-    typeof api.receiver?.getCapabilities === "function";
+  const senderCapabilitiesAvailable = Boolean(api.sender?.getCapabilities);
+  const receiverCapabilitiesAvailable = Boolean(api.receiver?.getCapabilities);
   let hardwareEncoders = 0;
   for (const codec of VIDEO_CODEC_NAMES) {
     const encodeEntries = codecEntries(api.sender, codec);
@@ -224,13 +217,14 @@ export async function probeBrowserVideoCodecCapabilities(
     if (videoCodecs[codec].encode.acceleration === "hardware")
       hardwareEncoders += 1;
   }
+  const concurrentEncode: ParticipantMediaCapabilities["concurrentEncode"] = {
+    supported: hardwareEncoders > 0,
+    confidence: "conservative-default",
+  };
+  if (hardwareEncoders > 0) concurrentEncode.maxHardwareSessions = 1;
   return {
     videoCodecs,
-    concurrentEncode: {
-      supported: hardwareEncoders > 0,
-      ...(hardwareEncoders > 0 ? { maxHardwareSessions: 1 } : {}),
-      confidence: "conservative-default",
-    },
+    concurrentEncode,
     source: "browser-probe",
     probeVersion: "video-codec-matrix-v1-browser",
   };

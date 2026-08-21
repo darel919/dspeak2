@@ -1,14 +1,13 @@
-import type {
-  RepositoryBuildMetadata,
-  RepositoryUpdateSnapshot,
-} from "../shared/types/repository-update.ts";
+import type { RepositoryUpdateSnapshot } from "../shared/types/repository-update.ts";
+import { isExternalRecord } from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 const STATE_KEY = "repository-update-state";
 const UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
 let sharedRequest: Promise<RepositoryUpdateSnapshot | null> | null = null;
 
-function normalizeCommit(value: unknown) {
+function normalizeCommit(value: ExternalField) {
   const normalized = String(value || "")
     .trim()
     .toLowerCase();
@@ -20,7 +19,7 @@ export function useRepositoryUpdate() {
   const state = useState<{
     status: string;
     snapshot: RepositoryUpdateSnapshot | null;
-    error: unknown;
+    error: ExternalField;
   }>(STATE_KEY, () => ({
     status: "idle",
     snapshot: null,
@@ -56,7 +55,7 @@ export function useRepositoryUpdate() {
         "",
       );
       const commit = normalizeCommit(
-        (currentBuild.value as RepositoryBuildMetadata).commit,
+        isExternalRecord(currentBuild.value) ? currentBuild.value.commit : null,
       );
       const query = commit ? `?commit=${encodeURIComponent(commit)}` : "";
       const response = await fetch(`${apiPath}/update${query}`, {
@@ -67,7 +66,10 @@ export function useRepositoryUpdate() {
       });
       if (!response.ok)
         throw new Error(`Update check failed (${response.status})`);
-      const nextSnapshot = (await response.json()) as RepositoryUpdateSnapshot;
+      const rawSnapshot = await response.json();
+      if (!isExternalRecord(rawSnapshot))
+        throw new Error("Invalid repository update response");
+      const nextSnapshot: RepositoryUpdateSnapshot = rawSnapshot;
       state.value = {
         ...state.value,
         status: nextSnapshot?.status === "ok" ? "complete" : "unavailable",

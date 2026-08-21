@@ -1,13 +1,71 @@
 import { mediaDebug, shortMediaId } from "../media-debug.ts";
+import { asError } from "../native-mediasoup-utils.ts";
 
 import { deferred, sessionClosedError, REQUEST_TIMEOUT_MS } from "./helpers.ts";
 import type {
   CloudflarePublication,
-  CloudflareConsumerEntry,
   CloudflareRequestResult,
   CloudflareSessionLike,
   CloudflareTrackEvent,
 } from "../types/cloudflare-media.ts";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
+
+type ParsedCloudflareTrack = NonNullable<
+  CloudflareRequestResult["tracks"]
+>[number];
+
+function fallbackMediaStream(track: MediaStreamTrack): MediaStream | null {
+  const constructor = globalThis.MediaStream;
+  if (!(constructor instanceof Function)) return null;
+  return new constructor([track]);
+}
+
+function cloudflareRequestResult<T>(value: T): CloudflareRequestResult {
+  const record = isExternalRecord(value) ? value : null;
+  if (!record) return {};
+  const result: CloudflareRequestResult = {};
+  if (isExternalString(record.sessionId)) result.sessionId = record.sessionId;
+  const description = isExternalRecord(record.sessionDescription)
+    ? record.sessionDescription
+    : null;
+  if (description) {
+    const type =
+      description.type === "offer" ||
+      description.type === "answer" ||
+      description.type === "pranswer" ||
+      description.type === "rollback"
+        ? description.type
+        : null;
+    if (type) {
+      const sessionDescription: RTCSessionDescriptionInit = { type };
+      if (isExternalString(description.sdp))
+        sessionDescription.sdp = description.sdp;
+      result.sessionDescription = sessionDescription;
+    }
+  }
+  if (Array.isArray(record.tracks)) {
+    result.tracks = record.tracks.flatMap((track) => {
+      const trackRecord = isExternalRecord(track) ? track : null;
+      if (!trackRecord) return [];
+      const parsed: ParsedCloudflareTrack = {};
+      if (isExternalString(trackRecord.trackName))
+        parsed.trackName = trackRecord.trackName;
+      if (
+        isExternalString(trackRecord.mid) ||
+        isExternalNumber(trackRecord.mid)
+      )
+        parsed.mid = trackRecord.mid;
+      return [parsed];
+    });
+  }
+  return result;
+}
 export class CloudflareNegotiationMethods {
   initialize(this: CloudflareSessionLike) {
     if (this.initializing) return this.initializing;
@@ -46,13 +104,7 @@ export class CloudflareNegotiationMethods {
       });
       const result = await this.request("new-session", undefined);
       if (generation !== this.sessionGeneration) throw sessionClosedError();
-      if (
-        !result ||
-        typeof result !== "object" ||
-        !("sessionId" in result) ||
-        typeof result.sessionId !== "string" ||
-        !result.sessionId
-      )
+      if (!result || !result.sessionId)
         throw new Error("Cloudflare session ID is missing");
       this.sessionId = result.sessionId;
       mediaDebug("cloudflare.session-created", {
@@ -139,13 +191,9 @@ export class CloudflareNegotiationMethods {
       key: publication.trackName,
       track: event.track,
       receiving,
-      stream:
-        event.streams?.[0] ||
-        (typeof MediaStream === "function"
-          ? new MediaStream([event.track])
-          : null),
+      stream: event.streams?.[0] || fallbackMediaStream(event.track),
     };
-    this.consumers.set(trackName, entry as CloudflareConsumerEntry);
+    this.consumers.set(trackName, entry);
     event.track.addEventListener?.(
       "ended",
       () => {
@@ -165,7 +213,7 @@ export class CloudflareNegotiationMethods {
   request(
     this: CloudflareSessionLike,
     operation: string,
-    body: unknown = undefined,
+    body: ExternalObject | undefined = undefined,
   ) {
     const requestId = crypto.randomUUID();
     mediaDebug("cloudflare.request", {
@@ -187,7 +235,7 @@ export class CloudflareNegotiationMethods {
     } catch (error) {
       this.pending.delete(requestId);
       waiting.catch(() => {});
-      waiting.reject(error);
+      waiting.reject(asError(error, "Cloudflare request failed"));
       throw error;
     }
     if (!sent) {
@@ -229,7 +277,7 @@ export class CloudflareNegotiationMethods {
 
   enqueueNegotiation(
     this: CloudflareSessionLike,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const task = this.negotiationQueue.then(operation);
     this.negotiationQueue = task.catch(() => {});
@@ -242,30 +290,26 @@ export class CloudflareNegotiationMethods {
     data: Record<string, unknown>,
   ) {
     if (type === "cloudflare-response") {
-      const requestId =
-        typeof data.requestId === "string" ? data.requestId : null;
+      const requestId = isExternalString(data.requestId)
+        ? data.requestId
+        : null;
       if (!requestId) return false;
       const waiting = this.pending.get(requestId);
       if (!waiting) return false;
-      if (typeof data.error === "string") waiting.reject(new Error(data.error));
-      else
-        waiting.resolve(
-          data.result && typeof data.result === "object"
-            ? (data.result as CloudflareRequestResult)
-            : {},
-        );
+      if (isExternalString(data.error)) waiting.reject(new Error(data.error));
+      else waiting.resolve(cloudflareRequestResult(data.result));
       mediaDebug("cloudflare.response", {
         requestId: shortMediaId(requestId),
-        ok: typeof data.error !== "string",
+        ok: !isExternalString(data.error),
       });
       return true;
     }
     if (type === "cloudflare-publication-available") {
-      const trackName =
-        typeof data.trackName === "string" ? data.trackName : null;
+      const trackName = isExternalString(data.trackName)
+        ? data.trackName
+        : null;
       if (!trackName) return false;
-      const publication = data as CloudflarePublication;
-      publication.trackName = trackName;
+      const publication: CloudflarePublication = { ...data, trackName };
 
       if (publication.peerId === this.localPeerId) {
         if (publication.closed === true) {
@@ -425,12 +469,10 @@ export class CloudflareNegotiationMethods {
             continue;
           }
         }
-        this.publications.set(trackName, pub as CloudflarePublication);
+        const publication: CloudflarePublication = { ...pub };
+        this.publications.set(trackName, publication);
         if (this.sessionId && this.subscriptionsStarted)
-          await this.subscribe(
-            pub as CloudflarePublication,
-            this.sessionGeneration,
-          );
+          await this.subscribe(publication, this.sessionGeneration);
         if (isStale?.()) return;
       }
     }

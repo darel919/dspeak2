@@ -16,6 +16,10 @@ interface CachedFile {
 }
 
 type UploadCache = Map<string, CachedFile>;
+/*
+ * SAFETY: This symbol is private to the upload cache, and each initialization
+ * stores an UploadCache before any read returns.
+ */
 const globalState = globalThis as typeof globalThis & {
   [stateKey]?: UploadCache;
 };
@@ -23,11 +27,12 @@ const globalState = globalThis as typeof globalThis & {
 console.log("[UploadCache] module loaded, stateKey:", String(stateKey));
 
 function getState() {
-  if (!globalState[stateKey]) {
-    console.log("[UploadCache] creating new Map in globalThis");
-    globalState[stateKey] = new Map<string, CachedFile>();
-  }
-  return globalState[stateKey] as UploadCache;
+  const existing = globalState[stateKey];
+  if (existing) return existing;
+  console.log("[UploadCache] creating new Map in globalThis");
+  const nextState: UploadCache = new Map<string, CachedFile>();
+  globalState[stateKey] = nextState;
+  return nextState;
 }
 
 function prune(state: UploadCache) {

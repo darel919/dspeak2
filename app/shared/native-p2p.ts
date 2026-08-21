@@ -24,6 +24,87 @@ import type {
   NativeP2pMeshSurface,
 } from "./types/native-p2p.ts";
 export class NativeP2pMesh {
+  declare configuration: NativeP2pMeshSurface["configuration"];
+  declare connections: NativeP2pMeshSurface["connections"];
+  declare sendSignal: NativeP2pMeshSurface["sendSignal"];
+  declare onRemoteTrack: NativeP2pMeshSurface["onRemoteTrack"];
+  declare onRemoteTrackEnded: NativeP2pMeshSurface["onRemoteTrackEnded"];
+  declare onFailure: NativeP2pMeshSurface["onFailure"];
+  declare onSnapshot: NativeP2pMeshSurface["onSnapshot"];
+  declare getSenderOptions: NativeP2pMeshSurface["getSenderOptions"];
+  declare getAudioStereo: NativeP2pMeshSurface["getAudioStereo"];
+  declare getControlConnectionEpoch: NativeP2pMeshSurface["getControlConnectionEpoch"];
+  declare mediaCapabilities: NativeP2pMeshSurface["mediaCapabilities"];
+  declare localSources: NativeP2pMeshSurface["localSources"];
+  declare sourceTransmission: NativeP2pMeshSurface["sourceTransmission"];
+  declare remoteSources: NativeP2pMeshSurface["remoteSources"];
+  declare remoteSourceOwners: NativeP2pMeshSurface["remoteSourceOwners"];
+  declare remoteSourceGenerations: NativeP2pMeshSurface["remoteSourceGenerations"];
+  declare remoteSourceConnectionEpochs: NativeP2pMeshSurface["remoteSourceConnectionEpochs"];
+  declare localPeerId: NativeP2pMeshSurface["localPeerId"];
+  declare epoch: number;
+  declare mode: string;
+  declare healthInterval: NativeP2pMeshSurface["healthInterval"];
+  declare qualificationTimeout: NativeP2pMeshSurface["qualificationTimeout"];
+  declare readyReported: boolean;
+  declare failureReportedKey: string | null;
+  declare healthCheckRunning: boolean;
+  declare healthRunToken: number;
+  declare senderOperations: NativeP2pMeshSurface["senderOperations"];
+  declare trackOperations: NativeP2pMeshSurface["trackOperations"];
+  declare sourceOperations: NativeP2pMeshSurface["sourceOperations"];
+  declare pendingSignals: NativeP2pMeshSurface["pendingSignals"];
+  declare pendingSignalLimit: number;
+  declare jitterBufferMinimumDelay: number;
+  declare jitterBufferTargetDelay: number;
+  declare fail: NativeP2pMeshSurface["fail"];
+  declare emitSnapshot: NativeP2pMeshSurface["emitSnapshot"];
+  declare sendControl: NativeP2pMeshSurface["sendControl"];
+  declare queuePendingSignal: NativeP2pMeshSurface["queuePendingSignal"];
+  declare usesStereoAudio: NativeP2pMeshSurface["usesStereoAudio"];
+  declare configureStateSenders: NativeP2pMeshSurface["configureStateSenders"];
+  declare setSenderReceiving: NativeP2pMeshSurface["setSenderReceiving"];
+  declare closeConnection: NativeP2pMeshSurface["closeConnection"];
+  declare closeAll: NativeP2pMeshSurface["closeAll"];
+  declare startQualificationTimeout: NativeP2pMeshSurface["startQualificationTimeout"];
+  declare startHealthChecks: NativeP2pMeshSurface["startHealthChecks"];
+  declare stopHealthChecks: NativeP2pMeshSurface["stopHealthChecks"];
+  declare checkQualification: NativeP2pMeshSurface["checkQualification"];
+  declare flushPendingSignals: NativeP2pMeshSurface["flushPendingSignals"];
+  declare ensureConnection: NativeP2pMeshSurface["ensureConnection"];
+  declare resynchronizeEpoch: NativeP2pMeshSurface["resynchronizeEpoch"];
+  declare attachSource: NativeP2pMeshSurface["attachSource"];
+  declare signal: NativeP2pMeshSurface["signal"];
+  declare enqueuePeerSignaling: NativeP2pMeshSurface["enqueuePeerSignaling"];
+  declare schedulePeerNegotiation: NativeP2pMeshSurface["schedulePeerNegotiation"];
+  declare retryPeerNegotiation: NativeP2pMeshSurface["retryPeerNegotiation"];
+  declare receiveSignal: NativeP2pMeshSurface["receiveSignal"];
+  declare applyPeerSignal: NativeP2pMeshSurface["applyPeerSignal"];
+  declare bindHealthChannel: NativeP2pMeshSurface["bindHealthChannel"];
+  declare handleConnectionState: NativeP2pMeshSurface["handleConnectionState"];
+  declare handleIceState: NativeP2pMeshSurface["handleIceState"];
+  declare handleTrack: NativeP2pMeshSurface["handleTrack"];
+  declare updateSender: NativeP2pMeshSurface["updateSender"];
+  declare updateTrack: NativeP2pMeshSurface["updateTrack"];
+  declare setSenderActive: NativeP2pMeshSurface["setSenderActive"];
+  declare configureSender: NativeP2pMeshSurface["configureSender"];
+  declare getSnapshot: NativeP2pMeshSurface["getSnapshot"];
+  declare applyTopology: NativeP2pMeshSurface["applyTopology"];
+  declare publishSource: NativeP2pMeshSurface["publishSource"];
+  declare enqueueSourceOperation: NativeP2pMeshSurface["enqueueSourceOperation"];
+  declare publishSourceInternal: NativeP2pMeshSurface["publishSourceInternal"];
+  declare unpublishSource: NativeP2pMeshSurface["unpublishSource"];
+  declare unpublishSourceInternal: NativeP2pMeshSurface["unpublishSourceInternal"];
+  declare setSourceTransmission: NativeP2pMeshSurface["setSourceTransmission"];
+  declare setRemoteReceiving: NativeP2pMeshSurface["setRemoteReceiving"];
+  declare isMediaReady: NativeP2pMeshSurface["isMediaReady"];
+  declare stats: NativeP2pMeshSurface["stats"];
+  declare diagnosticStats: NativeP2pMeshSurface["diagnosticStats"];
+  declare getInboundTrackStats: NativeP2pMeshSurface["getInboundTrackStats"];
+  declare getOutboundTrackStats: NativeP2pMeshSurface["getOutboundTrackStats"];
+  declare getOutboundTrackParameters: NativeP2pMeshSurface["getOutboundTrackParameters"];
+  declare setJitterBufferConfig: NativeP2pMeshSurface["setJitterBufferConfig"];
+  declare reconfigureSource: NativeP2pMeshSurface["reconfigureSource"];
   constructor({
     iceServers,
     sendSignal,
@@ -77,7 +158,7 @@ export class NativeP2pMesh {
   }
 }
 
-export interface NativeP2pMesh extends NativeP2pMeshSurface {}
+export type NativeP2pMeshContract = NativeP2pMeshSurface & NativeP2pMesh;
 
 const nativeP2pMethodGroups = [
   NativeP2pTopologyMethods,

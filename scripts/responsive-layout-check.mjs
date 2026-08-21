@@ -178,7 +178,6 @@ for (const viewport of viewports) {
     path: `/tmp/dspeak-responsive-${viewport.name}.png`,
   });
   results.push({
-    viewport: viewport.name,
     url: page.url(),
     title: await page.title(),
     viewport: await page.evaluate(() => ({
@@ -203,8 +202,7 @@ for (const viewport of viewports) {
         .slice(0, 200)
         .map((element) => ({
           tag: element.tagName,
-          className:
-            typeof element.className === "string" ? element.className : "",
+          className: element instanceof HTMLElement ? element.className : "",
           rect: (() => {
             const rect = element.getBoundingClientRect();
             return {
@@ -226,8 +224,7 @@ for (const viewport of viewports) {
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
         return {
-          className:
-            typeof element.className === "string" ? element.className : "",
+          className: element instanceof HTMLElement ? element.className : "",
           text: element.textContent?.trim().replace(/\s+/g, " "),
           rect: {
             x: rect.x,

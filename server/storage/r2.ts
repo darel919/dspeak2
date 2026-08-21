@@ -16,6 +16,7 @@ import type {
   R2UploadResult,
   UploadValidationResult,
 } from "../types/storage.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -64,6 +65,7 @@ export async function createUploadUrl(
   contentType: string,
   maxSizeBytes = 50 * 1024 * 1024,
 ): Promise<R2UploadResult> {
+  void maxSizeBytes;
   const key = generateObjectKey(type, identifiers);
   const command = new PutObjectCommand({
     Bucket: BUCKET,
@@ -85,7 +87,7 @@ export async function putObject(
     Key: key,
     Body: body,
     ContentType: contentType,
-    ...(contentLength == null ? {} : { ContentLength: contentLength }),
+    ContentLength: contentLength ?? undefined,
   });
   await r2Client.send(command);
 }
@@ -177,7 +179,7 @@ export const ALLOWED_MIME_TYPES = {
 export function validateUpload(
   type: R2ObjectTypeName,
   mimeType: string,
-  size: unknown,
+  size: ExternalField,
   maxSizeBytes = 50 * 1024 * 1024,
 ): UploadValidationResult {
   const allowed = ALLOWED_MIME_TYPES[type];

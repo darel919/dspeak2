@@ -1,5 +1,10 @@
 import type { CloudflarePublication } from "./types/cloudflare-media.ts";
 
+export type PublicationReconciliation = {
+  canonicalSnapshot: CloudflarePublication[];
+  removed: CloudflarePublication[];
+};
+
 function logicalSlot(publication: CloudflarePublication): string | null {
   const peerId = String(publication?.peerId || "");
   const source = String(publication?.source || "");
@@ -82,10 +87,9 @@ export function createCloudflarePublicationRegistry() {
     return true;
   }
 
-  function reconcileExact(snapshot: CloudflarePublication[]): {
-    canonicalSnapshot: CloudflarePublication[];
-    removed: CloudflarePublication[];
-  } {
+  function reconcileExact(
+    snapshot: CloudflarePublication[],
+  ): PublicationReconciliation {
     const serverPublications = new Map<string, CloudflarePublication>();
     for (const pub of snapshot) {
       const trackName = String(pub?.trackName || "");

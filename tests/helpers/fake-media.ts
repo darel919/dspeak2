@@ -8,9 +8,9 @@ export class FakeMediaStreamTrack
   readonly kind: "audio" | "video";
   readonly label: string;
   readonly muted = false;
-  onended: ((this: MediaStreamTrack, event: Event) => unknown) | null = null;
-  onmute: ((this: MediaStreamTrack, event: Event) => unknown) | null = null;
-  onunmute: ((this: MediaStreamTrack, event: Event) => unknown) | null = null;
+  onended: ((this: MediaStreamTrack, event: Event) => void) | null = null;
+  onmute: ((this: MediaStreamTrack, event: Event) => void) | null = null;
+  onunmute: ((this: MediaStreamTrack, event: Event) => void) | null = null;
   private state: MediaStreamTrackState = "live";
 
   constructor(kind: "audio" | "video", id: string) {
@@ -53,7 +53,7 @@ export class FakeMediaStreamTrack
     listener: (
       this: MediaStreamTrack,
       event: MediaStreamTrackEventMap[K],
-    ) => unknown,
+    ) => void,
     options?: boolean | AddEventListenerOptions,
   ): void;
   addEventListener(
@@ -74,7 +74,7 @@ export class FakeMediaStreamTrack
     listener: (
       this: MediaStreamTrack,
       event: MediaStreamTrackEventMap[K],
-    ) => unknown,
+    ) => void,
     options?: boolean | EventListenerOptions,
   ): void;
   removeEventListener(
@@ -99,11 +99,9 @@ export class FakeMediaStreamTrack
 export class FakeMediaStream extends EventTarget implements MediaStream {
   readonly id: string;
   onaddtrack:
-    ((this: MediaStream, event: MediaStreamTrackEvent) => unknown) | null =
-    null;
+    ((this: MediaStream, event: MediaStreamTrackEvent) => void) | null = null;
   onremovetrack:
-    ((this: MediaStream, event: MediaStreamTrackEvent) => unknown) | null =
-    null;
+    ((this: MediaStream, event: MediaStreamTrackEvent) => void) | null = null;
   private readonly tracks: MediaStreamTrack[];
 
   constructor(tracks: MediaStreamTrack[] = [], id = "fake-stream") {
@@ -147,7 +145,7 @@ export class FakeMediaStream extends EventTarget implements MediaStream {
 
   addEventListener<K extends keyof MediaStreamEventMap>(
     type: K,
-    listener: (this: MediaStream, event: MediaStreamEventMap[K]) => unknown,
+    listener: (this: MediaStream, event: MediaStreamEventMap[K]) => void,
     options?: boolean | AddEventListenerOptions,
   ): void;
   addEventListener(
@@ -165,7 +163,7 @@ export class FakeMediaStream extends EventTarget implements MediaStream {
 
   removeEventListener<K extends keyof MediaStreamEventMap>(
     type: K,
-    listener: (this: MediaStream, event: MediaStreamEventMap[K]) => unknown,
+    listener: (this: MediaStream, event: MediaStreamEventMap[K]) => void,
     options?: boolean | EventListenerOptions,
   ): void;
   removeEventListener(

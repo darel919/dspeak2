@@ -39,13 +39,18 @@ import { supabaseAdmin } from "../../../auth/supabase.ts";
 const accountDeletionLocksKey = Symbol.for("dspeak.account-deletion-locks");
 
 function accountDeletionLocks(): Set<string> {
+  /*
+   * SAFETY: This symbol is private to account deletion, and the function
+   * initializes its value as a Set before returning it.
+   */
   const globalState = globalThis as typeof globalThis & {
     [accountDeletionLocksKey]?: Set<string>;
   };
-  if (!globalState[accountDeletionLocksKey]) {
-    globalState[accountDeletionLocksKey] = new Set<string>();
-  }
-  return globalState[accountDeletionLocksKey] as Set<string>;
+  const existing = globalState[accountDeletionLocksKey];
+  if (existing) return existing;
+  const locks = new Set<string>();
+  globalState[accountDeletionLocksKey] = locks;
+  return locks;
 }
 
 async function deleteAccount(

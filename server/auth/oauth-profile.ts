@@ -5,6 +5,10 @@ import { profileRepository } from "../db/repositories/profiles.ts";
 import { putObject, deleteObject } from "../storage/r2.ts";
 import { fetchPublicBytes } from "../infrastructure/network/outbound-request.ts";
 import type { OAuthProfileRecord, SupabaseUser } from "../types/auth.ts";
+import {
+  parseExternalRecord,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 const profileProvisioningTimeoutMs = 15_000;
 
@@ -19,7 +23,7 @@ function providerAvatarUrl(user: SupabaseUser): string {
 
 function supportedAvatarType(contentType: string | null): string {
   if (
-    typeof contentType === "string" &&
+    contentType &&
     new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]).has(
       contentType,
     )
@@ -28,10 +32,10 @@ function supportedAvatarType(contentType: string | null): string {
   return "";
 }
 
-function normalizeOAuthProfileRecord(value: unknown): OAuthProfileRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new TypeError("OAuth profile is not an object");
-  return Object.fromEntries(Object.entries(value));
+function normalizeOAuthProfileRecord(value: ExternalField): OAuthProfileRecord {
+  const record = parseExternalRecord(value);
+  if (record === null) throw new TypeError("OAuth profile is not an object");
+  return record;
 }
 
 async function importProviderAvatar(

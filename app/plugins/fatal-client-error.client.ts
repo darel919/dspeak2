@@ -3,13 +3,15 @@ import {
   isNativeMediaWorkerFatalError,
   nativeMediaWorkerFatalDescriptor,
 } from "~/shared/fatal-client-error.ts";
+import { isExternalRecord } from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 
 type NativeFatalListenerState = {
   handled: boolean;
   owners: number;
   unlisten: (() => void) | null;
   installation: Promise<void> | null;
-  handle: ((payload: unknown) => void) | null;
+  handle: ((payload: ExternalField) => void) | null;
 };
 
 type NativeFatalListenerWindow = Window & {
@@ -17,6 +19,7 @@ type NativeFatalListenerWindow = Window & {
 };
 
 function nativeFatalListenerState() {
+  /* SAFETY: Nuxt client plugins execute with a browser Window, and the custom property is owned by this plugin. */
   const target = window as NativeFatalListenerWindow;
   return (target.__DSPEAK_NATIVE_FATAL_LISTENER__ ??= {
     handled: false,
@@ -59,7 +62,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (!isTauri) {
       try {
         const { isTauri: detectTauri } = await import("@tauri-apps/api/core");
-        isTauri = typeof detectTauri === "function" && detectTauri();
+        isTauri = detectTauri instanceof Function && detectTauri();
       } catch {}
     }
     if (!isTauri || listenerState.owners === 0) return;
@@ -70,7 +73,7 @@ export default defineNuxtPlugin((nuxtApp) => {
         const { listen } = await import("@tauri-apps/api/event");
         const unlisten = await listen(
           "media:error",
-          ({ payload }: { payload: unknown }) => {
+          ({ payload }: { payload: ExternalField }) => {
             listenerState.handle?.(payload);
           },
         );
@@ -123,14 +126,10 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (listenerState.handled) return;
     listenerState.handled = true;
     console.error("[FatalClientError] Native media event:", payload);
-    const details =
-      payload && typeof payload === "object"
-        ? (payload as Record<string, unknown>)
-        : {};
-    const diagnostics =
-      details.diagnostics && typeof details.diagnostics === "object"
-        ? (details.diagnostics as Record<string, unknown>)
-        : {};
+    const details = isExternalRecord(payload) ? payload : {};
+    const diagnostics = isExternalRecord(details.diagnostics)
+      ? details.diagnostics
+      : {};
     if (diagnostics.nativeCrash) {
       console.error(
         "[FatalClientError] Native crash evidence:",
