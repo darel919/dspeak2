@@ -251,6 +251,10 @@ test("desktop releases publish signed updates and fail when the updater contract
   );
   assert.match(
     workflow,
+    /working-directory: \$\{\{ github\.workspace \}\}\/\.\.\/dspeak-media-control[\s\S]*?run: npm ci --ignore-scripts/,
+  );
+  assert.match(
+    workflow,
     /sudo apt-get install --no-install-recommends -y ripgrep/,
   );
   assert.match(

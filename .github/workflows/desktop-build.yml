@@ -61,6 +61,10 @@ jobs:
         with:
           bun-version: "1"
 
+      - name: Install media control dependencies
+        working-directory: ${{ github.workspace }}/../dspeak-media-control
+        run: npm ci --ignore-scripts
+
       - name: Install root dependencies
         run: bun install --frozen-lockfile
 
