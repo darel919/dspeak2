@@ -508,6 +508,7 @@ describe("NativeCloudflareRealtimeSession", () => {
 
     assert.equal(session.producers.get("audio").mid, "0");
     assert.ok(calls.includes("media_p2p_create_offer"));
+    assert.ok(calls.includes("media_p2p_get_track_mid"));
     await session.closeMedia();
   });
 

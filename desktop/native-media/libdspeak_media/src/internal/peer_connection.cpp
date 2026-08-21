@@ -637,6 +637,49 @@ extern "C" int lib_dspeak_media_p2p_create_offer(lib_dspeak_media_p2p_handle_t* 
     }
 }
 
+extern "C" int lib_dspeak_media_p2p_get_track_mid(
+    lib_dspeak_media_p2p_handle_t* h,
+    const char* track_key,
+    char** mid_out)
+{
+    if (!h || !h->signaling_thread || !track_key || !mid_out) return -1;
+    try {
+        h->last_error.clear();
+        const std::string key(track_key);
+        return h->signaling_thread->BlockingCall([h, key, mid_out] {
+            webrtc::scoped_refptr<webrtc::RtpSenderInterface> sender;
+            const auto audio = h->audio_senders.find(key);
+            if (audio != h->audio_senders.end()) sender = audio->second;
+            if (!sender) {
+                const auto video = h->video_senders.find(key);
+                if (video != h->video_senders.end()) sender = video->second;
+            }
+            if (!sender) {
+                h->last_error = "native P2P track sender is unavailable";
+                return -1;
+            }
+            for (const auto& transceiver : h->pc->GetTransceivers()) {
+                if (!transceiver || transceiver->sender() != sender) continue;
+                const auto mid = transceiver->mid();
+                if (!mid || mid->empty()) {
+                    h->last_error = "native P2P track transceiver MID is unavailable";
+                    return -1;
+                }
+                *mid_out = lib_dspeak_media_strdup(mid->c_str());
+                return *mid_out ? 0 : -1;
+            }
+            h->last_error = "native P2P track transceiver is unavailable";
+            return -1;
+        });
+    } catch (const std::exception& error) {
+        h->last_error = error.what();
+        return -1;
+    } catch (...) {
+        h->last_error = "unknown native track MID error";
+        return -1;
+    }
+}
+
 extern "C" int lib_dspeak_media_p2p_create_answer(lib_dspeak_media_p2p_handle_t* h, const char* remote_sdp, char** sdp_out)
 {
     if (!h || !h->pc || !remote_sdp || !sdp_out) return -1;

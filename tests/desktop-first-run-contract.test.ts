@@ -77,6 +77,18 @@ describe("desktop first-run URL and transport boundaries", () => {
     );
   });
 
+  it("scopes native presigned uploads to the configured R2 account", async () => {
+    const generator = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(
+        new URL("../scripts/generate-tauri-capabilities.mjs", import.meta.url),
+        "utf8",
+      ),
+    );
+    assert.match(generator, /CF_R2_ACCOUNT_ID/);
+    assert.match(generator, /r2\.cloudflarestorage\.com/);
+    assert.match(generator, /\$\{r2Origin\}\/\*\*/);
+  });
+
   it("attaches the Supabase bearer to native API requests", () => {
     const init = withDesktopAuthorization(
       "https://dspeak.darelisme.my.id/api/rooms",

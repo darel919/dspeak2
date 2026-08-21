@@ -296,6 +296,11 @@ extern "C" {
         handle: *mut lib_dspeak_media_p2p_handle_t,
         sdp_out: *mut *mut c_char,
     ) -> c_int;
+    pub fn lib_dspeak_media_p2p_get_track_mid(
+        handle: *mut lib_dspeak_media_p2p_handle_t,
+        track_key: *const c_char,
+        mid_out: *mut *mut c_char,
+    ) -> c_int;
     pub fn lib_dspeak_media_p2p_create_answer(
         handle: *mut lib_dspeak_media_p2p_handle_t,
         remote_sdp: *const c_char,

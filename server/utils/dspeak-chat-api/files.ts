@@ -149,6 +149,7 @@ export function createChatFilesHandler(dependencies: ChatRouteDependencies) {
           statusMessage: "Image is already attached to a message",
         });
       await db.delete(chatFiles).where(eq(chatFiles.id, fileId));
+      await deleteObject(record[0].r2Key).catch(() => {});
       return { deleted: true, id: record[0].id };
     }
     return undefined;

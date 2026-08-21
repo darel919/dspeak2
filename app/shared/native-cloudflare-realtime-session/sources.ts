@@ -854,7 +854,30 @@ export const nativeCloudflareSourcesMethods: Partial<NativeCloudflareSessionSurf
           .map((producer) => String(producer.mid || ""))
           .filter(Boolean),
       );
-      const mid = midForTrack(offer, trackId, kind, usedMids);
+      let mid: string | null = null;
+      try {
+        const nativeMid = await this.invoke("media_p2p_get_track_mid", {
+          p2pHandle: this.handle,
+          trackKey,
+        });
+        const nativeMidValue = isExternalString(nativeMid)
+          ? nativeMid
+          : recordValue(nativeMid).mid;
+        if (
+          isExternalString(nativeMidValue) ||
+          isExternalNumber(nativeMidValue)
+        )
+          mid = String(nativeMidValue);
+      } catch (error) {
+        if (
+          !asError(
+            error,
+            "Native Cloudflare track MID lookup failed",
+          ).message.includes("command is unsupported")
+        )
+          throw error;
+      }
+      mid ||= midForTrack(offer, trackId, kind, usedMids);
       if (!mid)
         throw new Error(
           `Native Cloudflare ${source} transceiver MID is missing`,

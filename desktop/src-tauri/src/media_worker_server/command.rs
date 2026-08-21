@@ -68,6 +68,7 @@ pub(super) fn dispatch(
         "media_p2p_create" => p2p::p2p_create(state, payload),
         "media_p2p_destroy" => p2p::p2p_destroy(state, payload),
         "media_p2p_create_offer" => p2p::p2p_create_offer(state, payload),
+        "media_p2p_get_track_mid" => p2p::p2p_get_track_mid(state, payload),
         "media_p2p_create_answer" => p2p::p2p_create_answer(state, payload),
         "media_p2p_set_remote_description" => p2p::p2p_set_remote_description(state, payload),
         "media_p2p_rollback_local_description" => {

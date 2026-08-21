@@ -1,4 +1,7 @@
 import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+import { hasTauriRuntimeMarker } from "./desktop-capture.ts";
+import { nativeHttpFetch } from "./desktop-http.ts";
+import { resolveApiResourceUrl } from "./api-resource-url.ts";
 
 type ImageDimensions = { width?: number; height?: number };
 type UploadRecord = {
@@ -117,17 +120,20 @@ export async function uploadChatFile(
   if (!uploadUrl || !key || !cleanupToken)
     throw new Error("Upload preparation response is incomplete");
 
-  const putResponse = await fetch(uploadUrl, {
-    method: "PUT",
-    credentials: "include",
-    headers: { "Content-Type": file.type },
-    body: file,
-  });
-  if (!putResponse.ok)
-    throw new Error(`R2 upload failed with status ${putResponse.status}`);
-
   let result: UploadRecord;
   try {
+    const putTransport = hasTauriRuntimeMarker()
+      ? nativeHttpFetch
+      : globalThis.fetch;
+    const putResponse = await putTransport(uploadUrl, {
+      method: "PUT",
+      credentials: "omit",
+      headers: { "Content-Type": file.type },
+      body: file,
+    });
+    if (!putResponse.ok)
+      throw new Error(`R2 upload failed with status ${putResponse.status}`);
+
     const commit = await fetch(`${path}/files/commit`, {
       method: "POST",
       credentials: "include",
@@ -171,7 +177,10 @@ export async function uploadChatFile(
 
   return {
     id: result.id,
-    url: `/api/assets/chat-file?id=${encodeURIComponent(result.id)}`,
+    url: resolveApiResourceUrl(
+      `/api/assets/chat-file?id=${encodeURIComponent(result.id)}`,
+      apiPath,
+    ),
     name: result.fileName || file.name,
     size: result.size,
     mime_type: result.mimeType,

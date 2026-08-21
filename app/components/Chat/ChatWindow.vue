@@ -467,8 +467,10 @@ import {
   isExternalRecord,
   isExternalString,
 } from "../../shared/types/boundary.ts";
+import { resolveApiResourceUrl } from "../../shared/api-resource-url.ts";
 
 const showMemberList = ref(true);
+const apiPath = useRuntimeConfig().public.apiPath;
 
 onMounted(() => {
   const saved = localStorage.getItem(STORAGE_KEYS.chatMemberListVisible);
@@ -1118,11 +1120,11 @@ function jumpToMessage(messageOrId) {
   }
 }
 
-function openImageLightbox({ message, attachmentIndex }) {
-  const attachments = message.attachments || [];
-  if (attachments.length > 0) {
-    lightboxImages.value = attachments.map((att) => ({
-      url: att.url || att.preview,
+function openImageLightbox({ message, attachmentIndex, attachments }) {
+  const resolvedAttachments = attachments || message.attachments || [];
+  if (resolvedAttachments.length > 0) {
+    lightboxImages.value = resolvedAttachments.map((att) => ({
+      url: resolveApiResourceUrl(att.url || att.preview, apiPath),
       name: att.name || "Image",
     }));
     lightboxIndex.value = attachmentIndex || 0;

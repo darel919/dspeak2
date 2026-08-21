@@ -45,16 +45,36 @@ describe("native capture capability contract", () => {
   });
 
   it("preserves Windows camera and microphone startup error codes", async () => {
-    const source = await readFile(
-      new URL(
-        "../desktop/native-media/platform/windows/PlatformCaptureWindowsAudio.cpp",
-        import.meta.url,
+    const [source, support, session] = await Promise.all([
+      readFile(
+        new URL(
+          "../desktop/native-media/platform/windows/PlatformCaptureWindowsAudio.cpp",
+          import.meta.url,
+        ),
+        "utf8",
       ),
-      "utf8",
-    );
+      readFile(
+        new URL(
+          "../desktop/native-media/platform/windows/PlatformCaptureWindowsSupport.cpp",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+      readFile(
+        new URL(
+          "../desktop/native-media/platform/windows/PlatformCaptureWindowsSession.cpp",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ]);
     assert.match(source, /startup_result_ = -601/);
     assert.match(source, /startup_result_ = -602/);
     assert.match(source, /startup_result_ = SUCCEEDED\(result\) \? 0 : -611/);
+    assert.match(support, /camera_id_from_value\(const char\* value\)/);
+    assert.match(session, /camera_id_from_value\(device_id\)/);
+    assert.match(source, /set_output_type = \[&\]\(bool constrain_format\)/);
+    assert.match(source, /set_output_type\(false\)/);
   });
 
   it("normalizes every platform backend to an explicit capability record", () => {

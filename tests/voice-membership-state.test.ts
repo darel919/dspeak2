@@ -218,6 +218,21 @@ test("desktop close behavior supports persistent tray and exit modes", async () 
   assert.match(settingsSource, /set_hide_on_close/);
 });
 
+test("tray close keeps the process alive after destroying an idle window", async () => {
+  const [windowSource, desktopSource] = await Promise.all([
+    readFile("desktop/src-tauri/src/desktop/window.rs", "utf8"),
+    readFile("desktop/src-tauri/src/desktop/mod.rs", "utf8"),
+  ]);
+
+  assert.match(
+    windowSource,
+    /HIDE_ON_CLOSE\.load\(Ordering::Relaxed\)[\s\S]*window_clone\.destroy\(\)/,
+  );
+  assert.match(desktopSource, /tauri::RunEvent::ExitRequested/);
+  assert.match(desktopSource, /should_prevent_tray_exit\(/);
+  assert.match(desktopSource, /api\.prevent_exit\(\)/);
+});
+
 test("active calls keep signaling alive until the media state disconnects", async () => {
   const [windowSource, desktopSource] = await Promise.all([
     readFile("desktop/src-tauri/src/desktop/window.rs", "utf8"),

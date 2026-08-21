@@ -114,6 +114,7 @@ std::wstring utf8_to_wide(const char* value);
 std::string wide_to_utf8(const wchar_t* value);
 char* json_string(const json& value);
 std::wstring endpoint_id_from_value(const char* value);
+std::wstring camera_id_from_value(const char* value);
 ComPtr<IMMDeviceEnumerator> create_device_enumerator();
 ComPtr<IMMDevice> get_audio_device(const std::wstring& requested, EDataFlow flow);
 std::string endpoint_friendly_name(IMMDevice* device);

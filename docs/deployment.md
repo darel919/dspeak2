@@ -107,6 +107,8 @@ Back up PostgreSQL before production schema migrations. Apply migrations before 
 
 Create a private bucket and scoped credentials for the server. Clients upload through short-lived URLs prepared by `/api/files/prepare`, then commit metadata through `/api/files/commit`. Configure the bucket CORS policy only for `https://app.example.com` and required methods. Do not expose permanent R2 credentials or public bucket URLs.
 
+The browser upload policy must allow `PUT` and `Content-Type` for the deployed web origin. The Tauri client sends presigned `PUT` requests through its native HTTP transport, so `tauri.localhost` does not need to be added to the bucket CORS policy. Set `CF_R2_ACCOUNT_ID` in the desktop build environment so the generated Tauri capability scopes that native transport to the correct R2 endpoint.
+
 Schedule authenticated cleanup and reconciliation calls with `DSPEAK_CRON_SECRET` so abandoned uploads and unreferenced objects are removed. Database metadata is the authorization source; R2 stores bytes only.
 
 ## Media control, Realtime, and TURN

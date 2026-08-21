@@ -57,6 +57,15 @@ const publicOrigin = originFrom(
 );
 const configuredSupabaseUrl = configuredValue("SUPABASE_URL");
 const supabaseOrigin = originFrom(configuredSupabaseUrl, "SUPABASE_URL");
+const r2AccountId = configuredValue("CF_R2_ACCOUNT_ID").trim();
+if (!r2AccountId)
+  throw new Error(
+    "CF_R2_ACCOUNT_ID is required to scope desktop presigned uploads",
+  );
+const r2Origin = originFrom(
+  `https://${r2AccountId}.r2.cloudflarestorage.com`,
+  "CF_R2_ACCOUNT_ID",
+);
 
 const capability = {
   identifier: "generated-api",
@@ -66,7 +75,7 @@ const capability = {
   permissions: [
     {
       identifier: "http:default",
-      allow: [{ url: `${apiOrigin}/api/**` }],
+      allow: [{ url: `${apiOrigin}/api/**` }, { url: `${r2Origin}/**` }],
     },
     {
       identifier: "opener:allow-open-url",
