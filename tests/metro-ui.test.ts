@@ -124,14 +124,32 @@ test("authenticated page copy consistently calls shared spaces rooms", async () 
   );
 });
 
-test("home workspace uses a content-led Metro room composition", async () => {
+test("home workspace puts personal attention before the room directory", async () => {
   const source = await readFile("app/pages/index.vue", "utf8");
   assert.match(source, /class="home-workspace flex-1 overflow-y-auto"/);
+  assert.match(source, /Welcome, \{\{ homeUserName \}\}\./);
+  assert.match(source, /aria-labelledby="home-notifications-title"/);
   assert.match(source, /aria-labelledby="home-rooms-title"/);
+  assert.match(source, /class="home-feed-section mt-8 lg:mt-10"/);
+  assert.match(source, /useNotificationsStore/);
   assert.match(source, /v-for="room in roomsStore\.rooms"/);
-  assert.match(source, /class="home-room-tile metro-transition/);
+  assert.match(source, /class="home-room-row metro-transition/);
+  assert.match(source, /:to="`\/room\/\$\{room\.id\}`"/);
+  assert.match(source, /@pointerenter="prefetchRoom\(room\.id\)"/);
+  assert.match(source, /@focus="prefetchRoom\(room\.id\)"/);
+  assert.match(source, /@click\.prevent="openRoom\(room\)"/);
+  assert.match(source, /<NuxtLink to="\/room\/create"/);
   assert.match(source, /v-if="roomsStore\.loading/);
   assert.match(source, /v-else-if="roomsStore\.error/);
+  assert.ok(
+    source.indexOf('aria-labelledby="home-notifications-title"') <
+      source.indexOf('aria-labelledby="home-rooms-title"'),
+  );
+  assert.doesNotMatch(source, /home-direct-messages-title/);
+  assert.doesNotMatch(source, /useDirectMessagesStore/);
+  assert.doesNotMatch(source, /home-feed-grid/);
+  assert.doesNotMatch(source, /homeFeatures/);
+  assert.doesNotMatch(source, /dSpeak capabilities/);
   assert.doesNotMatch(source, /Welcome to dSpeak/);
   assert.doesNotMatch(source, /text-center max-w-md/);
 });
@@ -381,7 +399,7 @@ test("notification dropdown renders above navbar call controls", async () => {
     "app/components/NotificationCenter.vue",
     "utf8",
   );
-  assert.doesNotMatch(navbar, /navbar[^\"]*overflow-hidden/);
+  assert.doesNotMatch(navbar, /navbar[^"]*overflow-hidden/);
   assert.match(notifications, /dropdown dropdown-end relative z-30/);
   assert.match(notifications, /dropdown-content metro-pane z-50/);
 });
@@ -466,12 +484,32 @@ test("audio-only system shares expose automatic listening controls", async () =>
   assert.match(source, /setRemoteSystemAudioReceiving/);
 });
 
-test("screen prompts and accepted video use one stable stage frame", async () => {
+test("screen prompts and accepted video share the adaptive stage frame", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
   const feed = await readFile("app/components/VideoFeed.vue", "utf8");
-  assert.match(source, /screen-feed-frame-single/);
-  assert.match(source, /aspect-ratio: 16 \/ 9/);
-  assert.match(source, /width: min\(100cqw, calc\(100cqh \* 16 \/ 9\)\)/);
+  assert.match(
+    source,
+    /v-if="roomTiles\.length"\s+class="screen-feed-area relative min-h-0 flex-1 overflow-hidden p-4 md:p-6"/,
+  );
+  assert.match(
+    source,
+    /ref="videoStage"\s+class="voice-room-grid h-full min-h-0 w-full"/,
+  );
+  assert.match(source, /v-for="tile in displayedRoomTiles"/);
+  assert.match(
+    source,
+    /useAdaptiveVideoGrid\(\s*videoStage,\s*computed\(\(\) => \(viewMode\.value === "overview" \? roomTiles\.value\.length : 0\)\),\s*\)/,
+  );
+  assert.match(
+    source,
+    /'--video-tile-width': `\$\{adaptiveLayout\.tileWidth\}px`/,
+  );
+  assert.match(
+    source,
+    /'--video-tile-height': `\$\{adaptiveLayout\.tileHeight\}px`/,
+  );
+  assert.match(source, /'--video-grid-gap': `\$\{adaptiveLayout\.gap\}px`/);
+  assert.match(source, /\.screen-feed-area\s*\{\s*container-type: size;/);
   assert.match(source, /:compact=/);
   assert.match(source, /:avatar-src="tile\.feed\.avatar"/);
   assert.match(feed, /\(localScreenPreviewPaused \|\| !receiving\)/);
@@ -479,25 +517,79 @@ test("screen prompts and accepted video use one stable stage frame", async () =>
   assert.match(feed, /blur-xl opacity-60/);
 });
 
-test("voice video offers equal overview tiles and viewer-selected focus", async () => {
+test("voice video uses immediate direct-manipulation focus for every tile", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /@click="focusTile\(tile\.key\)"/);
   assert.match(
     source,
-    /tile\.type !== 'participant' && scheduleTileFocus\(tile\.key\)/,
+    /@keydown\.enter\.self\.prevent="focusTile\(tile\.key\)"/,
   );
-  assert.match(source, /@dblclick\.stop="cancelTileFocus"/);
+  assert.match(
+    source,
+    /@keydown\.space\.self\.prevent="focusTile\(tile\.key\)"/,
+  );
+  assert.match(source, /role="button"/);
+  assert.match(source, /tabindex="0"/);
+  assert.match(source, /getTileAriaLabel/);
+  assert.match(source, /Back to grid/);
+  assert.match(source, /@click="showOverview"/);
+  assert.match(source, /event\.key === "Escape"/);
+  assert.match(source, /!document\.fullscreenElement/);
+  assert.doesNotMatch(
+    source,
+    /scheduleTileFocus|cancelTileFocus|setTimeout\(\(\) => \{/,
+  );
+  assert.doesNotMatch(source, /@dblclick\.stop/);
   assert.match(source, /voice-room-grid-focused/);
   assert.match(source, /voice-room-tile-focused/);
-  assert.match(source, /justify-content: center/);
-  assert.match(source, /grid-template-rows: minmax\(0, 1fr\) 8rem/);
-  assert.match(source, /grid-column: 1 \/ -1/);
+  assert.match(source, /voice-support-index/);
+  assert.match(source, /voice-support-count/);
+  assert.match(source, /overflow-x: auto/);
+  assert.match(source, /--voice-filmstrip-height: clamp/);
+  assert.match(source, /voice-room-grid-focused-no-support/);
+  assert.match(source, /isFocusedSupportTile/);
   assert.match(source, /representedUsers/);
-  assert.match(source, /focusedTileKey\.value === key/);
-  assert.match(source, /viewMode\.value = "overview"/);
   assert.match(source, /participant-audio-tile-compact/);
-  assert.match(source, /setTimeout\(\(\) => \{/);
-  assert.match(source, /}, 240\)/);
-  assert.doesNotMatch(source, /aria-label="Voice channel view"/);
+  assert.match(source, /useVideoRoomLayout/);
+});
+
+test("voice video keeps media sources stable without automatic spotlighting", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.doesNotMatch(source, /getSmartVideoStageLayout|smartVideoStageLayout/);
+  assert.doesNotMatch(source, /voice-room-grid-smart|voice-room-tile-smart/);
+  assert.doesNotMatch(source, /focusedTileKey\.value = `broadcast-/);
+  assert.match(source, /watch\(roomTiles, \(tiles\) =>/);
+  assert.match(source, /reconcileTiles\(tiles\.map\(\(tile\) => tile\.key\)\)/);
+  assert.match(source, /v-for="tile in displayedRoomTiles"/);
+  assert.match(source, /:key="tile\.key"/);
+  assert.match(source, /:popped-out=/);
+  assert.match(source, /:receiver-incarnation-id=/);
+  assert.match(source, /@pop-out=/);
+  assert.match(source, /@first-frame=/);
+});
+
+test("voice video removes the competing Stage and Tiles state machine", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.doesNotMatch(
+    source,
+    /\bvideoLayoutMode\b|aria-label="Video layout"|>Stage<|>Tiles<\/>|voice-layout-toggle/,
+  );
+  assert.doesNotMatch(source, /voice-room-grid-stage|voice-room-grid-tiles/);
+  assert.match(source, /'voice-room-grid-overview'/);
+  assert.match(source, /'voice-room-grid-focused'/);
+  assert.match(source, /const isSoloAudioOverview = computed/);
+  assert.match(source, /voice-room-grid-solo-audio/);
+  assert.match(source, /position: relative/);
+  assert.match(source, /voice-command-bar absolute inset-x-0 bottom-0/);
+  assert.match(source, /--voice-control-safe-area: 5rem/);
+});
+
+test("voice stage keeps a connected local participant beside local media", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  assert.match(source, /mergeLocalVoiceParticipant/);
+  assert.match(source, /shouldRenderVoiceParticipant/);
+  assert.match(source, /voiceStore\.connected/);
+  assert.match(source, /voiceStore\.currentChannelId === props\.channel\.id/);
 });
 
 test("participant volume controls render outside the scrolling participant strip", async () => {
@@ -517,13 +609,26 @@ test("participant volume controls render outside the scrolling participant strip
   assert.doesNotMatch(source, /absolute top-2 right-2 bg-base-200/);
 });
 
-test("odd overview tiles center the final participant in the grid", async () => {
+test("overview tiles center incomplete rows through the adaptive layout", async () => {
   const source = await readFile("app/components/VoiceChannel.vue", "utf8");
-  assert.match(source, /@container \(min-width: 36\.75rem\)/);
-  assert.match(source, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
-  assert.match(source, /\.voice-room-tile:last-child:nth-child\(odd\)/);
-  assert.match(source, /grid-column: 1 \/ -1/);
-  assert.match(source, /width: calc\(50% - 0\.375rem\)/);
+  const overviewGrid = source.match(
+    /\.voice-room-grid-overview\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+  const overviewTile = source.match(
+    /\.voice-room-grid-overview \.voice-room-tile\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+
+  assert.ok(overviewGrid);
+  assert.match(overviewGrid, /display: flex/);
+  assert.match(overviewGrid, /flex-wrap: wrap/);
+  assert.match(overviewGrid, /align-content: center/);
+  assert.match(overviewGrid, /justify-content: center/);
+  assert.match(overviewGrid, /gap: var\(--video-grid-gap\)/);
+  assert.ok(overviewTile);
+  assert.match(overviewTile, /flex: 0 0 auto/);
+  assert.match(overviewTile, /width: var\(--video-tile-width\)/);
+  assert.match(overviewTile, /height: var\(--video-tile-height\)/);
+  assert.doesNotMatch(source, /\.voice-room-tile:last-child:nth-child\(odd\)/);
 });
 
 test("voice channel indicators show participant avatars and media status", async () => {
@@ -565,13 +670,31 @@ test("room rail tooltips preview connected voice participants", async () => {
   assert.match(channels, /existing\?\.connecting/);
   assert.match(
     channels,
-    /applyVoicePresence\(\s*message\.data as VoicePresenceSnapshot,\s*normalizedRoomId,\s*\)/,
+    /const snapshot = parseVoicePresenceSnapshot\(message\.data\)[\s\S]*?applyVoicePresence\(snapshot, normalizedRoomId\)/,
   );
   assert.match(
     channels,
     /openRealtimeChannel(?:<[\s\S]*?>)?\(`room:\$\{normalizedRoomId\}`/,
   );
-  assert.match(channels, /function syncVoicePresenceRooms\(roomIds: unknown\)/);
+  assert.match(
+    channels,
+    /function syncVoicePresenceRooms\(roomIds: ExternalField\)/,
+  );
+});
+
+test("direct messages use the room rail tile treatment", async () => {
+  const rail = await readFile("app/components/MetroRoomRail.vue", "utf8");
+  const messagesLink = rail.match(
+    /<NuxtLink\s+to="\/messages"[\s\S]*?<\/NuxtLink>/,
+  )?.[0];
+
+  assert.ok(messagesLink);
+  assert.match(
+    messagesLink,
+    /class="metro-transition relative mx-2 grid aspect-square place-items-center overflow-hidden bg-base-200 text-sm font-semibold hover:bg-base-300"/,
+  );
+  assert.doesNotMatch(messagesLink, /metro-icon-btn/);
+  assert.match(messagesLink, /directMessagesStore\.unreadCount/);
 });
 
 test("voice channel participant rows own a channel-specific context menu", async () => {
@@ -609,7 +732,7 @@ test("channel deletion reports server failures instead of failing silently", asy
     source,
     /channelMenuElement\.value\?\.contains\(event\.target\)/,
   );
-  assert.match(source, /toastSuccess\(`Deleted #\$\{channel\.name\}\.\`\);/);
+  assert.match(source, /toastSuccess\(`Deleted #\$\{channel\.name\}\.`\);/);
   assert.match(source, /toastError\(message\);/);
   assert.doesNotMatch(
     source,
@@ -706,7 +829,7 @@ test("room accent changes persist and propagate immediately", async () => {
   assert.match(rooms, /applyRealtimeRoomUpdate/);
   assert.match(presence, /message\?\.type === "room_updated"/);
   assert.match(api, /type: "room_updated"/);
-  assert.match(api, /data\.attenuation = normalizeAttenuation/);
+  assert.match(api, /update\.attenuation = normalizeAttenuation/);
   assert.match(api, /A room member must have at least one role/);
   assert.match(api, /Assigned roles must belong to this room/);
 });
@@ -780,6 +903,17 @@ test("room rail join action opens the join dialog", async () => {
     dialog,
     /router\.push\(`\/join\/\$\{encodeURIComponent\(inviteToken\)\}`\)/,
   );
+});
+
+test("join room dialog keeps its panel and backdrop geometry isolated", async () => {
+  const dialog = await readFile("app/components/JoinRoomDialog.vue", "utf8");
+  assert.match(
+    dialog,
+    /class="metro-flyout[^\"]*\bw-full\b[^\"]*\bmax-w-lg\b[^\"]*\bp-5\b/,
+  );
+  assert.match(dialog, /class="mt-6 flex justify-end gap-3"/);
+  assert.match(dialog, /class="fixed inset-0 z-0 border-0 bg-black\/50 p-0"/);
+  assert.doesNotMatch(dialog, /class="modal-backdrop"/);
 });
 
 test("room switching prepares the destination before one direct navigation", async () => {

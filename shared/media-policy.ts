@@ -1,3 +1,17 @@
+import {
+  parseExternalBoolean,
+  parseExternalRecord,
+  type ExternalField,
+} from "./types/external.ts";
+import type { MediaPolicyInput, PolicyLimits } from "./types/media.ts";
+
+const MEDIA_POLICY_KEYS = [
+  "microphoneKbps",
+  "cameraKbps",
+  "screenKbps",
+  "sharedAudioKbps",
+] as const;
+
 export const MEDIA_POLICY_LIMITS = Object.freeze({
   microphoneKbps: Object.freeze({ min: 32, max: 256, default: 48 }),
   cameraKbps: Object.freeze({ min: 250, max: 2000, default: 1500 }),
@@ -23,12 +37,12 @@ export const VIDEO_POLICY_QUALITY_STEPS = Object.freeze({
   ]),
 });
 
-export function normalizeMediaPolicy(value: MediaPolicyInput = {}) {
-  value = value && typeof value === "object" ? value : {};
-  const requestedMicrophone = value.microphoneKbps;
+export function normalizeMediaPolicy(value: ExternalField = {}) {
+  const record = parseExternalRecord(value) ?? {};
+  const requestedMicrophone = record.microphoneKbps;
   const hdAudio =
-    value.hdAudio === true ||
-    (value.hdAudio == null &&
+    parseExternalBoolean(record.hdAudio) === true ||
+    (record.hdAudio == null &&
       Number(requestedMicrophone) > STANDARD_MICROPHONE_MAX_KBPS);
   return {
     hdAudio,
@@ -46,56 +60,54 @@ export function normalizeMediaPolicy(value: MediaPolicyInput = {}) {
           },
     ),
     cameraKbps: readPolicyNumber(
-      value.cameraKbps,
+      record.cameraKbps,
       MEDIA_POLICY_LIMITS.cameraKbps,
     ),
     screenKbps: readPolicyNumber(
-      value.screenKbps,
+      record.screenKbps,
       MEDIA_POLICY_LIMITS.screenKbps,
     ),
     sharedAudioKbps: readPolicyNumber(
-      value.sharedAudioKbps,
+      record.sharedAudioKbps,
       MEDIA_POLICY_LIMITS.sharedAudioKbps,
     ),
-    connectionMode: normalizeConnectionMode(value.connectionMode),
-    revision: Math.max(1, Math.floor(Number(value.revision) || 1)),
-    updatedAt: value.updatedAt || null,
+    connectionMode: normalizeConnectionMode(record.connectionMode),
+    revision: Math.max(1, Math.floor(Number(record.revision) || 1)),
+    updatedAt: record.updatedAt || null,
   };
 }
 
 export function validateMediaPolicy(value: MediaPolicyInput = {}) {
-  value = value && typeof value === "object" ? value : {};
+  const record = parseExternalRecord(value) ?? {};
   const errors: string[] = [];
-  if (typeof value.hdAudio !== "boolean")
+  if (parseExternalBoolean(record.hdAudio) === null)
     errors.push("hdAudio must be a boolean");
-  for (const [key, limits] of Object.entries(MEDIA_POLICY_LIMITS) as [
-    keyof typeof MEDIA_POLICY_LIMITS,
-    PolicyLimits,
-  ][]) {
-    const number = Number(value[key]);
+  for (const key of MEDIA_POLICY_KEYS) {
+    const limits: PolicyLimits = MEDIA_POLICY_LIMITS[key];
+    const number = Number(record[key]);
     if (!Number.isFinite(number) || number < limits.min || number > limits.max)
       errors.push(
         `${key} must be between ${limits.min} and ${limits.max} kbps`,
       );
   }
-  const microphone = Number(value.microphoneKbps);
+  const microphone = Number(record.microphoneKbps);
   if (
     Number.isFinite(microphone) &&
-    value.hdAudio === false &&
+    record.hdAudio === false &&
     microphone > STANDARD_MICROPHONE_MAX_KBPS
   )
     errors.push("microphoneKbps must be at most 96 kbps without HD audio");
   if (
     Number.isFinite(microphone) &&
-    value.hdAudio === true &&
+    record.hdAudio === true &&
     microphone < HD_MICROPHONE_MIN_KBPS
   )
     errors.push("microphoneKbps must be at least 64 kbps with HD audio");
   if (errors.length) return { valid: false, errors };
-  return { valid: true, value: normalizeMediaPolicy(value) };
+  return { valid: true, value: normalizeMediaPolicy(record) };
 }
 
-export function readPolicyNumber(value: unknown, limits: PolicyLimits) {
+export function readPolicyNumber(value: ExternalField, limits: PolicyLimits) {
   const number = Number(value);
   return Number.isFinite(number) && number >= limits.min && number <= limits.max
     ? Math.round(number)
@@ -109,13 +121,12 @@ export const ConnectionMode = Object.freeze({
 
 export const DEFAULT_CONNECTION_MODE = ConnectionMode.AUTO;
 
-export function normalizeConnectionMode(value: unknown) {
+export function normalizeConnectionMode(value: ExternalField) {
   if (value === ConnectionMode.AUTO || value === ConnectionMode.DIRECT)
     return value;
   return DEFAULT_CONNECTION_MODE;
 }
 
-export function validateConnectionMode(value: unknown) {
+export function validateConnectionMode(value: ExternalField) {
   return value === ConnectionMode.AUTO || value === ConnectionMode.DIRECT;
 }
-import type { MediaPolicyInput, PolicyLimits } from "./types/media.ts";

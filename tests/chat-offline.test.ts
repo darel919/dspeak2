@@ -48,7 +48,10 @@ test("offline messages remain writable and queue for reconnection", () => {
 });
 
 test("orphaned pending messages are removed locally after server deletion", () => {
-  assert.match(chatStore, /response\.status === 404 && isPending/);
+  assert.match(
+    chatStore,
+    /response\.status === 404 && targetMessage\?\.status === "pending"/,
+  );
   assert.match(
     chatStore,
     /await context\.dependencies\.dequeueMessage\(pendingClientId\)/,
@@ -100,7 +103,7 @@ test("permanent HTTP rejections are not queued for repeated delivery", () => {
   assert.match(chatStore, /deliveryError\.retryable === false/);
   assert.match(
     chatStore,
-    /context\.removeMessage\(pendingMessage!\.id, clientMessageId\)/,
+    /context\.removeMessage\(pendingMessageId, clientMessageId\)/,
   );
   assert.match(chatStore, /throw fetchError/);
   assert.doesNotMatch(chatStore, /response\.status === 429/);

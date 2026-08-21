@@ -1,32 +1,97 @@
 import { getAudioCodecPolicy } from "#shared/audio-codec-policy.ts";
 import { buildVideoProduceOptions } from "../video-settings.ts";
 import { applyRtpSenderSettings } from "../rtp-sender-settings.ts";
+import { mediaDebug } from "../media-debug.ts";
 import type {
+  CloudflareConsumerEntry,
   CloudflarePublication,
+  CloudflareRemoteTrackBinding,
   CloudflareSessionLike,
   CloudflareSourceEntry,
   CloudflareSourceInput,
+  CloudflareSourceRequest,
+  CloudflareSubscriptionBatchOptions,
+  CloudflareSubscriptionGuardPhase,
 } from "../types/cloudflare-media.ts";
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
+
+interface CloudflarePublicationData extends CloudflarePublication {
+  target?: Record<string, unknown>;
+  targetAdjusted?: boolean;
+}
 
 import {
   MAX_TRACKS_PER_REQUEST,
   getLocalSessionDescription,
 } from "./helpers.ts";
+
+export function bindingStillOwnedForCompensation(
+  session: CloudflareSessionLike,
+  binding: CloudflareRemoteTrackBinding,
+  {
+    peerConnection,
+    sessionGeneration,
+    sessionId,
+    expectedConsumer,
+  }: {
+    peerConnection: RTCPeerConnection;
+    sessionGeneration: number;
+    sessionId: string;
+    expectedConsumer?: CloudflareConsumerEntry;
+  },
+): boolean {
+  if (
+    session.peerConnection !== peerConnection ||
+    session.sessionGeneration !== sessionGeneration ||
+    session.sessionId !== sessionId
+  )
+    return false;
+  const mappedPublication = session.remoteByMid.get(binding.mid);
+  if (mappedPublication && mappedPublication !== binding.publication)
+    return false;
+  const current = session.consumers.get(binding.trackName);
+  if (!current) return true;
+  if (current.mid != null && String(current.mid) !== binding.mid) return true;
+  if (
+    binding.consumer &&
+    current === binding.consumer &&
+    String(binding.consumer.mid || "") === binding.mid
+  )
+    return true;
+  if (
+    expectedConsumer &&
+    current === expectedConsumer &&
+    String(expectedConsumer.mid || "") === binding.mid
+  )
+    return true;
+  return false;
+}
+
 export class CloudflareSourcesMethods {
-  async addSource(this: CloudflareSessionLike, entry: CloudflareSourceInput) {
+  async addSource(this: CloudflareSessionLike, entry: CloudflareSourceRequest) {
     if (!entry?.source)
       throw new Error("A media source identifier is required");
     const source = String(entry.source);
+    const sourceInput: CloudflareSourceInput = {
+      ...entry,
+      generation: entry.generation ?? 1,
+    };
     return this.enqueueSourceOperation(source, async () => {
       await this.initialize();
-      return this.enqueueNegotiation(() => this.addSourceInternal(entry));
+      return this.enqueueNegotiation(() => this.addSourceInternal(sourceInput));
     });
   }
 
   enqueueSourceOperation(
     this: CloudflareSessionLike,
     source: string,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
@@ -51,26 +116,62 @@ export class CloudflareSourcesMethods {
     const current = this.producers.get(entry.source);
     if (current) {
       const previousTrack = current.track;
+      const previousGeneration = current.generation;
       try {
         await current.sender.replaceTrack(entry.track);
         this.assertCurrentSession(peerConnection, generation);
-        current.track = entry.track;
-        current.ownerSource = entry.ownerSource || null;
         await this.configureVideoSender(current.sender, entry);
         await this.setSourceTransmission(
           entry.source,
           this.sourceTransmission.get(entry.source) ?? true,
         );
+        current.track = entry.track;
+        current.ownerSource = entry.ownerSource || null;
+        current.generation = entry.generation;
+        if (this.send) {
+          const publicationData: CloudflarePublicationData = {
+            trackName: current.trackName,
+            source: entry.source,
+            kind: "video",
+            ownerSource: entry.ownerSource || null,
+            logicalStreamId: current.logicalStreamId || null,
+            generation: entry.generation,
+            connectionEpoch: this.getControlConnectionEpoch?.() || 0,
+            variantId: current.variantId || null,
+            codec: current.codec || null,
+            codecAcceleration: current.codecAcceleration || null,
+            codecImplementation: current.codecImplementation || null,
+            width: current.width ?? 0,
+            height: current.height ?? 0,
+            fps: current.fps ?? 0,
+            bitrate: current.bitrate ?? 0,
+            receivers: current.receivers || [],
+            emergency: current.emergency === true,
+            score: current.score ?? 0,
+          };
+          if (isExternalRecord(current.target))
+            publicationData.target = current.target;
+          if (current.targetAdjusted === true)
+            publicationData.targetAdjusted = true;
+          this.send({
+            type: "cloudflare-publication",
+            data: publicationData,
+          });
+        }
       } catch (error) {
         try {
           await current.sender.replaceTrack(previousTrack);
         } catch {}
         current.track = previousTrack;
+        current.generation = previousGeneration;
         throw error;
       }
       return;
     }
     let sender: RTCRtpSender | null = null;
+    let tracksNewSucceeded = false;
+    let createdTrackName: string | null = null;
+    let createdMid: string | null = null;
     try {
       const stream = entry.stream || new MediaStream([entry.track]);
       sender = peerConnection.addTrack(entry.track, stream);
@@ -87,12 +188,18 @@ export class CloudflareSourcesMethods {
         const encodings = Array.isArray(parameters.encodings)
           ? parameters.encodings
           : [];
-        if (!encodings[0] || typeof encodings[0] !== "object")
-          encodings[0] = {};
+        if (!encodings[0]) encodings[0] = {};
         parameters.encodings = encodings;
         encodings[0].maxBitrate = entry.audioBitrate || policy.maxBitrateBps;
-        encodings[0].priority = policy.priority as RTCPriorityType;
-        encodings[0].networkPriority = policy.priority as RTCPriorityType;
+        const priority: RTCPriorityType =
+          policy.priority === "very-low" ||
+          policy.priority === "low" ||
+          policy.priority === "medium" ||
+          policy.priority === "high"
+            ? policy.priority
+            : "high";
+        encodings[0].priority = priority;
+        encodings[0].networkPriority = priority;
         try {
           await sender.setParameters(parameters);
         } catch {}
@@ -117,6 +224,9 @@ export class CloudflareSourcesMethods {
         tracks: [{ location: "local", mid, trackName }],
       });
       this.assertCurrentSession(peerConnection, generation);
+      tracksNewSucceeded = true;
+      createdTrackName = trackName;
+      createdMid = mid;
       if (result.sessionDescription)
         await peerConnection.setRemoteDescription(result.sessionDescription);
       this.assertCurrentSession(peerConnection, generation);
@@ -128,6 +238,7 @@ export class CloudflareSourcesMethods {
         trackName,
         mid,
         ownerSource: entry.ownerSource || null,
+        generation: entry.generation,
       });
       await this.setSourceTransmission(
         entry.source,
@@ -140,8 +251,8 @@ export class CloudflareSourcesMethods {
             trackName,
             source: entry.source,
             ownerSource: entry.ownerSource || null,
-            generation: this.sessionGeneration,
-            connectionEpoch: this.connectionEpoch,
+            generation: entry.generation,
+            connectionEpoch: this.getControlConnectionEpoch(),
           },
         })
       )
@@ -151,19 +262,419 @@ export class CloudflareSourcesMethods {
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
       ) {
-        // Only close media if the entire session is actually invalid
-        // For individual source failures, we should only mark that source as failed
-        // rather than destroying all media
-        if (
-          error instanceof Error &&
-          error.message.includes("MEDIA_SESSION_CLOSED")
-        ) {
-          this.closeMedia();
+        if (tracksNewSucceeded && createdTrackName && createdMid) {
+          let compensationError: Error | string | null = null;
+          try {
+            const sessionDescription =
+              await getLocalSessionDescription(peerConnection);
+            const closeResult = await this.request("tracks-close", {
+              tracks: [{ mid: createdMid }],
+              sessionDescription,
+              force: false,
+            });
+            if (closeResult.sessionDescription)
+              await peerConnection.setRemoteDescription(
+                closeResult.sessionDescription,
+              );
+          } catch (error) {
+            compensationError = error instanceof Error ? error : String(error);
+            mediaDebug("cloudflare.tracks-close-compensation-failed", {
+              source: entry.source,
+              trackName: createdTrackName,
+              mid: createdMid,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          if (compensationError && error instanceof Error)
+            Object.assign(error, { compensationError });
         }
-        // Otherwise, just mark the source as failed and let the recovery layer handle it
+        if (sender) {
+          try {
+            const transceiver = peerConnection
+              .getTransceivers()
+              .find((t) => t.sender === sender);
+            if (transceiver && transceiver.direction !== "recvonly") {
+              transceiver.direction = "inactive";
+            }
+            peerConnection.removeTrack(sender);
+          } catch {}
+        }
+        const createdProducer = this.producers.get(entry.source);
+        if (
+          createdProducer &&
+          createdTrackName &&
+          createdProducer.trackName === createdTrackName
+        ) {
+          this.producers.delete(entry.source);
+          this.sourceTransmission.delete(entry.source);
+        }
+        if (peerConnection.signalingState !== "stable") {
+          try {
+            await peerConnection.setLocalDescription({ type: "rollback" });
+          } catch {}
+        }
+        this.sourceOperations.delete(entry.source);
+      }
+      if (
+        error instanceof Error &&
+        error.message.includes("MEDIA_SESSION_CLOSED")
+      ) {
+        this.closeMedia();
       }
       throw error;
     }
+  }
+
+  reannounceLocalPublications(
+    this: CloudflareSessionLike,
+    { connectionEpoch }: { connectionEpoch: number },
+  ) {
+    this.controlConnectionEpoch = connectionEpoch;
+
+    for (const [source, producer] of this.producers) {
+      const trackName = producer.trackName;
+      if (!trackName) continue;
+      const ownerSource = producer.ownerSource || null;
+      const generation = producer.generation || 0;
+      const sent = this.send({
+        type: "cloudflare-publication",
+        data: {
+          trackName,
+          source,
+          ownerSource,
+          generation,
+          connectionEpoch: this.controlConnectionEpoch,
+          sessionId: this.sessionId,
+          variantId: producer.variantId,
+          codec: producer.codec,
+        },
+      });
+      if (!sent) {
+        mediaDebug("cloudflare.reannounce-send-failed", { source, trackName });
+      }
+    }
+    return Promise.resolve(true);
+  }
+
+  async closePulledRemoteTracksSafely(
+    this: CloudflareSessionLike,
+    bindings: CloudflareRemoteTrackBinding[],
+    peerConnection: RTCPeerConnection,
+    generation: number,
+    expectedConsumer?: CloudflareConsumerEntry,
+  ) {
+    const uniqueBindings = [
+      ...new Map(bindings.map((binding) => [binding.mid, binding])).values(),
+    ];
+    const sessionId = this.sessionId;
+    if (!sessionId) return false;
+    const isCurrentSession = () =>
+      this.peerConnection === peerConnection &&
+      this.sessionGeneration === generation &&
+      this.sessionId === sessionId;
+    const isOwned = (binding: CloudflareRemoteTrackBinding) =>
+      bindingStillOwnedForCompensation(this, binding, {
+        peerConnection,
+        sessionGeneration: generation,
+        sessionId,
+        expectedConsumer,
+      });
+    const blockedMids = new Set(
+      uniqueBindings
+        .filter((binding) => this.remoteCompensationOwners.has(binding.mid))
+        .map((binding) => binding.mid),
+    );
+    const candidateBindings = uniqueBindings.filter(
+      (binding) => !blockedMids.has(binding.mid),
+    );
+    const currentBindings = () => candidateBindings.filter(isOwned);
+    const sameBindings = (
+      left: CloudflareRemoteTrackBinding[],
+      right: CloudflareRemoteTrackBinding[],
+    ) =>
+      left.length === right.length &&
+      left.every((binding) =>
+        right.some((candidate) => candidate.mid === binding.mid),
+      );
+    const transceivers = new Map<
+      string,
+      {
+        transceiver: RTCRtpTransceiver;
+        previousDirection: RTCRtpTransceiverDirection | null;
+      }
+    >();
+    const compensationTokens = new Map<string, symbol>();
+    const restoreUnowned = () => {
+      const ownedMids = new Set(
+        currentBindings().map((binding) => binding.mid),
+      );
+      for (const binding of candidateBindings) {
+        if (ownedMids.has(binding.mid)) continue;
+        const token = compensationTokens.get(binding.mid);
+        const owner = this.remoteCompensationOwners.get(binding.mid);
+        const state = transceivers.get(binding.mid);
+        if (
+          !token ||
+          owner?.token !== token ||
+          !state ||
+          !state.previousDirection ||
+          state.transceiver.direction !== "inactive"
+        )
+          continue;
+        state.transceiver.direction = state.previousDirection;
+        this.remoteCompensationOwners.delete(binding.mid);
+      }
+    };
+    const setInactive = (owned: CloudflareRemoteTrackBinding[]) => {
+      for (const binding of owned) {
+        const state = transceivers.get(binding.mid);
+        if (state && state.transceiver.direction !== "inactive")
+          state.transceiver.direction = "inactive";
+      }
+    };
+    const initialBindings = currentBindings();
+    if (!initialBindings.length || !isCurrentSession()) return false;
+    for (const binding of initialBindings) {
+      const transceiver = peerConnection
+        .getTransceivers?.()
+        ?.find((candidate) => String(candidate.mid) === binding.mid);
+      if (transceiver) {
+        const token = Symbol(binding.mid);
+        compensationTokens.set(binding.mid, token);
+        transceivers.set(binding.mid, {
+          transceiver,
+          previousDirection: transceiver.direction,
+        });
+        this.remoteCompensationOwners.set(binding.mid, {
+          token,
+          transceiver,
+          previousDirection: transceiver.direction,
+        });
+      }
+    }
+    try {
+      let bindingsToClose: CloudflareRemoteTrackBinding[] | null = null;
+      let sessionDescription: { type: string; sdp: string } | null = null;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        if (!isCurrentSession()) return false;
+        const owned = currentBindings();
+        if (!owned.length) return false;
+        restoreUnowned();
+        setInactive(owned);
+        const offer = await peerConnection.createOffer();
+        if (!isCurrentSession()) return false;
+        const afterOffer = currentBindings();
+        restoreUnowned();
+        if (!sameBindings(owned, afterOffer)) continue;
+        await peerConnection.setLocalDescription(offer);
+        if (!isCurrentSession()) return false;
+        const afterLocalDescription = currentBindings();
+        restoreUnowned();
+        if (!sameBindings(owned, afterLocalDescription)) continue;
+        const localDescription =
+          await getLocalSessionDescription(peerConnection);
+        if (!isCurrentSession()) return false;
+        const afterGathering = currentBindings();
+        restoreUnowned();
+        if (!sameBindings(owned, afterGathering)) continue;
+        bindingsToClose = afterGathering;
+        sessionDescription = localDescription;
+        break;
+      }
+      if (!bindingsToClose || !sessionDescription) return false;
+      const finalBindings = currentBindings();
+      if (!sameBindings(bindingsToClose, finalBindings)) return false;
+      const result = await this.request("tracks-close", {
+        tracks: finalBindings.map((binding) => ({ mid: binding.mid })),
+        sessionDescription,
+        force: false,
+      });
+      if (!isCurrentSession()) return false;
+      if (!finalBindings.every(isOwned)) return false;
+      if (result.sessionDescription?.type === "offer") {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        const answer = await peerConnection.createAnswer();
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        await peerConnection.setLocalDescription(answer);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        const renegotiationDescription =
+          await getLocalSessionDescription(peerConnection);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+        await this.request("renegotiate", {
+          sessionDescription: renegotiationDescription,
+        });
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+      } else if (result.sessionDescription) {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (!isCurrentSession()) return false;
+        if (!finalBindings.every(isOwned)) return false;
+      }
+      restoreUnowned();
+      const cleanupBindings = finalBindings.filter(isOwned);
+      for (const binding of cleanupBindings) {
+        const mappedPublication = this.remoteByMid.get(binding.mid);
+        if (!mappedPublication || mappedPublication === binding.publication) {
+          this.remoteByMid.delete(binding.mid);
+          this.pendingRemoteTracks.delete(binding.mid);
+        }
+        const current = this.consumers.get(binding.trackName);
+        const ownedConsumer =
+          current &&
+          current.mid != null &&
+          String(current.mid) === binding.mid &&
+          ((binding.consumer && current === binding.consumer) ||
+            (expectedConsumer && current === expectedConsumer))
+            ? current
+            : null;
+        if (ownedConsumer) {
+          try {
+            ownedConsumer.track?.stop?.();
+          } catch {}
+          this.consumers.delete(binding.trackName);
+          this.onRemoteTrackEnded?.(ownedConsumer);
+        }
+        const hasOtherBinding = [...this.remoteByMid.values()].some(
+          (publication) => publication.trackName === binding.trackName,
+        );
+        if (!hasOtherBinding && !this.consumers.has(binding.trackName)) {
+          this.subscribedTrackNames.delete(binding.trackName);
+          this.rtpSamples.delete(binding.trackName);
+        }
+      }
+      return true;
+    } catch (error) {
+      mediaDebug("cloudflare.remote-track-compensation-failed", {
+        mids: uniqueBindings.map((binding) => binding.mid),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    } finally {
+      for (const [mid, token] of compensationTokens) {
+        if (this.remoteCompensationOwners.get(mid)?.token === token)
+          this.remoteCompensationOwners.delete(mid);
+      }
+    }
+  }
+
+  async recoverRemotePublication(
+    this: CloudflareSessionLike,
+    trackName: string,
+    expectedReceiverIncarnation?: string,
+    generation = this.sessionGeneration,
+  ) {
+    const publication = this.publications.get(trackName);
+    const current = this.consumers.get(trackName);
+    const peerConnection = this.peerConnection;
+    const mid =
+      current?.mid ||
+      [...this.remoteByMid.entries()].find(
+        ([, candidate]) => candidate.trackName === trackName,
+      )?.[0];
+    if (
+      !publication ||
+      !current ||
+      !peerConnection ||
+      !mid ||
+      generation !== this.sessionGeneration ||
+      (expectedReceiverIncarnation &&
+        current.receiverIncarnationId !== expectedReceiverIncarnation)
+    )
+      return false;
+    let recoveredMid: string | undefined;
+    let recoveredConsumer: CloudflareConsumerEntry | undefined;
+    const isRecoveryStale = (phase: CloudflareSubscriptionGuardPhase) => {
+      const active = this.consumers.get(trackName);
+      if (
+        this.peerConnection !== peerConnection ||
+        this.sessionGeneration !== generation ||
+        !this.sessionId ||
+        this.publications.get(trackName) !== publication
+      )
+        return true;
+      if (phase === "before-bind")
+        return (
+          (active !== undefined && active !== current) ||
+          (active?.receiverIncarnationId !== undefined &&
+            expectedReceiverIncarnation !== undefined &&
+            active.receiverIncarnationId !== expectedReceiverIncarnation)
+        );
+      if (recoveredConsumer === undefined && active !== undefined) {
+        if (!recoveredMid || active.mid !== recoveredMid) return true;
+        recoveredConsumer = active;
+        return false;
+      }
+      return (
+        recoveredConsumer !== undefined &&
+        (active !== recoveredConsumer || active.mid !== recoveredMid)
+      );
+    };
+    return this.enqueueNegotiation(async () => {
+      if (isRecoveryStale("before-bind")) return false;
+      const transceiver = peerConnection
+        .getTransceivers()
+        .find((candidate) => String(candidate.mid) === String(mid));
+      if (transceiver && transceiver.direction !== "inactive")
+        transceiver.direction = "inactive";
+      this.consumers.delete(trackName);
+      this.subscribedTrackNames.delete(trackName);
+      this.remoteByMid.delete(String(mid));
+      this.pendingRemoteTracks.delete(String(mid));
+      this.rtpSamples.delete(trackName);
+      try {
+        current.track?.stop?.();
+      } catch {}
+      this.onRemoteTrackEnded?.(current);
+      const offer = await peerConnection.createOffer();
+      if (isRecoveryStale("before-bind")) return false;
+      await peerConnection.setLocalDescription(offer);
+      if (isRecoveryStale("before-bind")) return false;
+      const sessionDescription =
+        await getLocalSessionDescription(peerConnection);
+      if (isRecoveryStale("before-bind")) return false;
+      const result = await this.request("tracks-close", {
+        tracks: [{ mid }],
+        sessionDescription,
+        force: false,
+      });
+      if (isRecoveryStale("before-bind")) return false;
+      if (result.sessionDescription?.type === "offer") {
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (isRecoveryStale("before-bind")) return false;
+        const answer = await peerConnection.createAnswer();
+        if (isRecoveryStale("before-bind")) return false;
+        await peerConnection.setLocalDescription(answer);
+        if (isRecoveryStale("before-bind")) return false;
+        await this.request("renegotiate", {
+          sessionDescription: await getLocalSessionDescription(peerConnection),
+        });
+        if (isRecoveryStale("before-bind")) return false;
+      } else if (result.sessionDescription) {
+        if (isRecoveryStale("before-bind")) return false;
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        if (isRecoveryStale("before-bind")) return false;
+      }
+      return Boolean(
+        await this.subscribePublicationBatch([publication], generation, {
+          isStale: isRecoveryStale,
+          onTrackBound: (binding) => {
+            if (binding.trackName === trackName) recoveredMid = binding.mid;
+          },
+          compensateStale: (bindings) =>
+            this.closePulledRemoteTracksSafely(
+              bindings,
+              peerConnection,
+              generation,
+              recoveredConsumer,
+            ),
+        }),
+      );
+    });
   }
 
   subscribe(
@@ -237,13 +748,14 @@ export class CloudflareSourcesMethods {
     this: CloudflareSessionLike,
     publications: CloudflarePublication[],
     generation: number,
+    options: CloudflareSubscriptionBatchOptions = {},
   ) {
     const active = publications.filter(
       (publication) =>
         publication.trackName != null &&
         this.publications.get(publication.trackName) === publication,
     );
-    if (!active.length) return false;
+    if (!active.length || options.isStale?.("before-bind")) return false;
     const peerConnection = this.peerConnection;
     if (
       generation !== this.sessionGeneration ||
@@ -251,6 +763,18 @@ export class CloudflareSourcesMethods {
       !peerConnection
     )
       return false;
+    const compensate = async (bindings: CloudflareRemoteTrackBinding[]) => {
+      if (!bindings.length) return;
+      if (options.compensateStale) {
+        await options.compensateStale(bindings);
+        return;
+      }
+      await this.closePulledRemoteTracksSafely(
+        bindings,
+        peerConnection,
+        generation,
+      );
+    };
     const result = await this.request("tracks-new", {
       tracks: active.map((publication) => ({
         location: "remote",
@@ -259,42 +783,87 @@ export class CloudflareSourcesMethods {
       })),
     });
     this.assertCurrentSession(peerConnection, generation);
-    for (const publication of active) {
-      if (
-        !publication.trackName ||
-        this.publications.get(publication.trackName) !== publication
-      )
-        continue;
-      const track = result.tracks?.find(
-        (candidate) => candidate.trackName === publication.trackName,
-      );
-      if (track?.mid == null)
-        throw new Error("Cloudflare subscription track MID is missing");
-      const mid = String(track.mid);
-      this.remoteByMid.set(mid, publication);
-      this.subscribedTrackNames.add(publication.trackName);
-      const pending = this.pendingRemoteTracks.get(mid) || [];
-      this.pendingRemoteTracks.delete(mid);
-      for (const event of pending) this.handleRemoteTrack(event, publication);
+    const bindings: CloudflareRemoteTrackBinding[] = [];
+    const captureBoundConsumers = () => {
+      for (const binding of bindings) {
+        const consumer = this.consumers.get(binding.trackName);
+        if (
+          consumer?.mid === binding.mid &&
+          this.remoteByMid.get(binding.mid) === binding.publication
+        )
+          binding.consumer = consumer;
+      }
+    };
+    const compensateIfStale = async (
+      phase: CloudflareSubscriptionGuardPhase,
+    ) => {
+      if (!options.isStale?.(phase)) return false;
+      await compensate(bindings);
+      return true;
+    };
+    try {
+      for (const publication of active) {
+        const trackName = publication.trackName;
+        if (!trackName)
+          throw new Error("Cloudflare subscription track name is missing");
+        const track = result.tracks?.find(
+          (candidate) => candidate.trackName === trackName,
+        );
+        if (track?.mid == null)
+          throw new Error("Cloudflare subscription track MID is missing");
+        bindings.push({
+          trackName,
+          mid: String(track.mid),
+          publication,
+        });
+      }
+      if (await compensateIfStale("before-bind")) return false;
+      for (const binding of bindings) {
+        if (await compensateIfStale("before-bind")) return false;
+        if (this.publications.get(binding.trackName) !== binding.publication) {
+          await compensate(bindings);
+          return false;
+        }
+        this.remoteByMid.set(binding.mid, binding.publication);
+        this.subscribedTrackNames.add(binding.trackName);
+        options.onTrackBound?.(binding);
+        const pending = this.pendingRemoteTracks.get(binding.mid) || [];
+        this.pendingRemoteTracks.delete(binding.mid);
+        for (const event of pending)
+          this.handleRemoteTrack(event, binding.publication);
+        captureBoundConsumers();
+      }
+      if (await compensateIfStale("after-bind")) return false;
+      if (result.sessionDescription?.type === "offer") {
+        if (await compensateIfStale("after-bind")) return false;
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        captureBoundConsumers();
+        this.assertCurrentSession(peerConnection, generation);
+        const answer = await peerConnection.createAnswer();
+        if (await compensateIfStale("after-bind")) return false;
+        await peerConnection.setLocalDescription(answer);
+        this.assertCurrentSession(peerConnection, generation);
+        const sessionDescription =
+          await getLocalSessionDescription(peerConnection);
+        if (await compensateIfStale("after-bind")) return false;
+        await this.request("renegotiate", {
+          sessionDescription,
+        });
+        this.assertCurrentSession(peerConnection, generation);
+        if (await compensateIfStale("after-bind")) return false;
+      } else if (result.sessionDescription) {
+        if (await compensateIfStale("after-bind")) return false;
+        await peerConnection.setRemoteDescription(result.sessionDescription);
+        captureBoundConsumers();
+        this.assertCurrentSession(peerConnection, generation);
+        if (await compensateIfStale("after-bind")) return false;
+      }
+      this.lastReceivedConsumerParams = result;
+      return true;
+    } catch (error) {
+      await compensate(bindings);
+      throw error;
     }
-    this.lastReceivedConsumerParams = result;
-    if (result.sessionDescription?.type === "offer") {
-      await peerConnection.setRemoteDescription(result.sessionDescription);
-      this.assertCurrentSession(peerConnection, generation);
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      this.assertCurrentSession(peerConnection, generation);
-      const sessionDescription =
-        await getLocalSessionDescription(peerConnection);
-      await this.request("renegotiate", {
-        sessionDescription,
-      });
-      this.assertCurrentSession(peerConnection, generation);
-    } else if (result.sessionDescription) {
-      await peerConnection.setRemoteDescription(result.sessionDescription);
-      this.assertCurrentSession(peerConnection, generation);
-    }
-    return true;
   }
 
   async removeSource(this: CloudflareSessionLike, source: string) {
@@ -333,8 +902,8 @@ export class CloudflareSourcesMethods {
             trackName: current.trackName,
             source,
             ownerSource: current.ownerSource || null,
-            generation: this.sessionGeneration,
-            connectionEpoch: this.connectionEpoch,
+            generation: current.generation,
+            connectionEpoch: this.getControlConnectionEpoch(),
             closed: true,
           },
         })
@@ -345,16 +914,12 @@ export class CloudflareSourcesMethods {
         this.peerConnection === peerConnection &&
         this.sessionGeneration === generation
       ) {
-        // Only close media if the entire session is actually invalid
-        // For individual source failures, we should only mark that source as failed
-        // rather than destroying all media
         if (
           error instanceof Error &&
           error.message.includes("MEDIA_SESSION_CLOSED")
         ) {
           this.closeMedia();
         }
-        // Otherwise, just mark the source as failed and let the recovery layer handle it
       }
       throw error;
     }
@@ -395,10 +960,7 @@ export class CloudflareSourcesMethods {
       try {
         await entry.sender.setParameters(parameters);
       } catch (error) {
-        const errorName =
-          error && typeof error === "object" && "name" in error
-            ? String(error.name)
-            : "";
+        const errorName = error instanceof Error ? error.name : "";
         if (
           [
             "InvalidModificationError",
@@ -458,18 +1020,16 @@ export class CloudflareSourcesMethods {
         height: settings.height,
         frameRate:
           settings.frameRate ||
-          (typeof requested.frameRate === "number"
+          (isExternalNumber(requested.frameRate)
             ? requested.frameRate
             : undefined),
-        qualityPriority:
-          typeof requested.qualityPriority === "string"
-            ? requested.qualityPriority
-            : undefined,
+        qualityPriority: isExternalString(requested.qualityPriority)
+          ? requested.qualityPriority
+          : undefined,
         screen: entry.source === "screen",
-        maxBitrate:
-          typeof requested.maxBitrate === "number"
-            ? requested.maxBitrate
-            : null,
+        maxBitrate: isExternalNumber(requested.maxBitrate)
+          ? requested.maxBitrate
+          : null,
       }),
     );
   }
@@ -498,10 +1058,7 @@ export class CloudflareSourcesMethods {
     sourceOrReceiving: string | boolean,
     receivingValue?: boolean,
   ) {
-    if (
-      typeof sourceOrReceiving === "boolean" &&
-      receivingValue === undefined
-    ) {
+    if (isExternalBoolean(sourceOrReceiving) && receivingValue === undefined) {
       const entry = this.consumers.get(String(userIdOrKey));
       return entry
         ? this.setRemoteReceiving(

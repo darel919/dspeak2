@@ -6,6 +6,10 @@ import type {
   TurnHealthResult,
   TurnProbeResult,
 } from "../types/turn-health.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../../shared/types/external.ts";
 
 const stunBindingRequest = 0x0001;
 const stunBindingSuccess = 0x0101;
@@ -52,9 +56,8 @@ function sendBindingRequest(
       finish({
         available: false,
         detail:
-          error && typeof error === "object" && "code" in error
-            ? String(error.code)
-            : "probe-error",
+          parseExternalString(parseExternalRecord(error)?.code) ||
+          "probe-error",
       }),
     );
     socket.once("message", (message) => {
@@ -105,14 +108,12 @@ export async function probeSelfHostedTurn(
       );
       result = { configured: true, ...probe };
     }
-  } catch (error: unknown) {
+  } catch (error) {
+    const errorRecord = parseExternalRecord(error);
     result = {
       configured: true,
       available: false,
-      detail:
-        error && typeof error === "object" && "code" in error
-          ? String(error.code)
-          : "dns-resolution-failed",
+      detail: parseExternalString(errorRecord?.code) || "dns-resolution-failed",
     };
   }
   cachedResult = result;

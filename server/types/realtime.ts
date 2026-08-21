@@ -1,5 +1,7 @@
+import type { ExternalField } from "../../shared/types/external.ts";
+
 export interface RealtimeChannelPublisher {
-  httpSend: (event: string, message: unknown) => Promise<unknown>;
+  httpSend: (event: string, message: ExternalField) => Promise<ExternalField>;
 }
 
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -26,11 +28,11 @@ export interface ChatCallbacks {
 
 export interface ChatSubscription {
   channel: RealtimeChannel;
-  sendMessage: (message: RealtimePayload) => Promise<unknown>;
-  sendTyping: (typing: RealtimePayload) => Promise<unknown>;
-  sendReaction: (reaction: RealtimePayload) => Promise<unknown>;
-  trackPresence: (presence: RealtimePayload) => Promise<unknown>;
-  untrackPresence: () => Promise<unknown>;
+  sendMessage: (message: RealtimePayload) => Promise<ExternalField>;
+  sendTyping: (typing: RealtimePayload) => Promise<ExternalField>;
+  sendReaction: (reaction: RealtimePayload) => Promise<ExternalField>;
+  trackPresence: (presence: RealtimePayload) => Promise<ExternalField>;
+  untrackPresence: () => Promise<ExternalField>;
   unsubscribe: () => void;
 }
 

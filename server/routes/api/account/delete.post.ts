@@ -1,5 +1,8 @@
 import { requireAuthenticatedUser } from "../../../utils/auth.ts";
-import { withTransaction } from "../../../db/transactions.ts";
+import {
+  withTransaction,
+  type DatabaseTransaction,
+} from "../../../db/transactions.ts";
 import {
   users,
   profiles,
@@ -32,21 +35,28 @@ import {
 import { eq, and, or, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.ts";
 import { supabaseAdmin } from "../../../auth/supabase.ts";
-import { db } from "../../../db/client.ts";
 
 const accountDeletionLocksKey = Symbol.for("dspeak.account-deletion-locks");
 
 function accountDeletionLocks(): Set<string> {
+  /*
+   * SAFETY: This symbol is private to account deletion, and the function
+   * initializes its value as a Set before returning it.
+   */
   const globalState = globalThis as typeof globalThis & {
     [accountDeletionLocksKey]?: Set<string>;
   };
-  if (!globalState[accountDeletionLocksKey]) {
-    globalState[accountDeletionLocksKey] = new Set<string>();
-  }
-  return globalState[accountDeletionLocksKey] as Set<string>;
+  const existing = globalState[accountDeletionLocksKey];
+  if (existing) return existing;
+  const locks = new Set<string>();
+  globalState[accountDeletionLocksKey] = locks;
+  return locks;
 }
 
-async function deleteAccount(tx: typeof db, userId: string): Promise<void> {
+async function deleteAccount(
+  tx: DatabaseTransaction,
+  userId: string,
+): Promise<void> {
   const ownedRooms = await tx
     .select({ id: rooms.id })
     .from(rooms)

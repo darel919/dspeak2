@@ -6,7 +6,7 @@ import {
   roomMemberships,
   membershipRoles,
 } from "../schema/index.ts";
-import { eq, and, desc, asc, count } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import type {
   ChannelInsert,
   RoomInsert,

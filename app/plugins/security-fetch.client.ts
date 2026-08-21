@@ -8,6 +8,7 @@ import {
   resolveApiRequestTarget,
 } from "../shared/api-request-target.ts";
 import { useRuntimeStore } from "../stores/runtime";
+import { isExternalString } from "../shared/types/boundary.ts";
 
 const mutatingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const retryableMethods = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -71,7 +72,9 @@ async function getDesktopAccessToken(): Promise<string | undefined> {
 async function getDesktopHttpFetch(): Promise<FetchLike> {
   if (!desktopHttpFetch) {
     desktopHttpFetch = import("@tauri-apps/plugin-http").then(
-      ({ fetch: tauriFetch }) => tauriFetch as unknown as FetchLike,
+      ({ fetch: tauriFetch }) =>
+        (input, init) =>
+          tauriFetch(input, init),
     );
   }
   return desktopHttpFetch;
@@ -99,7 +102,7 @@ async function retryWithSupabaseBearer(
   if (
     response.status !== 401 ||
     !isConfiguredApiRequest(url, apiTarget) ||
-    (!retryableMethods.has(method) && typeof options.body !== "string")
+    (!retryableMethods.has(method) && !isExternalString(options.body))
   )
     return response;
 
@@ -111,18 +114,17 @@ async function retryWithSupabaseBearer(
     if (!accessToken) return response;
     const headers = requestHeaders(input, options);
     headers.set("Authorization", `Bearer ${accessToken}`);
-    return transport(input, {
-      ...options,
-      headers,
-      ...(desktop ? { credentials: "omit" as const } : {}),
-    });
+    const requestOptions = desktop
+      ? { ...options, headers, credentials: "omit" as const }
+      : { ...options, headers };
+    return transport(input, requestOptions);
   } catch {
     return response;
   }
 }
 
 export default defineNuxtPlugin(() => {
-  const browserFetch = globalThis.fetch.bind(globalThis) as FetchLike;
+  const browserFetch: FetchLike = globalThis.fetch.bind(globalThis);
   const runtimeConfig = useRuntimeConfig();
   const runtimeStore = useRuntimeStore();
   const apiTarget = resolveApiRequestTarget(

@@ -18,6 +18,8 @@ import type { H3Event } from "h3";
 import type { RoomRole } from "../../shared/types/room.ts";
 import type { ChannelApiDependencies } from "../types/channel-api.ts";
 
+type ChannelUpdate = Partial<typeof channels.$inferInsert>;
+
 export function createChannelApiHandler(dependencies: ChannelApiDependencies) {
   const {
     broadcastToChannel,
@@ -287,7 +289,7 @@ export function createChannelApiHandler(dependencies: ChannelApiDependencies) {
       if (!room)
         throw createError({ statusCode: 404, statusMessage: "Room not found" });
       await requireRoomPermission(room, userId, "channel.update");
-      const update: Record<string, unknown> = { updatedAt: new Date() };
+      const update: ChannelUpdate = { updatedAt: new Date() };
       if (body.name) update.name = String(body.name).trim();
       if (body.desc !== undefined) update.description = String(body.desc);
       if (body.policy !== undefined)

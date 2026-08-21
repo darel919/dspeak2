@@ -1,39 +1,46 @@
 import type { DesktopAuthError, DesktopAuthFailureStage } from "./types/auth";
+import { isExternalString } from "./types/boundary.ts";
 
 export function createDesktopAuthError(
   code: string,
   message: string,
   metadata: Partial<DesktopAuthError> = {},
 ): DesktopAuthError {
-  const error = new Error(message) as DesktopAuthError;
-
-  error.code = code;
-  error.stage = metadata.stage || "unknown";
-  error.httpStatus = metadata.httpStatus ?? 0;
-  error.serverDiagnostic = metadata.serverDiagnostic || code;
-  error.serverBuildCommit = metadata.serverBuildCommit || "";
-  error.serverProjectRef = metadata.serverProjectRef || "";
-  error.clientBuildCommit = metadata.clientBuildCommit || "";
-  error.clientProjectRef = metadata.clientProjectRef || "";
-  error.requestId = metadata.requestId || "";
-  error.transport = metadata.transport || "webview-fetch";
-
-  return error;
+  return Object.assign(new Error(message), {
+    code,
+    stage: metadata.stage || "unknown",
+    httpStatus: metadata.httpStatus ?? 0,
+    serverDiagnostic: metadata.serverDiagnostic || code,
+    serverBuildCommit: metadata.serverBuildCommit || "",
+    serverProjectRef: metadata.serverProjectRef || "",
+    clientBuildCommit: metadata.clientBuildCommit || "",
+    clientProjectRef: metadata.clientProjectRef || "",
+    requestId: metadata.requestId || "",
+    transport: metadata.transport || "webview-fetch",
+    requestUrl: metadata.requestUrl || "",
+    responseUrl: metadata.responseUrl || "",
+    redirected: metadata.redirected || false,
+    statusText: metadata.statusText || "",
+    retryAfter: metadata.retryAfter || "",
+    serverHeader: metadata.serverHeader || "",
+    viaHeader: metadata.viaHeader || "",
+    vercelRequestId: metadata.vercelRequestId || "",
+    cloudflareRay: metadata.cloudflareRay || "",
+  });
 }
 
-export function isDesktopAuthError(value: unknown): value is DesktopAuthError {
+export function isDesktopAuthError<T>(value: T): value is T & DesktopAuthError {
   return (
-    value instanceof Error &&
-    typeof (value as Partial<DesktopAuthError>).code === "string"
+    value instanceof Error && "code" in value && isExternalString(value.code)
   );
 }
 
-export function stageOf(value: unknown): DesktopAuthFailureStage {
+export function stageOf<T>(value: T): DesktopAuthFailureStage {
   if (isDesktopAuthError(value)) return value.stage;
   return "unknown";
 }
 
-export function httpStatusOf(value: unknown): number {
+export function httpStatusOf<T>(value: T): number {
   if (isDesktopAuthError(value)) return value.httpStatus;
   return 0;
 }

@@ -17,8 +17,8 @@
     </NuxtLink>
     <NuxtLink
       to="/messages"
-      class="metro-icon-btn metro-icon-btn--ghost relative mx-2 mb-2 min-h-12"
-      :class="route.path === '/messages' && 'metro-icon-btn--primary'"
+      class="metro-transition relative mx-2 grid aspect-square place-items-center overflow-hidden bg-base-200 text-sm font-semibold hover:bg-base-300"
+      :class="route.path === '/messages' && 'metro-selected'"
       aria-label="Messages"
       title="Messages"
     >

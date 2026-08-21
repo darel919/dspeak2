@@ -2,6 +2,7 @@ import type {
   VoiceJoinReadinessOptions,
   VoiceTransportReadinessOptions,
 } from "./types/shared-utilities.ts";
+import { isExternalString } from "./types/boundary.ts";
 
 export const VOICE_JOIN_TIMEOUT_MS = 10_000;
 
@@ -31,7 +32,7 @@ export async function waitForVoiceTransportReady({
   const startedAt = now();
   const resolveTimeoutMs = () => {
     const value =
-      typeof timeoutMs === "function" ? timeoutMs() : Number(timeoutMs);
+      timeoutMs instanceof Function ? timeoutMs() : Number(timeoutMs);
     return Number.isFinite(value) && value > 0 ? value : VOICE_JOIN_TIMEOUT_MS;
   };
   let deadline = startedAt + resolveTimeoutMs();
@@ -42,13 +43,12 @@ export async function waitForVoiceTransportReady({
       throw error;
     }
     const sessionError = getError();
-    const sessionErrorMessage =
-      typeof sessionError === "string"
-        ? sessionError
-        : sessionError?.message ||
-          sessionError?.code ||
-          sessionError?.cause?.code ||
-          null;
+    const sessionErrorMessage = isExternalString(sessionError)
+      ? sessionError
+      : sessionError?.message ||
+        sessionError?.code ||
+        sessionError?.cause?.code ||
+        null;
     if (sessionErrorMessage) throw new Error(sessionErrorMessage);
     if (isReady()) return;
     deadline = Math.max(deadline, startedAt + resolveTimeoutMs());

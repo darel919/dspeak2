@@ -12,9 +12,168 @@ import type {
   DirectMessageRealtimePayload,
   DirectMessageSender,
 } from "../shared/types/direct-messages.ts";
+import { isExternalString } from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalValue,
+} from "../utils/external-values.ts";
 
-function errorMessage(error: unknown) {
+function errorMessage(error: ExternalField) {
   return error instanceof Error ? error.message : String(error);
+}
+
+type ParsedDirectItem = DirectMessage | DirectConversation;
+type ParsedDirectApiResponse = Omit<
+  DirectMessageApiResponse,
+  "items" | "nextBefore"
+> & {
+  items?: ParsedDirectItem[];
+  nextBefore?: { created: string; id: string } | null;
+};
+type ParsedUnreadCount = number;
+
+function requiredId(value: ExternalField): string | null {
+  return isExternalString(value) && value.trim() ? value : null;
+}
+
+function parseDirectSender(value: ExternalField): DirectMessageSender | null {
+  const record = parseExternalRecord(value);
+  const id = requiredId(record?.id);
+  if (!record || !id) return null;
+  const sender: DirectMessageSender = { id };
+  if (isExternalString(record.name)) sender.name = record.name;
+  if (isExternalString(record.display_name))
+    sender.display_name = record.display_name;
+  if (isExternalString(record.username)) sender.username = record.username;
+  if (isExternalString(record.avatar)) sender.avatar = record.avatar;
+  return sender;
+}
+
+function parseDirectMessage(value: ExternalField): DirectMessage | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  const id = requiredId(record.id);
+  const conversationId = requiredId(record.conversation_id);
+  const content = isExternalString(record.content) ? record.content : null;
+  const sender = parseDirectSender(record.sender);
+  const created = requiredId(record.created);
+  if (!id || !conversationId || content === null || !sender || !created)
+    return null;
+  const message: DirectMessage = {
+    id,
+    conversation_id: conversationId,
+    content,
+    sender,
+    created,
+  };
+  if (isExternalString(record.client_id)) message.client_id = record.client_id;
+  if (record.read_at === null || isExternalString(record.read_at))
+    message.read_at = record.read_at;
+  if (record.delivered_at === null || isExternalString(record.delivered_at))
+    message.delivered_at = record.delivered_at;
+  if (record.status === "pending" || record.status === "failed")
+    message.status = record.status;
+  if (isExternalString(record.error)) message.error = record.error;
+  return message;
+}
+
+function parseDirectMessageRealtime(
+  value: ExternalField,
+): DirectMessageRealtimePayload | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  const dataRecord = parseExternalRecord(record.data);
+  if (!dataRecord) {
+    return {
+      type: isExternalString(record.type) ? record.type : undefined,
+    };
+  }
+  const data: NonNullable<DirectMessageRealtimePayload["data"]> = {};
+  const conversationId = requiredId(dataRecord.conversation_id);
+  if (conversationId) data.conversation_id = conversationId;
+  if (Array.isArray(dataRecord.message_ids))
+    data.message_ids = dataRecord.message_ids;
+  if (
+    isExternalString(dataRecord.delivered_at) ||
+    dataRecord.delivered_at === null
+  )
+    data.delivered_at = dataRecord.delivered_at;
+  if (isExternalString(dataRecord.read_at) || dataRecord.read_at === null)
+    data.read_at = dataRecord.read_at;
+  const message = parseDirectMessage(dataRecord.message);
+  if (message) data.message = message;
+  return {
+    type: isExternalString(record.type) ? record.type : undefined,
+    data,
+  };
+}
+
+function parseUnreadCount(value: ExternalField): ParsedUnreadCount | null {
+  const number = parseExternalNumber(parseExternalValue(value));
+  if (number === null || !Number.isInteger(number) || number < 0) return null;
+  return number;
+}
+
+function parseDirectConversation(
+  value: ExternalField,
+): DirectConversation | null {
+  const record = parseExternalRecord(value);
+  const id = requiredId(record?.id);
+  const unreadCount = parseUnreadCount(record?.unread_count);
+  if (!record || !id || unreadCount === null) return null;
+  const conversation: DirectConversation = {
+    id,
+    unread_count: unreadCount,
+  };
+  const friend = parseExternalRecord(record.friend);
+  if (friend) conversation.friend = friend;
+  const lastMessage = parseDirectMessage(record.last_message);
+  if (lastMessage) conversation.last_message = lastMessage;
+  if (isExternalString(record.updated_at))
+    conversation.updated_at = record.updated_at;
+  return conversation;
+}
+
+function parseDirectApiResponse(value: ExternalField): ParsedDirectApiResponse {
+  const record = parseExternalRecord(value);
+  if (!record) return {};
+  const result: ParsedDirectApiResponse = {};
+  if (Array.isArray(record.items)) {
+    result.items = record.items
+      .map((item) => parseDirectMessage(item) || parseDirectConversation(item))
+      .filter((item): item is ParsedDirectItem => item !== null);
+  }
+  if (isExternalString(record.id)) result.id = record.id;
+  const friend = parseExternalRecord(record.friend);
+  if (friend) result.friend = friend;
+  if (record.hasMore === true || record.hasMore === false)
+    result.hasMore = record.hasMore;
+  const nextBefore = parseExternalRecord(record.nextBefore);
+  const nextBeforeId = requiredId(nextBefore?.id);
+  const nextBeforeCreated = requiredId(nextBefore?.created);
+  if (nextBeforeId && nextBeforeCreated)
+    result.nextBefore = { id: nextBeforeId, created: nextBeforeCreated };
+  return result;
+}
+
+function isDirectMessage(item: ParsedDirectItem): item is DirectMessage {
+  return "content" in item;
+}
+
+function isDirectConversation(
+  item: ParsedDirectItem,
+): item is DirectConversation {
+  return "unread_count" in item && !isDirectMessage(item);
+}
+
+function parseReceiptIds(value: ExternalField): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const id = requiredId(entry);
+    return id ? [id] : [];
+  });
 }
 
 const MAX_LOADED_MESSAGES = 500;
@@ -40,7 +199,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
 
   const unreadCount = computed(() =>
     conversations.value.reduce(
-      (total, conversation) => total + Number(conversation.unread_count || 0),
+      (total, conversation) => total + conversation.unread_count,
       0,
     ),
   );
@@ -70,7 +229,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
         apiErrorMessage(text, response.status, "Direct message request failed"),
       );
     }
-    return (await response.json()) as DirectMessageApiResponse;
+    return parseDirectApiResponse(await response.json());
   }
 
   function currentUser(): DirectMessageSender {
@@ -148,14 +307,12 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
 
   function applyReceipt(
     conversationId: string | undefined,
-    messageIds: unknown,
+    messageIds: ExternalField,
     field: "delivered_at" | "read_at",
     value: string | null | undefined,
   ) {
     if (String(conversationId) !== currentConversationId.value) return;
-    const ids = new Set(
-      (Array.isArray(messageIds) ? messageIds : []).map(String),
-    );
+    const ids = new Set(parseReceiptIds(messageIds));
     for (const message of messages.value) {
       if (ids.has(String(message.id))) message[field] = value;
     }
@@ -167,7 +324,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     try {
       const result = await apiFetch();
       conversations.value = Array.isArray(result.items)
-        ? (result.items as DirectConversation[])
+        ? result.items.filter(isDirectConversation)
         : [];
       return conversations.value;
     } catch (cause: unknown) {
@@ -183,6 +340,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     realtimeHandle = await openRealtimeChannel<DirectMessageRealtimePayload>(
       `notify:${userId}`,
       {
+        decodePayload: parseDirectMessageRealtime,
         onMessage: (message) => {
           if (message?.type === "direct_messages_delivered") {
             applyReceipt(
@@ -204,9 +362,11 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
           }
           if (message?.type !== "direct_message" || !message.data?.message)
             return;
-          const conversationId = String(message.data.conversation_id || "");
-          const directMessage = message.data.message;
+          const directMessage = parseDirectMessage(message.data.message);
           if (!directMessage) return;
+          const conversationId =
+            requiredId(message.data.conversation_id) ||
+            directMessage.conversation_id;
           const ownMessage =
             String(directMessage.sender?.id) === String(userId);
           if (conversationId === currentConversationId.value) {
@@ -232,7 +392,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
           const unreadCount =
             ownMessage || conversationId === currentConversationId.value
               ? null
-              : Number(conversation?.unread_count || 0) + 1;
+              : (conversation?.unread_count ?? 0) + 1;
           if (
             !updateConversationSummary(
               conversationId,
@@ -289,7 +449,8 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
       method: "POST",
       body: JSON.stringify({ friendId }),
     });
-    const conversation = result as DirectConversation;
+    const conversation = parseDirectConversation(result);
+    if (!conversation) throw new Error("Invalid direct conversation response");
     const existing = conversations.value.find(
       (item) => item.id === conversation.id,
     );
@@ -313,7 +474,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     try {
       const result = await apiFetch(`/${encodeURIComponent(conversationId)}`);
       messages.value = Array.isArray(result.items)
-        ? (result.items as DirectMessage[])
+        ? result.items.filter(isDirectMessage)
         : [];
       hasMoreMessages.value = result.hasMore === true;
       messageHistoryCursor =
@@ -353,7 +514,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
         `/${encodeURIComponent(conversationId)}?before=${encodeURIComponent(cursor.created)}&beforeId=${encodeURIComponent(cursor.id)}`,
       );
       const older = Array.isArray(result.items)
-        ? (result.items as DirectMessage[])
+        ? result.items.filter(isDirectMessage)
         : [];
       const existingIds = new Set(messages.value.map((message) => message.id));
       messages.value = [
@@ -382,7 +543,7 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
     const normalizedContent = String(content || "").trim();
     if (!currentConversationId.value || !normalizedContent) return null;
     const clientMessageId =
-      typeof crypto?.randomUUID === "function"
+      crypto?.randomUUID instanceof Function
         ? crypto.randomUUID()
         : `dm_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     const pending: DirectMessage = {
@@ -410,7 +571,8 @@ export const useDirectMessagesStore = defineStore("directMessages", () => {
           }),
         },
       );
-      const message = result as DirectMessage;
+      const message = parseDirectMessage(result);
+      if (!message) throw new Error("Invalid direct message response");
       reconcileMessage(message);
       updateConversationSummary(currentConversationId.value, message, null);
       return result;

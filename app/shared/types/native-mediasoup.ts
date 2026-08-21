@@ -8,15 +8,8 @@ export interface NativeAction {
   actionId?: number;
 }
 
-export interface NativeReceiveEvent {
-  kind?: number;
-  id?: string;
-  payload?: Record<string, unknown>;
-  data?: string;
-  dataBytes?: number;
-  dataDropped?: boolean;
-  eventId?: number | string;
-}
+export type NativeReceiveEvent =
+  import("./native-cloudflare.ts").NativeCloudflareEvent;
 
 export interface NativeConsumerEntry extends Record<string, unknown> {
   consumerId: string;

@@ -22,11 +22,14 @@ function sfuHandoff({
   return waitForMediaHandoff({
     getLatestTopologyKey: () => "current",
     getLocalPeerId: () => "local",
-    getSfu: () => ({
-      expectedInboundFlowCount: () => inboundFlowCount,
-      ...(includeMediaReadiness ? { mediaReadiness: readiness } : {}),
-      ...(shouldReceive ? { shouldReceive } : {}),
-    }),
+    getSfu: () => {
+      const sfu = {
+        expectedInboundFlowCount: () => inboundFlowCount,
+      };
+      if (includeMediaReadiness) sfu.mediaReadiness = readiness;
+      if (shouldReceive) sfu.shouldReceive = shouldReceive;
+      return sfu;
+    },
     handoff: {
       count: () => (tracksReady ? expectedSources.length : 1),
       entries: () =>

@@ -1,6 +1,11 @@
 import { computed, ref } from "vue";
 import type { Ref } from "vue";
 import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+} from "./types/boundary.ts";
+import {
   resolveMediaAttenuation,
   summarizeMediaAttenuation,
 } from "./media-attenuation-reporter.ts";
@@ -24,12 +29,25 @@ export function createHybridMediaAudioState({
 }) {
   const getAttenuation = () =>
     resolveMediaAttenuation(getRoomAttenuation(), getStreamAttenuation());
+  const parseAttenuationReports = () => {
+    const parsed = new Map<
+      string,
+      { active: boolean; effectivePercent: number }
+    >();
+    for (const [peerId, report] of attenuationReports.value) {
+      if (!isExternalRecord(report)) continue;
+      if (!isExternalBoolean(report.active)) continue;
+      if (!isExternalNumber(report.effectivePercent)) continue;
+      parsed.set(peerId, {
+        active: report.active,
+        effectivePercent: report.effectivePercent,
+      });
+    }
+    return parsed;
+  };
   const sharedAudioAttenuation = computed(() =>
     summarizeMediaAttenuation(
-      attenuationReports.value as Map<
-        string,
-        { active: boolean; effectivePercent: number }
-      >,
+      parseAttenuationReports(),
       getPeers(),
       getLocalPeerId(),
     ),

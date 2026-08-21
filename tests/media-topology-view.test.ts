@@ -16,7 +16,6 @@ function makeView(overrides = {}) {
       activeProvider: () => "p2p",
       addressFamily: () => "ipv4",
       buildTopologyGraph: (input) => input,
-      consumers: { value: new Map() },
       getLocalPeerId: () => "me",
       getP2pEdges: () => edges.value,
       getP2pMesh: () => null,
@@ -87,7 +86,6 @@ describe("media-topology-view", () => {
   });
 
   it("leaves mediaPathMetrics untouched when not provided", () => {
-    const { view } = makeView();
     const fallback = makeView({
       mediaPathMetrics: undefined,
     });

@@ -3,6 +3,7 @@ import {
   VIDEO_FRAME_RATE_MIN,
   VIDEO_RESOLUTIONS,
   VIDEO_SCALE_STEPS,
+  isVideoResolution,
 } from "./video-settings.ts";
 import type {
   AdaptiveFrameCounters,
@@ -13,6 +14,13 @@ import type {
   AdaptiveVideoSettings,
   AdaptiveVideoState,
 } from "./types/adaptive-media.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
 
 const ADAPTIVE_FRAME_RATES = Object.freeze([15, 25, 30, 50, 60]);
 
@@ -130,14 +138,15 @@ export function updateAdaptiveVideoState(
     nextScale !== scale ||
     nextFrameRate !== frameRate ||
     nextBitrate !== bitrate;
-  return {
+  const result = {
     scale: nextScale,
     frameRate: nextFrameRate,
-    ...(nextBitrate !== null ? { maxBitrate: nextBitrate } : {}),
     pressureSamples: changed ? 0 : pressureSamples,
     healthySamples: changed ? 0 : healthySamples,
     changed,
   };
+  if (nextBitrate !== null) Object.assign(result, { maxBitrate: nextBitrate });
+  return result;
 }
 
 export function createAdaptiveVideoController({
@@ -157,7 +166,7 @@ export function createAdaptiveVideoController({
   ) => Promise<Map<string, Record<string, unknown>> | null>;
   getSettings: (source: string) => AdaptiveVideoSettings;
   intervalMs?: number;
-  onError?: (error: unknown) => void;
+  onError?: (error: OwnedErrorValue) => void;
 }) {
   let active: AdaptiveVideoEntry | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -183,12 +192,41 @@ export function createAdaptiveVideoController({
     try {
       const report = await getReport(active.source);
       const outbound = report
-        ? ([...report.values()] as AdaptiveVideoReport[]).find(
-            (stat) =>
-              stat.type === "outbound-rtp" &&
-              !stat.isRemote &&
-              (stat.kind === "video" || stat.mediaType === "video"),
-          )
+        ? [...report.values()]
+            .flatMap((value) => {
+              if (!isExternalRecord(value)) return [];
+              const parsed: AdaptiveVideoReport = {
+                type: isExternalString(value.type) ? value.type : undefined,
+                isRemote: isExternalBoolean(value.isRemote)
+                  ? value.isRemote
+                  : undefined,
+                kind: isExternalString(value.kind) ? value.kind : undefined,
+                mediaType: isExternalString(value.mediaType)
+                  ? value.mediaType
+                  : undefined,
+                totalEncodeTime: isExternalNumber(value.totalEncodeTime)
+                  ? value.totalEncodeTime
+                  : null,
+                framesEncoded: isExternalNumber(value.framesEncoded)
+                  ? value.framesEncoded
+                  : null,
+                framesPerSecond: isExternalNumber(value.framesPerSecond)
+                  ? value.framesPerSecond
+                  : null,
+                qualityLimitationReason: isExternalString(
+                  value.qualityLimitationReason,
+                )
+                  ? value.qualityLimitationReason
+                  : undefined,
+              };
+              return [parsed];
+            })
+            .find(
+              (stat) =>
+                stat.type === "outbound-rtp" &&
+                !stat.isRemote &&
+                (stat.kind === "video" || stat.mediaType === "video"),
+            )
         : null;
       if (outbound) {
         const frameTimeMs = calculateFrameTimeMs(
@@ -217,7 +255,7 @@ export function createAdaptiveVideoController({
         if (next.changed) await apply(active, next, settings);
       }
     } catch (error) {
-      onError?.(error);
+      onError?.(error instanceof Error ? error : String(error));
     }
     if (active) schedule();
   }
@@ -226,8 +264,9 @@ export function createAdaptiveVideoController({
     stop();
     const trackSettings = entry.track.getSettings?.() || {};
     const requested = getSettings(entry.source);
-    const resolution =
-      VIDEO_RESOLUTIONS[requested.resolution as keyof typeof VIDEO_RESOLUTIONS];
+    const resolution = isVideoResolution(requested.resolution)
+      ? VIDEO_RESOLUTIONS[requested.resolution]
+      : null;
     active = {
       ...entry,
       ceilingWidth:
@@ -259,8 +298,9 @@ export function adaptiveTrackConstraints(
   settings: AdaptiveVideoSettings,
 ): AdaptiveTrackConstraints {
   const scale = settings.qualityPriority === "framerate" ? state.scale : 1;
-  const resolution =
-    VIDEO_RESOLUTIONS[settings.resolution as keyof typeof VIDEO_RESOLUTIONS];
+  const resolution = isVideoResolution(settings.resolution)
+    ? VIDEO_RESOLUTIONS[settings.resolution]
+    : null;
   const ceilingWidth = Math.min(
     Number(entry.ceilingWidth) || Infinity,
     Number(resolution?.width) || Infinity,

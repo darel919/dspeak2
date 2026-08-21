@@ -14,6 +14,31 @@ import type {
   VoiceDetector,
 } from "./types/hybrid-media-registry.ts";
 import type { AttenuationReportInput } from "./media-attenuation-reporter.ts";
+import type {
+  RemoteSourceIncarnation,
+  RemoteSourceConvergenceState,
+  RemotePresentationObservationMode,
+} from "./remote-source-convergence.ts";
+import {
+  createRemoteSourceIncarnation,
+  buildRemoteReceiverIncarnationId,
+  createRemoteSourceConvergenceState,
+  advancePhase,
+  checkRtpProgression,
+  checkAudioRtpProgression,
+  retireIncarnation,
+  detectStall,
+  scheduleRecovery,
+  clearStall,
+  promoteConvergence,
+  recordFirstFrameEvidence,
+  recordPresentationProgress,
+  setIntentionalReceivingDisabled,
+  DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
+} from "./remote-source-convergence.ts";
+import type { RemoteReceiverStats } from "./remote-source-convergence.ts";
+import { isExternalString } from "./types/boundary.ts";
+import type { RemoteSourceProvider } from "./remote-source-convergence.ts";
 
 const REMOTE_VOICE_ACTIVITY_THRESHOLD_DB = -42;
 const VISIBLE_VOICE_DETECTION_INTERVAL_MS = 120;
@@ -27,20 +52,38 @@ export interface RemoteMediaRegistryOptions {
   isDeafened: () => boolean;
   isBroadcastMode: () => boolean;
   isAnyoneSpeaking: () => boolean;
-  onSpeaking: (userId: string, speaking: boolean) => unknown;
+  onSpeaking: (userId: string, speaking: boolean) => void;
   getAttenuation: (
     entry: Record<string, unknown>,
   ) => RegistryAttenuation | null;
-  onVideoReceivingChange: (
-    entry: RemoteMediaEntry,
-    receiving: boolean,
-  ) => unknown;
+  onVideoReceivingChange: (entry: RemoteMediaEntry, receiving: boolean) => void;
   onPlaybackState: (state: {
     userId: string | null;
     state: string;
     error: { name: string; message: string } | null;
-  }) => unknown;
-  onEffectiveGain: (state: AttenuationReportInput) => unknown;
+  }) => void;
+  onEffectiveGain: (state: AttenuationReportInput) => void;
+  getReceiverStats?: (
+    entry: RemoteMediaEntry,
+  ) => Promise<RemoteReceiverStats | null>;
+  onReceiverRecovery?: (
+    entry: RemoteMediaEntry,
+    attempt: number,
+    signal: AbortSignal,
+  ) => Promise<boolean> | boolean;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => void;
+}
+
+function remoteProvider(value: string): RemoteSourceProvider {
+  if (
+    value === "p2p" ||
+    value === "sfu" ||
+    value === "cloudflare-realtime" ||
+    value === "native-p2p" ||
+    value === "native-sfu"
+  )
+    return value;
+  return "sfu";
 }
 
 export function replaceMediaStreamTrack(
@@ -66,6 +109,9 @@ export class RemoteMediaRegistry {
   onVideoReceivingChange: RemoteMediaRegistryOptions["onVideoReceivingChange"];
   onPlaybackState: RemoteMediaRegistryOptions["onPlaybackState"];
   onEffectiveGain: RemoteMediaRegistryOptions["onEffectiveGain"];
+  getReceiverStats: RemoteMediaRegistryOptions["getReceiverStats"];
+  onReceiverRecovery: RemoteMediaRegistryOptions["onReceiverRecovery"];
+  onReceiverFailed: RemoteMediaRegistryOptions["onReceiverFailed"];
   voiceDetectors: Map<string, VoiceDetector>;
   speakingUsers: Set<string>;
   participantAudio: Map<string, AudioGraph>;
@@ -74,22 +120,11 @@ export class RemoteMediaRegistry {
   audioContextToken: number;
   voiceDetectionTimer: ReturnType<typeof setTimeout> | null;
   externalSpeakingUsers: Set<string>;
-  remoteSourcePhases: Map<
-    string,
-    | "not-announced"
-    | "announced"
-    | "publication-discovered"
-    | "subscription-requested"
-    | "consumer-created"
-    | "transport-connected"
-    | "rtp-flowing"
-    | "first-frame"
-    | "renderable"
-    | "stalled"
-    | "recovering"
-    | "retired"
-    | "failed"
-  >;
+  remoteSourceConvergence: Map<string, RemoteSourceConvergenceState>;
+  receiverHealthTimer: ReturnType<typeof setTimeout> | null;
+  receiverHealthRunning: boolean;
+  receiverHealthGeneration: number;
+  receiverHealthRestartRequested: boolean;
 
   constructor({
     audioFeeds,
@@ -104,6 +139,9 @@ export class RemoteMediaRegistry {
     onVideoReceivingChange,
     onPlaybackState,
     onEffectiveGain,
+    getReceiverStats,
+    onReceiverRecovery,
+    onReceiverFailed,
   }: RemoteMediaRegistryOptions) {
     this.audioFeeds = audioFeeds;
     this.videoFeeds = videoFeeds;
@@ -117,6 +155,9 @@ export class RemoteMediaRegistry {
     this.onVideoReceivingChange = onVideoReceivingChange;
     this.onPlaybackState = onPlaybackState;
     this.onEffectiveGain = onEffectiveGain;
+    this.getReceiverStats = getReceiverStats;
+    this.onReceiverRecovery = onReceiverRecovery;
+    this.onReceiverFailed = onReceiverFailed;
     this.voiceDetectors = new Map();
     this.speakingUsers = new Set();
     this.participantAudio = new Map();
@@ -125,7 +166,67 @@ export class RemoteMediaRegistry {
     this.audioContextToken = 0;
     this.voiceDetectionTimer = null;
     this.externalSpeakingUsers = new Set();
-    this.remoteSourcePhases = new Map();
+    this.remoteSourceConvergence = new Map();
+    this.receiverHealthTimer = null;
+    this.receiverHealthRunning = false;
+    this.receiverHealthGeneration = 0;
+    this.receiverHealthRestartRequested = false;
+  }
+
+  retireCurrentEntry(key: string) {
+    const current =
+      this.videoFeeds.value.get(key) || this.audioFeeds.value.get(key) || null;
+    const state = this.remoteSourceConvergence.get(key);
+    if (state) retireIncarnation(state);
+    this.remoteSourceConvergence.delete(key);
+    this.audioFeeds.value.delete(key);
+    this.videoFeeds.value.delete(key);
+    if (current?.kind === "audio") this.removeAudioTrack(current);
+    this.stopVoiceDetection(key);
+    triggerRef(this.audioFeeds);
+    triggerRef(this.videoFeeds);
+  }
+
+  createIncarnation(entry: RemoteMediaEntry): RemoteSourceIncarnation {
+    const provider = remoteProvider(entry.provider);
+    const connectionEpoch = entry.connectionEpoch ?? 1;
+    const sourceGeneration = entry.sourceGeneration ?? 1;
+    const receiverIncarnationId =
+      entry.receiverIncarnationId ||
+      buildRemoteReceiverIncarnationId({
+        stableFeedKey: entry.key,
+        provider,
+        connectionEpoch,
+        sourceGeneration,
+        publicationId: entry.publicationId,
+        producerId: entry.producerId,
+        consumerId: entry.consumerId,
+        cloudflareSessionId:
+          String(entry.cloudflareSessionId || "") || undefined,
+        cloudflareTrackName:
+          String(entry.cloudflareTrackName || "") || undefined,
+        nativeTrackHandle: entry.nativeTrackHandle || entry.track?.id,
+        logicalStreamId: entry.logicalStreamId,
+        variantId: entry.variantId,
+      });
+    return createRemoteSourceIncarnation({
+      receiverIncarnationId,
+      stableFeedKey: entry.key,
+      provider,
+      peerId: String(entry.peerId ?? ""),
+      userId: String(entry.userId ?? ""),
+      source: entry.source,
+      connectionEpoch,
+      sourceGeneration,
+      publicationId: entry.publicationId,
+      producerId: entry.producerId,
+      consumerId: entry.consumerId,
+      cloudflareSessionId: entry.cloudflareSessionId,
+      cloudflareTrackName: entry.cloudflareTrackName,
+      nativeTrackHandle: entry.nativeTrackHandle || entry.track?.id,
+      logicalStreamId: entry.logicalStreamId,
+      variantId: entry.variantId,
+    });
   }
 
   bind(entry: RemoteMediaEntry, { staged = false }: { staged?: boolean } = {}) {
@@ -140,6 +241,36 @@ export class RemoteMediaRegistry {
           }
         : entry;
     entry = normalizedEntry;
+    const existingConvergence = this.remoteSourceConvergence.get(entry.key);
+    const previousEntry =
+      this.videoFeeds.value.get(entry.key) ||
+      this.audioFeeds.value.get(entry.key);
+    if (
+      previousEntry?.stream &&
+      entry.track?.kind === "video" &&
+      previousEntry.track?.kind === "video"
+    )
+      entry = { ...entry, stream: previousEntry.stream };
+    if (previousEntry?.stream && entry.stream && entry.track)
+      replaceMediaStreamTrack(entry.stream, entry.track);
+    const incarnation = this.createIncarnation(entry);
+    const isNewIncarnation =
+      !existingConvergence ||
+      existingConvergence.incarnation.receiverIncarnationId !==
+        incarnation.receiverIncarnationId;
+    if (isNewIncarnation && existingConvergence)
+      this.retireCurrentEntry(entry.key);
+    let convergenceState = this.remoteSourceConvergence.get(entry.key);
+    if (!convergenceState) {
+      convergenceState = createRemoteSourceConvergenceState(incarnation);
+      this.remoteSourceConvergence.set(entry.key, convergenceState);
+      advancePhase(convergenceState, "announced");
+    }
+    entry.incarnation = convergenceState.incarnation;
+    entry.receiverIncarnationId =
+      convergenceState.incarnation.receiverIncarnationId;
+    entry.convergenceState = convergenceState;
+
     if (entry.native && !entry.track) {
       const feeds = entry.kind === "video" ? this.videoFeeds : this.audioFeeds;
       const current = feeds.value.get(entry.key);
@@ -151,73 +282,64 @@ export class RemoteMediaRegistry {
           : isPairedScreenAudio(entry)
             ? this.screenReceivingFor(entry.userId)
             : entry.receiving !== false;
-      const normalized = {
-        ...entry,
-        stream: null,
-        receiving,
-        phase: "announced" as const,
-        connectionEpoch: entry.connectionEpoch,
-        sourceGeneration: entry.sourceGeneration,
-      };
+      setIntentionalReceivingDisabled(convergenceState, !receiving);
+      advancePhase(convergenceState, "transport-connected");
+      const normalized = { ...entry, stream: null, receiving };
       feeds.value.set(entry.key, normalized);
       triggerRef(feeds);
-      this.remoteSourcePhases.set(entry.key, "announced");
       if (entry.kind === "video") {
         this.onVideoReceivingChange?.(normalized, Boolean(receiving));
         if (entry.source === "screen")
           this.setPairedScreenAudioReceiving(entry.userId, receiving);
       } else if (isPairedScreenAudio(normalized))
         this.onVideoReceivingChange?.(normalized, Boolean(receiving));
+      this.startReceiverHealthSampling();
       return;
     }
     if (!entry?.track) return;
+    advancePhase(convergenceState, "transport-connected");
     const trackEntry = { ...entry, track: entry.track };
-    // Update FSM phase to renderable when track is available
-    if (
-      entry.sourceGeneration !== undefined &&
-      entry.connectionEpoch !== undefined
-    ) {
-      trackEntry.phase = "renderable" as const;
-      trackEntry.firstFrameAt = Date.now();
-    }
-    this.remoteSourcePhases.set(entry.key, "renderable");
     if (entry.track.kind === "video") {
       const current = this.videoFeeds.value.get(entry.key);
-      const stream =
-        current?.stream || entry.stream || new MediaStream([entry.track]);
-      if (current?.stream) replaceMediaStreamTrack(stream, entry.track);
+      const stream = entry.stream || new MediaStream([entry.track]);
       const receiving =
         entry.source === "screen"
           ? (this.receivingPreferences.get(entry.key) ??
             current?.receiving ??
             false)
-          : typeof document === "undefined" || !document.hidden;
+          : !import.meta.client || !document.hidden;
       entry.track.enabled = receiving;
+      setIntentionalReceivingDisabled(convergenceState, !receiving);
       this.videoFeeds.value.set(entry.key, { ...entry, stream, receiving });
       triggerRef(this.videoFeeds);
       if (entry.source === "screen") {
         this.onVideoReceivingChange?.(entry, receiving);
         this.setPairedScreenAudioReceiving(entry.userId, receiving);
       }
+      this.startReceiverHealthSampling();
       return;
     }
-    this.remove(entry.key);
     const receiving = isPairedScreenAudio(entry)
       ? this.screenReceivingFor(entry.userId)
       : entry.receiving !== false;
     entry.track.enabled = receiving;
+    setIntentionalReceivingDisabled(convergenceState, !receiving);
     this.audioFeeds.value.set(entry.key, { ...entry, receiving });
     triggerRef(this.audioFeeds);
     this.createAudioElement({ ...trackEntry, receiving }, staged);
     if (entry.source === "audio") this.startVoiceDetection(trackEntry);
     if (isPairedScreenAudio(entry))
       this.onVideoReceivingChange?.(entry, receiving);
+    this.startReceiverHealthSampling();
   }
 
   setVideoReceiving(key: string, receiving: boolean, persistPreference = true) {
     const entry = this.videoFeeds.value.get(key);
     if (!entry) return false;
+    const convergenceState = this.remoteSourceConvergence.get(key);
     if (entry.track) entry.track.enabled = Boolean(receiving);
+    if (convergenceState)
+      setIntentionalReceivingDisabled(convergenceState, !receiving);
     if (entry.source === "screen" && persistPreference)
       this.receivingPreferences.set(key, Boolean(receiving));
     this.videoFeeds.value.set(key, {
@@ -228,6 +350,67 @@ export class RemoteMediaRegistry {
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
     if (entry.source === "screen" && persistPreference)
       this.setPairedScreenAudioReceiving(entry.userId, receiving);
+    if (receiving) this.startReceiverHealthSampling();
+    return true;
+  }
+
+  markFirstFrame(
+    key: string,
+    expectedReceiverIncarnation: string | null = null,
+    at = Date.now(),
+    fallback = false,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
+  ) {
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    if (!convergenceState) return false;
+    if (
+      expectedReceiverIncarnation &&
+      convergenceState.incarnation.receiverIncarnationId !==
+        expectedReceiverIncarnation
+    )
+      return false;
+    const changed = recordFirstFrameEvidence(convergenceState, at, {
+      fallback,
+    });
+    if (!changed) return false;
+    if (observationMode) {
+      convergenceState.presentationObservationMode = observationMode;
+      if (convergenceState.rtpEvidence.kind === "video")
+        convergenceState.rtpEvidence.observedPresentationProgressCount =
+          convergenceState.rtpEvidence.presentationProgressCount;
+    }
+    if (convergenceState.stallState.cause === "first-frame-timeout")
+      clearStall(convergenceState);
+    const video = this.videoFeeds.value.get(key);
+    if (video) {
+      this.videoFeeds.value.set(key, {
+        ...video,
+        firstFrameAt: video.firstFrameAt || at,
+      });
+      triggerRef(this.videoFeeds);
+    }
+    return true;
+  }
+
+  markFramePresented(
+    key: string,
+    expectedReceiverIncarnation: string | null = null,
+    at = Date.now(),
+    mode: Exclude<RemotePresentationObservationMode, "unavailable"> = "native",
+  ) {
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    if (!convergenceState) return false;
+    if (
+      expectedReceiverIncarnation &&
+      convergenceState.incarnation.receiverIncarnationId !==
+        expectedReceiverIncarnation
+    )
+      return false;
+    const changed = recordPresentationProgress(convergenceState, at, mode);
+    if (!changed) return false;
+    if (convergenceState.stallState.cause === "render-stall")
+      clearStall(convergenceState);
+    promoteConvergence(convergenceState, at);
     return true;
   }
 
@@ -252,11 +435,15 @@ export class RemoteMediaRegistry {
 
   updateAudioReceiving(entry: RemoteMediaEntry, receiving: boolean) {
     const key = entry.key;
+    const convergenceState = this.remoteSourceConvergence.get(key);
     entry.receiving = Boolean(receiving);
     if (entry.track) entry.track.enabled = Boolean(receiving);
+    if (convergenceState)
+      setIntentionalReceivingDisabled(convergenceState, !receiving);
     this.audioFeeds.value.set(key, { ...entry });
     triggerRef(this.audioFeeds);
     this.onVideoReceivingChange?.(entry, Boolean(receiving));
+    if (receiving) this.startReceiverHealthSampling();
     return true;
   }
 
@@ -316,7 +503,11 @@ export class RemoteMediaRegistry {
     if (owner?.track && current.track !== owner.track) return;
     this.audioFeeds.value.delete(key);
     this.videoFeeds.value.delete(key);
-    this.remoteSourcePhases.delete(key);
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    if (convergenceState) {
+      retireIncarnation(convergenceState);
+      this.remoteSourceConvergence.delete(key);
+    }
     triggerRef(this.audioFeeds);
     triggerRef(this.videoFeeds);
     if (audio) this.removeAudioTrack(audio);
@@ -333,6 +524,7 @@ export class RemoteMediaRegistry {
   }
 
   clear() {
+    this.stopReceiverHealthSampling();
     const keys = new Set([
       ...this.audioFeeds.value.keys(),
       ...this.videoFeeds.value.keys(),
@@ -423,7 +615,7 @@ export class RemoteMediaRegistry {
     this.audioContextToken = contextToken;
     this.audioContext = context;
     const sinkId = this.getOutputDevice();
-    if (sinkId && typeof context.setSinkId === "function") {
+    if (sinkId && context.setSinkId instanceof Function) {
       try {
         Promise.resolve(context.setSinkId(sinkId)).catch((error) => {
           if (
@@ -489,7 +681,7 @@ export class RemoteMediaRegistry {
   applyOutputDevice() {
     const sinkId = this.getOutputDevice();
     const context = this.audioContext;
-    if (!context || typeof context.setSinkId !== "function") {
+    if (!context || !(context.setSinkId instanceof Function)) {
       if (sinkId)
         this.publishPlaybackState(
           null,
@@ -672,13 +864,13 @@ export class RemoteMediaRegistry {
     graph.resumeTimer?.unref?.();
   }
 
-  async recoverOutputDevice(
+  async recoverOutputDevice<T>(
     output: AudioContext,
     userId: string | number | null,
-    error: unknown,
+    error: T,
   ) {
     this.publishPlaybackState(userId, "output-failed", error);
-    if (typeof output.setSinkId !== "function") return false;
+    if (!(output.setSinkId instanceof Function)) return false;
     try {
       await output.setSinkId("");
       this.publishPlaybackState(userId, "default-output");
@@ -689,10 +881,10 @@ export class RemoteMediaRegistry {
     }
   }
 
-  publishPlaybackState(
+  publishPlaybackState<T>(
     userId: string | number | null,
     state: string,
-    error: unknown = null,
+    error: T | null = null,
   ) {
     try {
       const result = this.onPlaybackState?.({
@@ -703,7 +895,7 @@ export class RemoteMediaRegistry {
             ? { name: error.name, message: error.message }
             : null,
       });
-      Promise.resolve(result).catch((callbackError: unknown) => {
+      Promise.resolve(result).catch((callbackError) => {
         console.warn("[Media] playback-state observer failed", callbackError);
       });
     } catch (callbackError) {
@@ -799,7 +991,7 @@ export class RemoteMediaRegistry {
   ) {
     try {
       const result = this.onSpeaking?.(String(userId ?? ""), speaking);
-      Promise.resolve(result).catch((error: unknown) => {
+      Promise.resolve(result).catch((error) => {
         console.warn("[Media] speaking observer failed", error);
       });
     } catch (error) {
@@ -819,12 +1011,8 @@ export class RemoteMediaRegistry {
             ?.tracks.get(detector.key);
           if (!playbackTrack?.active || playbackTrack.entry.receiving === false)
             continue;
-          detector.analyser.getByteTimeDomainData(
-            detector.samples as unknown as Uint8Array<ArrayBuffer>,
-          );
-          const levelDb = byteTimeDomainLevelDb(
-            detector.samples as unknown as Uint8Array<ArrayBuffer>,
-          );
+          detector.analyser.getByteTimeDomainData(detector.samples);
+          const levelDb = byteTimeDomainLevelDb(detector.samples);
           const sensitivity =
             this.getAttenuation({})?.sensitivity || "standard";
           const thresholdOffset =
@@ -904,5 +1092,286 @@ export class RemoteMediaRegistry {
     this.applyAttenuation();
     this.voiceDetectors.delete(key);
     if (!this.voiceDetectors.size) this.stopVoiceDetectionScheduler();
+  }
+
+  receiverIsCurrent(
+    key: string,
+    expectedReceiverIncarnation: string | RemoteSourceIncarnation,
+  ) {
+    const state = this.remoteSourceConvergence.get(key);
+    if (!state) return false;
+    const expected = isExternalString(expectedReceiverIncarnation)
+      ? expectedReceiverIncarnation
+      : expectedReceiverIncarnation.receiverIncarnationId;
+    return state.incarnation.receiverIncarnationId === expected;
+  }
+
+  applyRtpEvidence(
+    key: string,
+    expectedReceiverIncarnation: string | RemoteSourceIncarnation,
+    stats: RemoteReceiverStats,
+    audio: boolean,
+  ) {
+    if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return false;
+    const state = this.remoteSourceConvergence.get(key);
+    if (!state) return false;
+    const previousNetworkProgressAt = state.rtpEvidence.lastNetworkProgressAt;
+    const previousDecodeProgressAt =
+      state.rtpEvidence.kind === "video"
+        ? state.rtpEvidence.lastDecodeProgressAt
+        : null;
+    const previousDecodedFrames =
+      state.rtpEvidence.kind === "video"
+        ? state.rtpEvidence.lastFramesDecoded
+        : null;
+    const previousPresentationCount =
+      state.rtpEvidence.kind === "video"
+        ? state.rtpEvidence.presentationProgressCount
+        : null;
+    const previousCause = state.stallState.cause;
+    const progression = audio
+      ? checkAudioRtpProgression(state, stats)
+      : checkRtpProgression(state, stats);
+    if (state.stallState.detected) {
+      const networkResumed =
+        state.rtpEvidence.lastNetworkProgressAt !== previousNetworkProgressAt;
+      const decodeResumed =
+        state.rtpEvidence.kind === "video" &&
+        state.rtpEvidence.lastFramesDecoded > (previousDecodedFrames ?? 0) &&
+        (state.rtpEvidence.lastDecodeProgressAt !== previousDecodeProgressAt ||
+          state.rtpEvidence.lastFramesDecoded !== previousDecodedFrames);
+      const presentationResumed =
+        state.rtpEvidence.kind === "video" &&
+        state.rtpEvidence.presentationProgressCount !==
+          previousPresentationCount;
+      if (
+        (previousCause === "no-rtp" && networkResumed) ||
+        (previousCause === "first-frame-timeout" &&
+          state.firstFrameEvidence.received) ||
+        (previousCause === "decoder-stall" && decodeResumed) ||
+        (previousCause === "render-stall" && presentationResumed) ||
+        (!previousCause && progression)
+      )
+        clearStall(state);
+    }
+    promoteConvergence(state);
+    this.evaluateReceiverHealth(key, expectedReceiverIncarnation);
+    return progression || state.rtpEvidence.lastRtpSampleAt !== null;
+  }
+
+  evaluateReceiverHealth(
+    key: string,
+    expectedReceiverIncarnation: string | RemoteSourceIncarnation,
+  ) {
+    if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return false;
+    const state = this.remoteSourceConvergence.get(key);
+    if (!state) return false;
+    if (detectStall(state, DEFAULT_REMOTE_SOURCE_FSM_CONFIG)) {
+      this.scheduleReceiverRecovery(key, state);
+      return true;
+    }
+    return false;
+  }
+
+  updateRtpStats(
+    key: string,
+    expectedReceiverIncarnation: string | RemoteSourceIncarnation,
+    stats: RemoteReceiverStats,
+  ) {
+    return this.applyRtpEvidence(
+      key,
+      expectedReceiverIncarnation,
+      stats,
+      false,
+    );
+  }
+
+  updateAudioRtpStats(
+    key: string,
+    expectedReceiverIncarnation: string | RemoteSourceIncarnation,
+    stats: RemoteReceiverStats,
+  ) {
+    return this.applyRtpEvidence(key, expectedReceiverIncarnation, stats, true);
+  }
+
+  scheduleReceiverRecovery(key: string, state: RemoteSourceConvergenceState) {
+    const entry =
+      this.videoFeeds.value.get(key) || this.audioFeeds.value.get(key) || null;
+    if (!entry) return false;
+    return scheduleRecovery(
+      state,
+      DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
+      () =>
+        void this.runReceiverRecovery(
+          key,
+          state.incarnation.receiverIncarnationId,
+        ),
+    );
+  }
+
+  async runReceiverRecovery(key: string, expectedReceiverIncarnation: string) {
+    if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return;
+    const state = this.remoteSourceConvergence.get(key);
+    const entry =
+      this.videoFeeds.value.get(key) || this.audioFeeds.value.get(key) || null;
+    if (
+      !state ||
+      !entry ||
+      !this.receiverIsCurrent(key, expectedReceiverIncarnation)
+    )
+      return;
+    const attempt = state.stallState.recoveryAttempt;
+    let recovered = false;
+    try {
+      recovered =
+        (await this.onReceiverRecovery?.(
+          entry,
+          attempt,
+          state.abortController.signal,
+        )) === true;
+    } catch {
+      recovered = false;
+    }
+    if (!this.receiverIsCurrent(key, expectedReceiverIncarnation)) return;
+    if (
+      !state.stallState.detected ||
+      !["stalled", "recovering"].includes(state.phase)
+    )
+      return;
+    if (recovered) {
+      clearStall(state);
+      return;
+    }
+    if (attempt >= DEFAULT_REMOTE_SOURCE_FSM_CONFIG.maxRecoveryAttempts) {
+      state.failed = true;
+      state.phase = "failed";
+      this.onReceiverFailed?.(entry);
+      return;
+    }
+    this.scheduleReceiverRecovery(key, state);
+  }
+
+  startReceiverHealthSampling() {
+    if (!this.getReceiverStats) return;
+    if (this.receiverHealthRunning) {
+      this.receiverHealthRestartRequested = true;
+      return;
+    }
+    if (this.receiverHealthTimer) return;
+    this.receiverHealthRestartRequested = false;
+    const generation = this.receiverHealthGeneration;
+    const sample = async () => {
+      this.receiverHealthTimer = null;
+      if (
+        this.receiverHealthRunning ||
+        generation !== this.receiverHealthGeneration
+      )
+        return;
+      this.receiverHealthRunning = true;
+      const entries = new Map<string, RemoteMediaEntry>();
+      for (const entry of this.audioFeeds.value.values())
+        entries.set(entry.key, entry);
+      for (const entry of this.videoFeeds.value.values())
+        entries.set(entry.key, entry);
+      const activeEntries = [...entries.values()].filter((entry) => {
+        const state = this.remoteSourceConvergence.get(entry.key);
+        return (
+          state &&
+          !state.retired &&
+          !state.failed &&
+          !state.intentionalReceivingDisabled &&
+          entry.receiving !== false
+        );
+      });
+      if (!activeEntries.length) {
+        this.receiverHealthRunning = false;
+        if (
+          generation !== this.receiverHealthGeneration &&
+          this.receiverHealthRestartRequested
+        ) {
+          this.receiverHealthRestartRequested = false;
+          this.startReceiverHealthSampling();
+        }
+        return;
+      }
+      await Promise.all(
+        activeEntries.map(async (entry) => {
+          const state = this.remoteSourceConvergence.get(entry.key);
+          if (!state) return;
+          const expected = state.incarnation.receiverIncarnationId;
+          let stats: RemoteReceiverStats | null = null;
+          try {
+            stats = (await this.getReceiverStats?.(entry)) || null;
+          } catch {
+            stats = null;
+          }
+          if (stats && this.receiverIsCurrent(entry.key, expected))
+            this.applyRtpEvidence(
+              entry.key,
+              expected,
+              stats,
+              state.kind === "audio",
+            );
+          else this.evaluateReceiverHealth(entry.key, expected);
+        }),
+      );
+      this.receiverHealthRunning = false;
+      if (generation !== this.receiverHealthGeneration) {
+        if (this.receiverHealthRestartRequested) {
+          this.receiverHealthRestartRequested = false;
+          this.startReceiverHealthSampling();
+        }
+        return;
+      }
+      const hasEntries =
+        this.audioFeeds.value.size > 0 || this.videoFeeds.value.size > 0;
+      if (hasEntries && this.getReceiverStats) {
+        this.receiverHealthTimer = setTimeout(
+          sample,
+          DEFAULT_REMOTE_SOURCE_FSM_CONFIG.statsSampleIntervalMs,
+        );
+        this.receiverHealthTimer.unref?.();
+      }
+    };
+    void sample();
+  }
+
+  stopReceiverHealthSampling() {
+    this.receiverHealthGeneration += 1;
+    this.receiverHealthRestartRequested = false;
+    if (this.receiverHealthTimer) clearTimeout(this.receiverHealthTimer);
+    this.receiverHealthTimer = null;
+  }
+
+  isSourceRenderable(key: string): boolean {
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    return convergenceState?.phase === "renderable";
+  }
+
+  getConvergenceState(key: string): RemoteSourceConvergenceState | undefined {
+    return this.remoteSourceConvergence.get(key);
+  }
+
+  clearStallForKey(key: string) {
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    if (convergenceState) clearStall(convergenceState);
+  }
+
+  scheduleRecoveryForKey(
+    key: string,
+    expectedReceiverIncarnation: string,
+    onRecovery: () => void,
+  ) {
+    const convergenceState = this.remoteSourceConvergence.get(key);
+    if (
+      !convergenceState ||
+      !this.receiverIsCurrent(key, expectedReceiverIncarnation)
+    )
+      return false;
+    return scheduleRecovery(
+      convergenceState,
+      DEFAULT_REMOTE_SOURCE_FSM_CONFIG,
+      onRecovery,
+    );
   }
 }

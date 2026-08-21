@@ -5,7 +5,7 @@ export const SOUNDBOARD_OUTPUT_BITRATE = "24k";
 export const SOUNDBOARD_MAX_ICON_SOURCE_BYTES = 5 * 1024 * 1024;
 
 export function normalizeSoundboardText(
-  value: unknown,
+  value: ExternalField,
   max: number,
   fallback = "",
 ) {
@@ -31,7 +31,7 @@ export function normalizeSoundboardMetadata(
 
 export function canManageSoundboardClip(
   clip: SoundboardClip | null | undefined,
-  userId: unknown,
+  userId: ExternalField,
   permissions: readonly string[] = [],
 ) {
   return (
@@ -78,3 +78,4 @@ import type {
   SoundboardMetadataInput,
   SoundboardRecord,
 } from "./types/soundboard.ts";
+import type { ExternalField } from "./types/external.ts";

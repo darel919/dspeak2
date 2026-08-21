@@ -1,31 +1,43 @@
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { SignalingMessage } from "./media-signaling.ts";
 import type { RtpStatsSample } from "../rtc-media-stats.ts";
+import type { TopologyState } from "./topology-controller.ts";
 
 export interface DiagnosticSourceEntry {
   source: string;
   key?: string;
   peerId?: string | number | null;
   track: MediaStreamTrack;
-  consumer?: { getStats: () => Promise<unknown> };
+  consumer?: { getStats: () => Promise<MediaCommandResult> };
+  incarnationId?: string;
 }
 
 export interface DiagnosticProvider {
-  producers?: Map<string, { producer: DiagnosticProducer }>;
-  stats?: () => Promise<unknown>;
-  diagnosticStats?: () => Promise<unknown>;
-  getSnapshot?: () => Promise<unknown>;
-  getOutboundTrackStats?: (source: string) => Promise<unknown>;
+  producers?: ReadonlyMap<string, DiagnosticProducerEntry>;
+  stats?: () => Promise<MediaCommandResult>;
+  diagnosticStats?: () => Promise<MediaCommandResult>;
+  getSnapshot?: () => Promise<MediaCommandResult>;
+  getOutboundTrackStats?: (source: string) => Promise<MediaCommandResult>;
   getInboundTrackStats?: (
-    peerId: string | number | null | undefined,
+    peerId: string | number,
     track: MediaStreamTrack,
-  ) => Promise<unknown>;
-  getOutboundTrackParameters?: (source: string) => DiagnosticParameters | null;
+  ) => Promise<MediaCommandResult>;
+  getOutboundTrackParameters?: (source: string) => MediaCommandResult;
+}
+
+export interface DiagnosticProducerEntry {
+  producer?: DiagnosticProducer;
+  track?: MediaStreamTrack;
+  mid?: string | null;
 }
 
 export interface DiagnosticProducer {
   id?: string;
-  getStats: () => Promise<unknown>;
+  getStats: () => Promise<MediaCommandResult>;
   rtpParameters?: DiagnosticParameters;
 }
 
@@ -42,11 +54,12 @@ export interface DiagnosticTopologyGraph {
 
 export interface HybridMediaDiagnosticsContext {
   collectRtpStats: (
-    report: unknown,
+    report: ExternalValue,
     direction: string,
     settings: MediaTrackSettings | Record<string, unknown>,
     previous?: RtpStatsSample | null,
     kind?: string | null,
+    selector?: { trackId?: string; mid?: string | null },
   ) => {
     sample?: RtpStatsSample | null;
     stats?: Record<string, unknown> | null;
@@ -54,23 +67,25 @@ export interface HybridMediaDiagnosticsContext {
   getActiveProvider: () => string | null;
   getActiveRouteProvider?: () => string | null;
   getAudioLatencySnapshot?: () => Record<string, unknown>;
-  getP2pMesh: () => unknown;
+  getP2pMesh: () => DiagnosticProvider | null;
   getRequestedVideoSettings: (source: string) => { frameRate?: number };
-  getLifecycle: () => unknown;
-  getProtocolState: () => unknown;
-  getReadiness: () => unknown;
-  getSfu: () => unknown;
+  getLifecycle: () => MediaCommandResult;
+  getProtocolState: () => MediaCommandResult;
+  getReadiness: () => MediaCommandResult;
+  getSfu: () => DiagnosticProvider | null;
   localSources: Map<string, DiagnosticSourceEntry>;
   playbackState: Ref<string>;
   peerRoundTripTimes: Ref<Record<string, unknown>>;
   remoteAudioFeeds: Ref<Map<string, unknown>>;
-  refreshTopologyGraph: (pair: null) => void;
+  refreshTopologyGraph: (pair: ExternalValue) => void;
   remoteVideoFeeds: Ref<Map<string, unknown>>;
-  send: (message: SignalingMessage) => unknown;
+  send: (message: SignalingMessage) => MediaCommandResult;
   sfuRoundTripTime: Ref<number | null>;
   topologyGraph: Ref<DiagnosticTopologyGraph>;
-  topologyState: Ref<{ epoch?: number }>;
-  updateP2pStats: (edges: unknown[]) => unknown;
+  topologyState: Ref<
+    Pick<TopologyState, "epoch" | "mode" | "target" | "targetTransport">
+  >;
+  updateP2pStats: (edges: unknown[]) => MediaCommandResult;
   rtpStatsSamples: Map<string, RtpStatsSample>;
 }
 

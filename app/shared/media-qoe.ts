@@ -1,26 +1,29 @@
+import { isExternalRecord } from "./types/boundary.ts";
+import type { MediaQoeRecord, QoeDecisionOptions } from "./types/media-qoe.ts";
+
 const DEFAULT_MIGRATION_STABILITY_MS = 10_000;
 const DEFAULT_LATENCY_IMPROVEMENT_MS = 20;
 
-function isMediaQoeRecord(value: unknown): value is MediaQoeRecord {
-  return Boolean(value) && typeof value === "object";
+function isMediaQoeRecord<T>(value: T): value is T & MediaQoeRecord {
+  return isExternalRecord(value);
 }
 
-function recordsFrom(value: unknown): MediaQoeRecord[] {
+function recordsFrom<T>(value: T): MediaQoeRecord[] {
   return Array.isArray(value) ? value.filter(isMediaQoeRecord) : [];
 }
 
-function finiteOrNull(value: unknown) {
+function finiteOrNull<T>(value: T) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function normalizeTimeMs(value: unknown) {
+function normalizeTimeMs<T>(value: T) {
   const number = finiteOrNull(value);
   if (number == null) return null;
   return Math.abs(number) < 1 ? number * 1000 : number;
 }
 
-function normalizePercent(value: unknown) {
+function normalizePercent<T>(value: T) {
   return finiteOrNull(value);
 }
 
@@ -80,7 +83,7 @@ export function createMediaQoeReport({
   };
 }
 
-export function mediaQoePathsFromStats(stats: unknown): MediaQoeRecord[] {
+export function mediaQoePathsFromStats<T>(stats: T): MediaQoeRecord[] {
   if (Array.isArray(stats)) return recordsFrom(stats);
   if (!isMediaQoeRecord(stats)) return [];
   if (Array.isArray(stats.paths)) return recordsFrom(stats.paths);
@@ -223,4 +226,3 @@ export function shouldMigrateForQoe(
 }
 
 export { DEFAULT_LATENCY_IMPROVEMENT_MS, DEFAULT_MIGRATION_STABILITY_MS };
-import type { MediaQoeRecord, QoeDecisionOptions } from "./types/media-qoe.ts";

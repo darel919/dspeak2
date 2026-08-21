@@ -1,4 +1,6 @@
 declare module "web-push" {
+  import type { ExternalField } from "../../shared/types/external.ts";
+
   export interface PushSubscription {
     endpoint: string;
     keys: {
@@ -23,7 +25,7 @@ declare module "web-push" {
       subscription: PushSubscription,
       payload: string,
       options?: SendNotificationOptions,
-    ): Promise<unknown>;
+    ): Promise<ExternalField>;
   }
 
   const webpush: WebPushClient;

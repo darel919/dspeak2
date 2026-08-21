@@ -205,7 +205,7 @@ test("chat messages preserve attachment and thread metadata end to end", () => {
   );
   assert.match(
     api,
-    /const contentValue = body\.content[\s\S]*?const hasContent = typeof contentValue === "string"/,
+    /const contentValue = parseExternalString\(body\.content\)[\s\S]*?const hasContent = contentValue !== null/,
   );
   assert.match(api, /validateMessageAttachments\(/);
   assert.match(api, /validateReplyTarget\(/);
@@ -518,7 +518,7 @@ test("pin state is synchronized through the realtime store contract", () => {
   assert.match(store, /case "message_pinned":[\s\S]*?case "message_unpinned":/);
   assert.match(
     store,
-    /context\.updateMessage\(\{[\s\S]*?id: String\(data\.data\?\.messageId[\s\S]*?pinned:/,
+    /context\.updateMessage\(\{[\s\S]*?id: messageId,[\s\S]*?pinned:/,
   );
   assert.match(store, /pinChanged/);
   assert.match(

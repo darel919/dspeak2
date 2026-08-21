@@ -16,7 +16,3 @@ export interface OAuthStorage {
   setItem: (key: string, value: string) => Promise<void>;
   removeItem: (key: string) => Promise<void>;
 }
-export interface PublicBytes {
-  body: Uint8Array;
-  contentType: string | null;
-}

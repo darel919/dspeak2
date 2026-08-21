@@ -92,36 +92,95 @@
               </div>
             </div>
             <main v-else class="home-workspace flex-1 overflow-y-auto">
-              <div class="metro-page-content py-12 lg:py-16">
-                <header class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
-                  <div>
-                    <p class="mb-3 text-sm font-semibold text-primary">
-                      Your workspace
-                    </p>
-                    <h1 class="metro-title max-w-3xl">
-                      Where do you want to talk?
-                    </h1>
-                    <p class="metro-description mt-5 text-lg">
-                      Pick up a room below, or make a new place for your next
-                      conversation.
-                    </p>
-                  </div>
-                  <div
-                    class="hidden border-l border-base-300 pl-8 lg:flex lg:flex-col lg:justify-end"
-                  >
-                    <span class="text-5xl font-light">{{
-                      roomsStore.rooms.length
-                    }}</span>
-                    <span class="mt-2 text-sm text-base-content/65">
-                      {{ roomsStore.rooms.length === 1 ? "room" : "rooms" }} in
-                      your rail
-                    </span>
-                  </div>
+              <div class="metro-page-content py-8 lg:py-10">
+                <header class="home-index-header">
+                  <p class="mb-3 text-sm font-semibold text-primary">
+                    Your workspace
+                  </p>
+                  <h1 class="metro-title max-w-3xl">
+                    Welcome, {{ homeUserName }}.
+                  </h1>
+                  <p class="metro-description mt-4 text-lg">
+                    Catch up with your people, then pick a room to continue.
+                  </p>
                 </header>
 
-                <section class="mt-14" aria-labelledby="home-rooms-title">
-                  <div class="mb-5 flex items-end justify-between gap-4">
-                    <div>
+                <section
+                  class="home-feed-section mt-8 lg:mt-10"
+                  aria-labelledby="home-notifications-title"
+                >
+                  <div class="home-section-heading">
+                    <div class="home-section-heading-copy">
+                      <span class="home-section-icon" aria-hidden="true">
+                        <Icon name="lucide:bell" class="size-5" />
+                      </span>
+                      <div>
+                        <h2
+                          id="home-notifications-title"
+                          class="metro-section-title"
+                        >
+                          Notifications
+                        </h2>
+                        <p class="mt-1 text-sm text-base-content/65">
+                          {{
+                            notificationsStore.unreadCount
+                              ? `${notificationsStore.unreadCount} unread`
+                              : "You’re all caught up"
+                          }}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="homeNotifications.length" class="home-feed-list">
+                    <button
+                      v-for="item in homeNotifications"
+                      :key="item.id"
+                      type="button"
+                      class="home-feed-row home-notification-row metro-transition"
+                      :class="!item.read_at && 'home-feed-row--unread'"
+                      @click="openHomeNotification(item)"
+                    >
+                      <span class="home-feed-row-icon" aria-hidden="true">
+                        <Icon name="lucide:inbox" class="size-4" />
+                      </span>
+                      <span class="min-w-0 flex-1 text-left">
+                        <strong class="block truncate text-sm">
+                          {{ notificationTitle(item) }}
+                        </strong>
+                        <span
+                          class="mt-1 block truncate text-sm text-base-content/65"
+                        >
+                          {{ notificationPreview(item) }}
+                        </span>
+                      </span>
+                      <span
+                        v-if="!item.read_at"
+                        class="home-unread-dot"
+                        aria-label="Unread"
+                      ></span>
+                      <Icon
+                        name="lucide:arrow-up-right"
+                        class="size-4 shrink-0 text-base-content/40"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </div>
+                  <div v-else class="home-feed-empty">
+                    <Icon
+                      name="lucide:check-check"
+                      class="size-5 text-primary"
+                      aria-hidden="true"
+                    />
+                    <p class="text-sm text-base-content/65">
+                      Nothing needs your attention right now.
+                    </p>
+                  </div>
+                </section>
+
+                <div class="home-directory-layout mt-8 lg:mt-10">
+                  <section aria-labelledby="home-rooms-title">
+                    <div class="mb-5">
                       <h2 id="home-rooms-title" class="metro-section-title">
                         Your rooms
                       </h2>
@@ -129,74 +188,61 @@
                         Continue where your team left off.
                       </p>
                     </div>
-                    <NuxtLink
-                      to="/room/create"
-                      class="metro-btn metro-btn--secondary hidden min-h-11 items-center gap-2 px-3 text-sm font-semibold sm:flex"
+
+                    <div
+                      v-if="roomsStore.loading && !roomsStore.rooms.length"
+                      class="home-room-grid"
+                      aria-label="Loading rooms"
                     >
-                      Create a room
+                      <div
+                        v-for="index in 3"
+                        :key="index"
+                        class="home-room-row bg-base-200"
+                      >
+                        <div class="metro-skeleton size-12 shrink-0" />
+                        <div class="min-w-0 flex-1">
+                          <div class="metro-skeleton h-5 w-2/3" />
+                          <div class="metro-skeleton mt-2 h-4 w-1/2" />
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      v-else-if="roomsStore.error && !roomsStore.rooms.length"
+                      class="metro-status metro-status--error"
+                      role="alert"
+                    >
                       <Icon
-                        name="lucide:plus"
-                        class="size-4"
+                        name="lucide:circle-alert"
+                        class="mt-0.5 size-5 shrink-0"
                         aria-hidden="true"
                       />
-                    </NuxtLink>
-                  </div>
-
-                  <div
-                    v-if="roomsStore.loading && !roomsStore.rooms.length"
-                    class="grid gap-px bg-base-300 sm:grid-cols-2 xl:grid-cols-3"
-                    aria-label="Loading rooms"
-                  >
-                    <div
-                      v-for="index in 3"
-                      :key="index"
-                      class="h-44 bg-base-200 p-6"
-                    >
-                      <div class="metro-skeleton size-12" />
-                      <div class="metro-skeleton mt-7 h-5 w-2/3" />
+                      <div>
+                        <strong class="block text-base-content">
+                          Rooms could not be loaded
+                        </strong>
+                        <p class="mt-1 text-sm text-base-content/70">
+                          {{ roomsStore.error }}
+                        </p>
+                        <button
+                          type="button"
+                          class="metro-btn mt-4"
+                          @click="roomsStore.fetchRooms()"
+                        >
+                          Try again
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <div
-                    v-else-if="roomsStore.error && !roomsStore.rooms.length"
-                    class="metro-status metro-status--error"
-                    role="alert"
-                  >
-                    <Icon
-                      name="lucide:circle-alert"
-                      class="mt-0.5 size-5 shrink-0"
-                      aria-hidden="true"
-                    />
-                    <div>
-                      <strong class="block text-base-content">
-                        Rooms could not be loaded
-                      </strong>
-                      <p class="mt-1 text-sm text-base-content/70">
-                        {{ roomsStore.error }}
-                      </p>
-                      <button
-                        type="button"
-                        class="metro-btn mt-4"
-                        @click="roomsStore.fetchRooms()"
+                    <div v-else class="home-room-grid">
+                      <NuxtLink
+                        v-for="room in roomsStore.rooms"
+                        :key="room.id"
+                        :to="`/room/${room.id}`"
+                        class="home-room-row metro-transition group bg-base-200 hover:bg-base-300"
+                        :aria-busy="openingRoomId === String(room.id)"
+                        @pointerenter="prefetchRoom(room.id)"
+                        @focus="prefetchRoom(room.id)"
+                        @click.prevent="openRoom(room)"
                       >
-                        Try again
-                      </button>
-                    </div>
-                  </div>
-                  <div
-                    v-else
-                    class="home-room-grid grid gap-px bg-base-300 sm:grid-cols-2 xl:grid-cols-3"
-                  >
-                    <NuxtLink
-                      v-for="room in roomsStore.rooms"
-                      :key="room.id"
-                      :to="`/room/${room.id}`"
-                      class="home-room-tile metro-transition group flex min-h-44 flex-col justify-between bg-base-200 p-6 hover:bg-base-300"
-                      :aria-busy="openingRoomId === String(room.id)"
-                      @pointerenter="prefetchRoom(room.id)"
-                      @focus="prefetchRoom(room.id)"
-                      @click.prevent="openRoom(room)"
-                    >
-                      <div class="flex items-start justify-between gap-4">
                         <div
                           class="grid size-12 shrink-0 place-items-center overflow-hidden bg-primary text-sm font-semibold text-primary-content"
                         >
@@ -208,65 +254,62 @@
                           />
                           <span v-else>{{ roomInitials(room.name) }}</span>
                         </div>
+                        <div class="min-w-0 flex-1">
+                          <h3 class="truncate text-lg font-semibold">
+                            {{ room.name }}
+                          </h3>
+                          <p class="mt-1 truncate text-sm text-base-content/65">
+                            {{ room.desc || "Open this room" }}
+                          </p>
+                        </div>
                         <Icon
                           name="lucide:arrow-up-right"
-                          class="size-5 text-base-content/45 group-hover:text-primary"
+                          class="size-5 shrink-0 text-base-content/45 group-hover:text-primary"
                           aria-hidden="true"
                         />
-                      </div>
-                      <div class="mt-8 min-w-0">
-                        <h3 class="truncate text-xl font-semibold">
-                          {{ room.name }}
-                        </h3>
-                        <p class="mt-1 truncate text-sm text-base-content/65">
-                          {{ room.desc || "Open this room" }}
-                        </p>
-                      </div>
-                    </NuxtLink>
-                    <NuxtLink
-                      v-if="!roomsStore.rooms.length"
-                      to="/room/create"
-                      class="home-room-tile metro-transition flex min-h-44 flex-col justify-between bg-primary p-6 text-primary-content hover:opacity-90"
-                    >
+                      </NuxtLink>
+                      <NuxtLink
+                        v-if="!roomsStore.rooms.length"
+                        to="/room/create"
+                        class="home-room-row home-room-empty-row metro-transition bg-primary text-primary-content hover:opacity-90"
+                      >
+                        <Icon
+                          name="lucide:plus"
+                          class="size-8 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <div class="min-w-0">
+                          <h3 class="text-lg font-semibold">
+                            Create your first room
+                          </h3>
+                          <p class="mt-1 text-sm opacity-80">
+                            Give your conversations a home.
+                          </p>
+                        </div>
+                      </NuxtLink>
+                    </div>
+                  </section>
+
+                  <aside class="home-room-utility" aria-label="Room actions">
+                    <div>
+                      <span class="block text-5xl font-light">
+                        {{ roomsStore.rooms.length }}
+                      </span>
+                      <span class="mt-2 block text-sm text-base-content/65">
+                        {{ roomsStore.rooms.length === 1 ? "room" : "rooms" }}
+                        in your rail
+                      </span>
+                    </div>
+                    <NuxtLink to="/room/create" class="metro-btn w-full">
+                      Create a room
                       <Icon
                         name="lucide:plus"
-                        class="size-10"
+                        class="size-4"
                         aria-hidden="true"
                       />
-                      <div class="mt-8">
-                        <h3 class="text-xl font-semibold">
-                          Create your first room
-                        </h3>
-                        <p class="mt-1 text-sm opacity-80">
-                          Give your conversations a home.
-                        </p>
-                      </div>
                     </NuxtLink>
-                  </div>
-                </section>
-
-                <section
-                  class="mt-16 grid border-l border-t border-base-300 md:grid-cols-3"
-                  aria-label="dSpeak capabilities"
-                >
-                  <div
-                    v-for="feature in homeFeatures"
-                    :key="feature.title"
-                    class="border-r border-b border-base-300 p-6"
-                  >
-                    <Icon
-                      :name="feature.icon"
-                      class="mb-8 size-7 text-primary"
-                      aria-hidden="true"
-                    />
-                    <h2 class="text-base font-semibold">{{ feature.title }}</h2>
-                    <p
-                      class="mt-2 text-sm leading-relaxed text-base-content/65"
-                    >
-                      {{ feature.description }}
-                    </p>
-                  </div>
-                </section>
+                  </aside>
+                </div>
               </div>
             </main>
           </div>
@@ -309,8 +352,10 @@ import { defineAsyncComponent } from "vue";
 import { useRoomsStore } from "../stores/rooms";
 import { useChannelsStore } from "../stores/channels";
 import { useAuthStore } from "../stores/auth";
+import { useNotificationsStore } from "../stores/notifications";
 import { MOBILE_BREAKPOINT_PX } from "../const/ui";
 import { usePreparedRoomNavigation } from "../composables/usePreparedRoomNavigation";
+import { publicDisplayName } from "~~/shared/user-profile.ts";
 
 const ChatWindow = defineAsyncComponent(
   () => import("../components/Chat/ChatWindow.vue"),
@@ -331,29 +376,12 @@ const MobileChannelList = defineAsyncComponent(
 const roomsStore = useRoomsStore();
 const channelsStore = useChannelsStore();
 const authStore = useAuthStore();
+const notificationsStore = useNotificationsStore();
 const clientMounted = ref(false);
 const router = useRouter();
 const route = useRoute();
 const config = useRuntimeConfig();
 const { openingRoomId, openRoom, prefetchRoom } = usePreparedRoomNavigation();
-
-const homeFeatures = [
-  {
-    icon: "lucide:messages-square",
-    title: "Messages stay in context",
-    description: "Move between room conversations without losing your place.",
-  },
-  {
-    icon: "lucide:audio-lines",
-    title: "Voice when words are not enough",
-    description: "Join a voice channel and talk without setting up a call.",
-  },
-  {
-    icon: "lucide:monitor-up",
-    title: "Share the work",
-    description: "Bring video and screen sharing into the same room.",
-  },
-];
 
 const selectedRoomId = ref(null);
 const selectedChannelId = ref(null);
@@ -367,10 +395,12 @@ const selectedChannel = computed(() =>
 
 const textChannels = computed(() => channelsStore.getTextChannels());
 const voiceChannels = computed(() => channelsStore.getMediaChannels());
+const homeUserName = computed(() => publicDisplayName(authStore.getUserData()));
+const homeNotifications = computed(() => notificationsStore.inbox.slice(0, 4));
 
 const isMobile = ref(false);
 let resizeHandler = null;
-if (typeof window !== "undefined") {
+if (import.meta.client) {
   const checkMobile = () => {
     isMobile.value = window.innerWidth < MOBILE_BREAKPOINT_PX;
   };
@@ -380,7 +410,7 @@ if (typeof window !== "undefined") {
 }
 
 onUnmounted(() => {
-  if (typeof window !== "undefined" && resizeHandler) {
+  if (import.meta.client && resizeHandler) {
     window.removeEventListener("resize", resizeHandler);
   }
 });
@@ -469,16 +499,140 @@ watch(
   isAuthenticated,
   async (newValue) => {
     if (newValue) {
-      await roomsStore.fetchRooms();
+      await Promise.allSettled([
+        roomsStore.fetchRooms(),
+        notificationsStore.initialize(),
+      ]);
     }
   },
   { immediate: true },
 );
+
+function notificationTitle(item) {
+  return item.title || "Notification";
+}
+
+function notificationPreview(item) {
+  return item.body || item.content || "You have a new notification.";
+}
+
+async function openHomeNotification(item) {
+  if (!item.read_at) await notificationsStore.markRead([item.id]);
+  notificationsStore.dismiss([item.id]).catch(() => {});
+  const roomId = item.room?.id || item.room;
+  const channelId = item.channel?.id || item.channel;
+  if (roomId && channelId) {
+    await navigateTo(`/room/${roomId}/${channelId}`);
+    return;
+  }
+  const conversationId = item.conversationId || item.conversation_id;
+  if (conversationId)
+    await navigateTo(
+      `/messages?conversationId=${encodeURIComponent(conversationId)}`,
+    );
+}
 </script>
 
 <style scoped>
 .home-workspace {
   background: var(--color-base-100);
+}
+
+.home-index-header {
+  padding-bottom: var(--metro-space-2);
+}
+
+.home-feed-section {
+  min-width: 0;
+  padding: var(--metro-space-5);
+  border: 1px solid var(--color-base-300);
+  background: var(--color-base-100);
+}
+
+.home-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--metro-space-4);
+}
+
+.home-section-heading-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--metro-space-3);
+}
+
+.home-section-icon,
+.home-feed-row-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--metro-accent);
+}
+
+.home-section-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.home-feed-list {
+  display: grid;
+  gap: 1px;
+  margin-top: var(--metro-space-4);
+  background: var(--color-base-300);
+}
+
+.home-feed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-3);
+  min-height: 4.5rem;
+  padding: var(--metro-space-3) var(--metro-space-4);
+  border: 0;
+  background: var(--color-base-200);
+  color: inherit;
+  text-decoration: none;
+}
+
+.home-feed-row:hover {
+  background: var(--color-base-300);
+}
+
+.home-feed-row:focus-visible {
+  outline: 2px solid var(--metro-accent);
+  outline-offset: -2px;
+}
+
+.home-feed-row--unread {
+  background: color-mix(in srgb, var(--metro-accent) 5%, var(--color-base-200));
+}
+
+.home-feed-row-icon {
+  width: 2rem;
+  height: 2rem;
+}
+
+.home-unread-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--metro-accent);
+}
+
+.home-feed-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--metro-space-3);
+  margin-top: var(--metro-space-4);
+  min-height: 3.5rem;
+  padding: var(--metro-space-3) var(--metro-space-4);
+  background: var(--color-base-200);
+}
+
+.home-directory-layout {
+  display: grid;
+  gap: var(--metro-space-8);
 }
 
 .home-room-grid {
@@ -487,37 +641,53 @@ watch(
   background: var(--color-base-300);
 }
 
-@media (min-width: 640px) {
-  .home-room-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1280px) {
-  .home-room-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-.home-room-tile {
+.home-room-row {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: 11rem;
-  padding: 1.5rem;
+  align-items: center;
+  gap: var(--metro-space-4);
+  min-height: 5.5rem;
+  padding: var(--metro-space-4);
   background: var(--color-base-200);
   text-decoration: none;
   color: inherit;
   transition: background-color 180ms cubic-bezier(0.1, 0.9, 0.2, 1);
 }
 
-.home-room-tile:hover {
+.home-room-row:hover {
   background: var(--color-base-300);
 }
 
-.home-room-tile:focus-visible {
+.home-room-row:focus-visible {
   outline: 2px solid var(--metro-accent);
   outline-offset: -2px;
+}
+
+.home-room-empty-row {
+  min-height: 6.5rem;
+}
+
+.home-room-utility {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--metro-space-6);
+  border-top: 1px solid var(--color-base-300);
+  padding-top: var(--metro-space-6);
+}
+
+@media (min-width: 1024px) {
+  .home-directory-layout {
+    grid-template-columns: minmax(0, 1fr) 13rem;
+    gap: var(--metro-space-10);
+  }
+
+  .home-room-utility {
+    min-height: 100%;
+    border-top: 0;
+    border-left: 1px solid var(--color-base-300);
+    padding-top: 0;
+    padding-left: var(--metro-space-6);
+  }
 }
 
 .metro-btn {

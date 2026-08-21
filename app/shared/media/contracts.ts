@@ -3,7 +3,6 @@ import type {
   MediaDeviceInfo,
   MediaEngineCapabilities,
   MediaEngineConfig,
-  MediaEngineEventMap,
   MediaEngineState,
   MediaSignalMessage,
   MediaStats,

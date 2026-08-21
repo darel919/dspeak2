@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { PendingOAuthSession } from "../types/auth.ts";
 import type { Session } from "@supabase/supabase-js";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 const pendingSessions = new Map<string, PendingOAuthSession>();
 const ttlMs = 60_000;
@@ -19,7 +20,7 @@ export function createPendingOAuthSession(session: Session): string {
   return code;
 }
 
-export function consumePendingOAuthSession(code: unknown) {
+export function consumePendingOAuthSession(code: ExternalField) {
   const normalized = String(code || "");
   const pending = pendingSessions.get(normalized);
   pendingSessions.delete(normalized);

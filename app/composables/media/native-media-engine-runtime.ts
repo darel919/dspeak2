@@ -1,6 +1,10 @@
 import { triggerRef } from "vue";
-import { getDeviceId } from "../../shared/device-identity.ts";
+import { getOrCreateDeviceId } from "../../shared/media-control-client.ts";
 import { resolveChannelRoomId } from "../../shared/media/channel-room.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
 import {
   EVENT_ALIASES,
   NATIVE_EVENT_NAMES,
@@ -12,12 +16,17 @@ import { handleNativeAudioTelemetry } from "./native-media-engine-audio.ts";
 import type {
   NativeCaptureRequest,
   NativeCapabilities,
-  NativeErrorLike,
   NativeFeed,
   NativeTopology,
 } from "../../shared/types/native-media.ts";
+import type { MediaCommandResult } from "../../shared/types/boundary.ts";
 import { resolveMediaProviderIdentity } from "../../shared/media-provider-identity.ts";
 import { normalizeParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
+import {
+  parseExternalValue,
+  parseThrownError,
+  type ParsedExternalError,
+} from "../../utils/external-values.ts";
 
 const NATIVE_MEDIA_READINESS_TIMEOUT_MS = 10_000;
 const NATIVE_MEDIA_READINESS_POLL_MS = 100;
@@ -76,7 +85,7 @@ async function waitForNativeMediaReadiness(
 ) {
   const mediaSession =
     provider === "p2p" ? engine.nativeP2pSession : engine.nativeSession;
-  if (typeof mediaSession?.mediaReadiness !== "function") return true;
+  if (!(mediaSession?.mediaReadiness instanceof Function)) return true;
   const localPeerId =
     topology.localPeerId ||
     mediaSession.localPeerId ||
@@ -245,57 +254,60 @@ async function applyNativeTopology(
     assertCurrentNativeTopology(engine, topologyKey, generation);
     engine._syncNativeFeeds();
     if (mode === "switching" && (target === "p2p" || target === "sfu")) {
+      const topologyReadyData = {
+        provider,
+        epoch: topology.epoch,
+        target,
+        sourceRevision: topology.sourceRevision,
+      };
+      if (providerId) Object.assign(topologyReadyData, { providerId });
       engine.nativeSession?.signaling?.send?.({
         type: "topology-ready",
-        data: {
-          provider,
-          ...(providerId ? { providerId } : {}),
-          epoch: topology.epoch,
-          target,
-          sourceRevision: topology.sourceRevision,
-        },
+        data: topologyReadyData,
       });
     }
   } catch (error) {
-    const errorLike = error as NativeErrorLike;
+    const errorLike = parseThrownError(error);
     if (
       errorLike.code === "NATIVE_TOPOLOGY_SUPERSEDED" ||
       !isCurrentNativeTopology(engine, topologyKey, generation)
     )
       return;
-    if (fallbackActivationFailed)
+    if (fallbackActivationFailed) {
+      const providerFailureData = {
+        provider,
+        epoch: topology.epoch,
+        sourceRevision: topology.sourceRevision,
+        reason: errorLike.message || "native-sfu-fallback-failed",
+      };
+      if (providerId) Object.assign(providerFailureData, { providerId });
       engine.nativeSession?.signaling?.send?.({
         type: "provider-failure",
-        data: {
-          provider,
-          ...(providerId ? { providerId } : {}),
-          epoch: topology.epoch,
-          sourceRevision: topology.sourceRevision,
-          reason: errorLike.message || "native-sfu-fallback-failed",
-        },
+        data: providerFailureData,
       });
-    else if (direct) reportNativeP2pFailure(engine, error);
-    else if (target === "sfu" || mode === "sfu")
+    } else if (direct) reportNativeP2pFailure(engine, errorLike);
+    else if (target === "sfu" || mode === "sfu") {
+      const failureData =
+        mode === "switching"
+          ? {
+              provider,
+              epoch: topology.epoch,
+              target: "sfu" as const,
+              sourceRevision: topology.sourceRevision,
+              reason: errorLike.message || "native-sfu-transition-failed",
+            }
+          : {
+              provider,
+              epoch: topology.epoch,
+              sourceRevision: topology.sourceRevision,
+              reason: errorLike.message || "native-sfu-activation-failed",
+            };
+      if (providerId) Object.assign(failureData, { providerId });
       engine.nativeSession?.signaling?.send?.({
         type: mode === "switching" ? "topology-failed" : "provider-failure",
-        data:
-          mode === "switching"
-            ? {
-                provider,
-                ...(providerId ? { providerId } : {}),
-                epoch: topology.epoch,
-                target: "sfu",
-                sourceRevision: topology.sourceRevision,
-                reason: errorLike.message || "native-sfu-transition-failed",
-              }
-            : {
-                provider,
-                ...(providerId ? { providerId } : {}),
-                epoch: topology.epoch,
-                sourceRevision: topology.sourceRevision,
-                reason: errorLike.message || "native-sfu-activation-failed",
-              },
+        data: failureData,
       });
+    }
     engine._emit("error", { source: "native-p2p", error });
     throw error;
   }
@@ -303,7 +315,7 @@ async function applyNativeTopology(
 
 export function reportNativeP2pFailure(
   engine: NativeMediaEngine,
-  error: unknown,
+  error: ParsedExternalError,
 ): void {
   const topology = engine.nativeSession?.topologyState;
   const mode = String(topology?.mode || "");
@@ -316,7 +328,7 @@ export function reportNativeP2pFailure(
     type: "p2p-failed",
     data: {
       epoch,
-      reason: `native-direct-path-${(error as NativeErrorLike).message || "failed"}`,
+      reason: `native-direct-path-${error.message || "failed"}`,
     },
   });
 }
@@ -384,23 +396,22 @@ export function mergeNativeCapabilities(
   engine: NativeMediaEngine,
   capabilities: NativeCapabilities = {},
 ) {
+  const videoCodecDiagnostics = isExternalRecord(
+    capabilities.videoCodecDiagnostics,
+  )
+    ? capabilities.videoCodecDiagnostics
+    : null;
   engine.mediaCapabilities = normalizeParticipantMediaCapabilities({
     ...capabilities,
-    ...(capabilities.mediaCapabilities || {}),
+    ...capabilities.mediaCapabilities,
     videoCodecs:
       capabilities.videoCodecCapabilities ||
       capabilities.mediaCapabilities?.videoCodecs ||
-      (
-        capabilities.videoCodecDiagnostics as
-          Record<string, unknown> | undefined
-      )?.capabilities,
+      videoCodecDiagnostics?.capabilities,
     concurrentEncode:
       capabilities.concurrentEncode ||
       capabilities.mediaCapabilities?.concurrentEncode ||
-      (
-        capabilities.videoCodecDiagnostics as
-          Record<string, unknown> | undefined
-      )?.concurrentEncode,
+      videoCodecDiagnostics?.concurrentEncode,
     source: "native-runtime-probe",
   });
   if (engine.nativeSession)
@@ -479,63 +490,52 @@ export async function invoke(
   engine: NativeMediaEngine,
   command: string,
   payload: NativeCaptureRequest = {},
-): Promise<NativeCaptureRequest> {
+): Promise<MediaCommandResult> {
   const tauri = await getTauri(engine);
   try {
-    return (await tauri.invoke(command, payload)) as NativeCaptureRequest;
+    return await tauri.invoke(command, payload);
   } catch (error) {
-    throw normalizeNativeInvokeError(command, error);
+    throw normalizeNativeInvokeError(command, parseExternalValue(error));
   }
 }
 
 export function normalizeNativeInvokeError(
   command: string,
-  value: unknown,
+  value: import("../../utils/external-values.ts").ExternalValue,
 ): Error {
   if (value instanceof Error) {
     Object.assign(value, { nativeCommand: command });
     return value;
   }
-  const record =
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : null;
-  const nested =
-    record?.error && typeof record.error === "object"
-      ? (record.error as Record<string, unknown>)
-      : null;
+  const record = isExternalRecord(value) ? value : null;
+  const nested = record && isExternalRecord(record.error) ? record.error : null;
   const details = record?.details ?? nested?.details;
   const nativeError =
-    details &&
-    typeof details === "object" &&
-    typeof (details as Record<string, unknown>).nativeError === "string"
-      ? String((details as Record<string, unknown>).nativeError).trim()
+    isExternalRecord(details) && isExternalString(details.nativeError)
+      ? details.nativeError.trim()
       : "";
-  const baseMessage =
-    typeof record?.message === "string"
-      ? record.message
-      : typeof nested?.message === "string"
-        ? nested.message
-        : typeof record?.error === "string"
-          ? record.error
-          : typeof value === "string" && value
-            ? value
-            : `Native media command failed: ${command}`;
+  const baseMessage = isExternalString(record?.message)
+    ? record.message
+    : isExternalString(nested?.message)
+      ? nested.message
+      : isExternalString(record?.error)
+        ? record.error
+        : isExternalString(value) && value
+          ? value
+          : `Native media command failed: ${command}`;
   const message =
     nativeError && !baseMessage.includes(nativeError)
       ? `${baseMessage}: ${nativeError}`
       : baseMessage;
   const error = new Error(message);
-  Object.assign(error, {
-    ...(typeof record?.code === "string"
-      ? { code: record.code }
-      : typeof nested?.code === "string"
-        ? { code: nested.code }
-        : {}),
-    ...(details !== undefined ? { details } : {}),
-    nativeCommand: command,
-    nativeResponse: value,
-  });
+  Object.assign(error, { nativeCommand: command, nativeResponse: value });
+  const code = isExternalString(record?.code)
+    ? record.code
+    : isExternalString(nested?.code)
+      ? nested.code
+      : null;
+  if (code) Object.assign(error, { code });
+  if (details !== undefined) Object.assign(error, { details });
   return error;
 }
 
@@ -551,16 +551,16 @@ export async function configureNativeIceServers(engine: NativeMediaEngine) {
   const authToken = accessToken || engine.nativeAuthToken;
   const endpoint = /^https?:\/\//.test(configuredPath)
     ? `${configuredPath}/config?connectionMode=${encodeURIComponent(String(connectionMode))}`
-    : `${serverUrl}${configuredPath}/config?connectionMode=${encodeURIComponent(String(connectionMode))}` ||
-      "/api/config";
+    : `${serverUrl}${configuredPath}/config?connectionMode=${encodeURIComponent(String(connectionMode))}`;
   if (!endpoint) return;
   try {
-    const response = await fetch(endpoint, {
-      credentials: "include",
-      ...(authToken
-        ? { headers: { Authorization: `Bearer ${authToken}` } }
-        : {}),
-    });
+    const requestOptions = authToken
+      ? {
+          credentials: "include" as const,
+          headers: { Authorization: `Bearer ${authToken}` },
+        }
+      : { credentials: "include" as const };
+    const response = await fetch(endpoint, requestOptions);
     if (!response.ok) return;
     const iceServers = await response.json();
     if (Array.isArray(iceServers)) await setIceServers(engine, iceServers);
@@ -593,18 +593,18 @@ export async function configureNativeControl(
   const bootstrapEndpoint = /^https?:\/\//.test(configuredPath)
     ? `${configuredPath}/media/bootstrap`
     : `${serverUrl}${configuredPath}/media/bootstrap`;
+  const headers = { "Content-Type": "application/json" };
+  if (authToken)
+    Object.assign(headers, { Authorization: `Bearer ${authToken}` });
   const response = await fetch(bootstrapEndpoint, {
     method: "POST",
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-    },
+    headers,
     body: JSON.stringify({
       roomId: resolvedRoomId,
       channelId,
       connectionMode,
-      deviceId: getDeviceId(),
+      deviceId: getOrCreateDeviceId(),
     }),
   });
   if (!response.ok) {
@@ -722,7 +722,7 @@ function decodeNativeAction(
 ): NativeCaptureRequest | null {
   if (!action.kind && !action.state) return null;
   let params = null;
-  if (typeof action.paramsJson === "string") {
+  if (isExternalString(action.paramsJson)) {
     try {
       params = JSON.parse(action.paramsJson);
     } catch (error) {
@@ -734,7 +734,7 @@ function decodeNativeAction(
     }
   }
   let state = action.state;
-  if (typeof state === "string") {
+  if (isExternalString(state)) {
     try {
       state = JSON.parse(state);
     } catch {}
@@ -769,6 +769,7 @@ export async function dispatchNativeAction(
         state: nativeAction.state,
       });
   } catch (error) {
+    const errorLike = parseThrownError(error);
     engine._emit("error", {
       source: "native",
       operation: "native-event",
@@ -778,18 +779,14 @@ export async function dispatchNativeAction(
       await engine
         ._invoke("media_fail_connect", {
           transportPtr: nativeAction.transportPtr,
-          error:
-            (error as NativeErrorLike).message ||
-            "Native transport connection failed",
+          error: errorLike.message || "Native transport connection failed",
         })
         .catch(() => {});
     } else if (nativeAction.kind === 2) {
       await engine
         ._invoke("media_fail_produce", {
           actionId: nativeAction.actionId,
-          error:
-            (error as NativeErrorLike).message ||
-            "Native producer creation failed",
+          error: errorLike.message || "Native producer creation failed",
         })
         .catch(() => {});
     }
@@ -804,7 +801,7 @@ export function dispatchNativeReceiveEvent(
   if (kind === 7) {
     handleNativeAudioTelemetry(
       engine,
-      (receiveEvent.payload || {}) as Record<string, unknown>,
+      isExternalRecord(receiveEvent.payload) ? receiveEvent.payload : {},
     );
     return;
   }
@@ -823,10 +820,16 @@ export async function bindNativeEvents(engine: NativeMediaEngine) {
     const unlisten = await tauri.listen(
       eventName,
       ({ payload }: { payload: unknown }) => {
-        const event = EVENT_ALIASES[eventName as keyof typeof EVENT_ALIASES];
+        const event = Object.entries(EVENT_ALIASES).find(
+          ([name]) => name === eventName,
+        )?.[1];
+        if (event === undefined) return;
         if (event === "native-receive-event") {
           try {
-            dispatchNativeReceiveEvent(engine, payload as NativeCaptureRequest);
+            dispatchNativeReceiveEvent(
+              engine,
+              isExternalRecord(payload) ? payload : {},
+            );
           } catch (error) {
             engine._emit("error", {
               source: "native",
@@ -839,9 +842,12 @@ export async function bindNativeEvents(engine: NativeMediaEngine) {
         const task =
           event === "native-action"
             ? () =>
-                dispatchNativeAction(engine, payload as NativeCaptureRequest)
+                dispatchNativeAction(
+                  engine,
+                  isExternalRecord(payload) ? payload : {},
+                )
             : () => {
-                engine._emit(event, payload);
+                engine._emit(event, parseExternalValue(payload));
               };
         const previous = engine.nativeEventOperation || Promise.resolve();
         const operation = previous.catch(() => {}).then(task);

@@ -3,6 +3,7 @@ import {
   dispatchMediaSignalingMessage,
 } from "./media-signaling-socket.ts";
 import type { MediaSignalingSocketOptions } from "./types/media-signaling.ts";
+import type { ExternalValue } from "./types/boundary.ts";
 
 export function createHybridMediaSignaling({
   buildClientHelloData,
@@ -21,10 +22,8 @@ export function createHybridMediaSignaling({
   onFailure,
   protocol,
 }: Omit<MediaSignalingSocketOptions, "handleMessage"> & {
-  getHandler: (
-    type: string,
-  ) => ((data: Record<string, unknown>) => unknown) | undefined;
-  onFailure: (error: unknown) => void;
+  getHandler: (type: string) => ((data: ExternalValue) => void) | undefined;
+  onFailure: (error: ExternalValue) => void;
 }) {
   return createMediaSignalingSocket({
     buildClientHelloData,

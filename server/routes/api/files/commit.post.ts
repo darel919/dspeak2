@@ -18,6 +18,12 @@ import {
   requireRoomPermission,
 } from "../../../utils/room-authorization.ts";
 import { and, eq } from "drizzle-orm";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../../../shared/types/external.ts";
 
 const uploadTypes = [
   "avatar",
@@ -39,35 +45,69 @@ interface UploadMetadata {
   volume?: number;
 }
 
-function requiredMetadataString(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value)
+function requiredMetadataString(
+  value: ExternalField | undefined,
+  label: string,
+): string {
+  const text = parseExternalString(value);
+  if (!text)
     throw createError({
       statusCode: 400,
       statusMessage: `${label} is required`,
     });
-  return value;
+  return text;
+}
+
+function parseUploadType(value: ExternalField | undefined): UploadType | null {
+  switch (parseExternalString(value)) {
+    case "avatar":
+      return "avatar";
+    case "room-profile":
+      return "room-profile";
+    case "room-header":
+      return "room-header";
+    case "chat":
+      return "chat";
+    case "soundboard":
+      return "soundboard";
+    default:
+      return null;
+  }
+}
+
+function parseUploadMetadata(
+  value: ExternalField | undefined,
+): UploadMetadata | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  const objectId = parseExternalString(record.objectId);
+  const mimeType = parseExternalString(record.mimeType);
+  const size = parseExternalNumber(record.size);
+  if (!objectId || !mimeType || size === null) return null;
+  const metadata: UploadMetadata = { objectId, mimeType, size };
+  const roomId = parseExternalString(record.roomId);
+  const channelId = parseExternalString(record.channelId);
+  const messageId = parseExternalString(record.messageId);
+  const fileName = parseExternalString(record.fileName);
+  const name = parseExternalString(record.name);
+  const volume = parseExternalNumber(record.volume);
+  if (roomId !== null) metadata.roomId = roomId;
+  if (channelId !== null) metadata.channelId = channelId;
+  if (messageId !== null) metadata.messageId = messageId;
+  if (fileName !== null) metadata.fileName = fileName;
+  if (name !== null) metadata.name = name;
+  if (volume !== null) metadata.volume = volume;
+  return metadata;
 }
 
 export default defineEventHandler(async (event) => {
   await requireAuth(event);
   const user = event.context.user;
 
-  const body = (await readBody(event)) as {
-    type?: unknown;
-    key?: unknown;
-    metadata?: unknown;
-  };
-  const typeValue = body.type;
-  const type =
-    typeof typeValue === "string" &&
-    uploadTypes.includes(typeValue as UploadType)
-      ? (typeValue as UploadType)
-      : null;
-  const key = typeof body.key === "string" ? body.key : "";
-  const metadata =
-    body.metadata && typeof body.metadata === "object"
-      ? (body.metadata as UploadMetadata)
-      : null;
+  const body = parseExternalRecord(await readBody(event));
+  const type = parseUploadType(body?.type);
+  const key = parseExternalString(body?.key) || "";
+  const metadata = parseUploadMetadata(body?.metadata);
 
   if (!type || !key) {
     throw createError({
@@ -76,7 +116,7 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  if (!metadata || typeof metadata !== "object")
+  if (!metadata)
     throw createError({
       statusCode: 400,
       statusMessage: "File metadata is required",
@@ -172,7 +212,6 @@ export default defineEventHandler(async (event) => {
   let result;
   switch (type) {
     case "avatar": {
-      const { objectId } = metadata;
       result = await db.transaction(async (tx) => {
         const avatarResult = await tx
           .insert(avatars)

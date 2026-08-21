@@ -10,6 +10,12 @@ import {
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
 import { publicDisplayName } from "../../shared/user-profile.ts";
 import { broadcastToUser } from "./dspeak-realtime.ts";
+import {
+  parseExternalDate,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 import type {
   DatabaseId,
   DirectConversationRow,
@@ -140,8 +146,8 @@ async function latestMessagesByConversation(
     .groupBy(directMessages.conversationId);
   if (!latestTimes.length) return new Map();
   const conditions = latestTimes.flatMap((latest) => {
-    const createdAt = new Date(latest.createdAt as string | number | Date);
-    if (!Number.isFinite(createdAt.getTime())) return [];
+    const createdAt = parseExternalDate(latest.createdAt);
+    if (!createdAt) return [];
     return [
       and(
         eq(directMessages.conversationId, latest.conversationId),
@@ -202,11 +208,10 @@ async function presentConversation(
 function presentNotification(notification: NotificationRow) {
   let data: Record<string, unknown> = {};
   try {
-    const parsed: unknown = notification.data
-      ? JSON.parse(notification.data)
-      : {};
-    if (parsed && typeof parsed === "object")
-      data = parsed as Record<string, unknown>;
+    const parsed = parseExternalRecord(
+      notification.data ? JSON.parse(notification.data) : {},
+    );
+    if (parsed) data = parsed;
   } catch {}
   return {
     ...data,
@@ -474,8 +479,7 @@ export async function sendDirectMessage(
     userId,
     conversationId,
   );
-  if (typeof content !== "string" || !content.trim())
-    fail(400, "Message content is required");
+  if (!content.trim()) fail(400, "Message content is required");
   if (content.length > 4000)
     fail(400, "Message content must be at most 4000 characters");
   if (!/^[a-zA-Z0-9_-]{1,80}$/.test(String(clientMessageId || "")))
@@ -511,9 +515,11 @@ export async function sendDirectMessage(
       .update(directConversations)
       .set({ updatedAt: created.createdAt })
       .where(eq(directConversations.id, conversation.id));
-  const [sender] = await Promise.all([
-    db.select().from(profiles).where(eq(profiles.id, userId)).limit(1),
-  ]);
+  const sender = await db
+    .select()
+    .from(profiles)
+    .where(eq(profiles.id, userId))
+    .limit(1);
   const senderProfile = sender[0];
   if (!senderProfile) fail(500, "Sender profile not found");
   const result = presentMessage(created, senderProfile);
@@ -595,7 +601,7 @@ export async function markDirectConversationRead(
 export async function markDirectMessagesDelivered(
   userId: DatabaseId,
   conversationId: DatabaseId,
-  messageIds: unknown,
+  messageIds: ExternalField,
 ) {
   const { conversation, friendId } = await findConversationForUser(
     userId,
@@ -603,9 +609,10 @@ export async function markDirectMessagesDelivered(
   );
   const ids = [
     ...new Set(
-      (Array.isArray(messageIds) ? messageIds : [])
-        .map((id) => String(id))
-        .filter(Boolean),
+      (Array.isArray(messageIds) ? messageIds : []).flatMap((id) => {
+        const value = parseExternalString(id);
+        return value === null ? [] : [value];
+      }),
     ),
   ];
   if (!ids.length) return { success: true, message_ids: [] };

@@ -1,3 +1,7 @@
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { MediaCaptureManager } from "../media-capture.ts";
 import type {
@@ -15,11 +19,14 @@ export interface SourceProvider {
     track: MediaStreamTrack,
     stream?: MediaStream,
     entry?: TopologySourceEntry,
-  ) => unknown;
-  unpublishSource: (source: string) => unknown;
-  addSource: (entry: TopologySourceEntry) => unknown;
-  removeSource: (source: string) => unknown;
-  setSourceTransmission?: (source: string, enabled: boolean) => unknown;
+  ) => MediaCommandResult;
+  unpublishSource: (source: string) => MediaCommandResult;
+  addSource: (entry: TopologySourceEntry) => MediaCommandResult;
+  removeSource: (source: string) => MediaCommandResult;
+  setSourceTransmission?: (
+    source: string,
+    enabled: boolean,
+  ) => MediaCommandResult;
 }
 
 export interface MediaSourceControllerContext {
@@ -33,26 +40,38 @@ export interface MediaSourceControllerContext {
   getConnectionEpoch: () => number;
   getIntentionalClose: () => boolean;
   getLastAppliedRoomRevision: () => string;
-  getP2pMesh: () => unknown;
-  getSfu: () => unknown;
+  getLastAppliedPublicationRevision: () => string;
+  setLastAppliedPublicationRevision: (value: string) => void;
+  getP2pMesh: () => MediaCommandResult;
+  getSfu: () => MediaCommandResult;
   getVideoReport?: (
     source: string,
   ) => Promise<Map<string, Record<string, unknown>> | null>;
   getVideoSettings?: (source: string) => AdaptiveVideoSettings;
   localSources: Map<string, TopologySourceEntry>;
   localVideoFeeds: Ref<Map<string, MediaVideoFeed>>;
-  onSharedAudioStopped?: () => unknown;
-  producerFacade: (entry: TopologySourceEntry) => unknown;
-  refreshMediaPolicy?: () => Promise<unknown>;
-  refreshPublicMaps: () => unknown;
-  reportSfuFailure: (reason: string) => unknown;
-  send: (message: Record<string, unknown>) => unknown;
-  startLocalVoiceDetection: (entry: TopologySourceEntry) => unknown;
-  startSharedAudioMeter: (source: string) => unknown;
-  stopLocalVoiceDetection: () => unknown;
-  stopSharedAudioMeter: () => unknown;
+  onSharedAudioStopped?: () => MediaCommandResult;
+  producerFacade: (entry: TopologySourceEntry) => MediaCommandResult;
+  refreshMediaPolicy?: () => Promise<MediaCommandResult>;
+  refreshPublicMaps: () => MediaCommandResult;
+  reportSfuFailure: (reason: string) => MediaCommandResult;
+  send: (message: Record<string, unknown>) => MediaCommandResult;
+  startLocalVoiceDetection: (entry: TopologySourceEntry) => MediaCommandResult;
+  startSharedAudioMeter: (source: string) => MediaCommandResult;
+  stopLocalVoiceDetection: () => MediaCommandResult;
+  stopSharedAudioMeter: () => MediaCommandResult;
   topologyState: Ref<TopologyState>;
-  queueTargetedReconciliation?: (operationId: string, data: unknown) => unknown;
+  queueTargetedReconciliation?: (
+    operationId: string,
+    data: ExternalValue,
+  ) => MediaCommandResult;
+  processPendingRetirements?: () => Promise<void>;
+  sendParticipantVoiceState: (state: {
+    muted?: boolean;
+    deafened?: boolean;
+  }) => MediaCommandResult;
+  getLocalPeerId?: () => string | null;
+  getLocalParticipantKey?: () => string | null;
   voiceStore: {
     micMuted: boolean;
     deafened: boolean;

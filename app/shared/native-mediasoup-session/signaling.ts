@@ -15,6 +15,9 @@ import type {
   NativeCloudflareSessionLike,
   NativeMediasoupSfuSessionSurface,
 } from "../types/native-mediasoup-session.ts";
+import type { SignalingMessage } from "../types/media-signaling.ts";
+import type { OwnedErrorValue } from "../types/shared-utilities.ts";
+import type { MediaCommandResult } from "../types/boundary.ts";
 
 import { CLOUDFLARE_REQUEST_TIMEOUT_MS } from "./helpers.ts";
 export class NativeMediasoupSignalingMethods {
@@ -54,7 +57,7 @@ export class NativeMediasoupSignalingMethods {
     if (this.cloudflareSession) return this.cloudflareSession;
     this.cloudflareSession = new NativeCloudflareRealtimeSession({
       invoke: this.invoke,
-      send: (message: unknown) => this.signaling?.send?.(message),
+      send: (message: SignalingMessage) => this.signaling?.send?.(message),
       ensureControlReady: async () => {
         await this.signaling?.waitForReady?.();
       },
@@ -81,7 +84,7 @@ export class NativeMediasoupSignalingMethods {
           this.reportProviderFailure("native-cloudflare-transport-failed");
         this._emitState();
       },
-      onError: (error: unknown) => {
+      onError: (error: OwnedErrorValue) => {
         const failure =
           error instanceof Error ? error : new Error(String(error));
         this.error = failure;
@@ -107,6 +110,7 @@ export class NativeMediasoupSignalingMethods {
       remoteVideoFeeds: this.remoteVideoFeeds,
       remoteAudioFeeds: this.remoteAudioFeeds,
       mediaCapabilities: this.mediaCapabilities,
+      getControlConnectionEpoch: this.getControlConnectionEpoch,
     });
     if (!this.cloudflareSession)
       throw new Error("Cloudflare media session was not created");
@@ -125,11 +129,11 @@ export class NativeMediasoupSignalingMethods {
     this.selectedProvider = nextProvider;
     const currentActivation = this.providerActivationPromise;
     if (currentActivation) {
-      let activationError: unknown = null;
+      let activationError: Error | string | null = null;
       try {
         await currentActivation;
       } catch (error) {
-        activationError = error;
+        activationError = error instanceof Error ? error : String(error);
       }
       if (
         activationError &&
@@ -140,7 +144,7 @@ export class NativeMediasoupSignalingMethods {
       if (this.activeSfuProvider === nextProvider)
         return this.cloudflareSession;
     }
-    let activation: Promise<unknown>;
+    let activation: Promise<MediaCommandResult>;
     activation = (async () => {
       if (this.closed)
         throw Object.assign(new Error("Native SFU session is closed"), {
@@ -251,4 +255,5 @@ export class NativeMediasoupSignalingMethods {
   }
 }
 
-export interface NativeMediasoupSignalingMethods extends NativeMediasoupSfuSessionSurface {}
+export type NativeMediasoupSignalingContract =
+  NativeMediasoupSfuSessionSurface & NativeMediasoupSignalingMethods;

@@ -1,4 +1,5 @@
 import type { Ref } from "vue";
+import type { OwnedErrorValue } from "./shared-utilities.ts";
 import type {
   TopologyData,
   TopologyP2pMesh,
@@ -32,6 +33,6 @@ export interface MediaHandoffReadinessContext {
 
 export interface InitialMediaTopologyContext {
   isReady: () => boolean;
-  setWaiter: (waiter: ((error?: unknown) => void) | null) => void;
+  setWaiter: (waiter: ((error?: OwnedErrorValue) => void) | null) => void;
   timeoutMs: number;
 }

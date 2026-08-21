@@ -1,26 +1,30 @@
 import type { ReaderValue } from "./types/shared-utilities.ts";
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
 
-export function readerId(reader: ReaderValue): string | null {
-  if (typeof reader === "string") return reader;
-  if (reader && typeof reader === "object" && reader.id) {
+export function readerId<T>(reader: T): string | null {
+  if (isExternalString(reader)) return reader;
+  if (isExternalRecord(reader) && reader.id) {
     return String(reader.id);
   }
   return null;
 }
 
-export function readerIds(readers: unknown): string[] {
+export function readerIds<T>(readers: T): string[] {
   if (!Array.isArray(readers)) return [];
   return [
     ...new Set(readers.map(readerId).filter((id): id is string => Boolean(id))),
   ];
 }
 
-export function hasReader(readers: unknown, userId: string | number | null) {
+export function hasReader<T>(readers: T, userId: string | number | null) {
   if (!userId) return false;
   return readerIds(readers).includes(String(userId));
 }
 
-export function addReader(readers: ReaderValue[], user: ReaderValue) {
+export function addReader(
+  readers: ReaderValue[] | undefined,
+  user: ReaderValue,
+) {
   const userId = readerId(user);
   if (!userId || hasReader(readers, userId)) {
     return Array.isArray(readers) ? readers : [];
@@ -29,8 +33,8 @@ export function addReader(readers: ReaderValue[], user: ReaderValue) {
 }
 
 export function mergeReaders(
-  currentReaders: ReaderValue[],
-  nextReaders: ReaderValue[],
+  currentReaders: ReaderValue[] | undefined,
+  nextReaders: ReaderValue[] | undefined,
 ) {
   const currentById = new Map<string, ReaderValue>(
     (Array.isArray(currentReaders) ? currentReaders : [])

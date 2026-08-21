@@ -6,11 +6,15 @@ import type {
 } from "./types/media-message-handlers.ts";
 import {
   getFailureScope,
-  isFailureRetryable,
-  isFailureSessionFatal,
   createOperationError,
 } from "./types/media-failure.ts";
-import type { TopologyController } from "./types/topology-controller.ts";
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 
 export function setupMediaMessageHandlers({
   getHeartbeatSequence,
@@ -42,6 +46,7 @@ export function setupMediaMessageHandlers({
   onSnapshotRequested,
   queueTargetedReconciliation,
   onConnectionEpochUpdated,
+  handlePublicationsDigest,
 }: MediaMessageHandlersContext) {
   mediaDebug("control.handlers-installed", {
     handlers: [
@@ -59,103 +64,107 @@ export function setupMediaMessageHandlers({
   registerHandler("hi919", onServerHello);
   registerHandler("connected", (data: MediaMessage) => {
     setLocalPeerId(String(data.peerId));
-    if (typeof data.connectionEpoch === "number") {
+    if (isExternalNumber(data.connectionEpoch)) {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
     onServerConnected?.();
-    if (typeof data.roomRevision === "string")
+    if (isExternalString(data.roomRevision))
       onRoomRevisionApplied?.(data.roomRevision);
   });
-  registerHandler("heartbeat-ack", (data: MediaMessage) => {
+  registerHandler("heartbeat-ack", async (data: MediaMessage) => {
     acknowledgeHeartbeat(data);
-    if (typeof data.connectionEpoch === "number") {
+    if (isExternalNumber(data.connectionEpoch)) {
       onConnectionEpochUpdated?.(data.connectionEpoch);
+    }
+    if (Array.isArray(data.publishedSourcesDigest)) {
+      const publicationRevision =
+        isExternalString(data.publicationRevision) ||
+        isExternalNumber(data.publicationRevision)
+          ? data.publicationRevision
+          : null;
+      await handlePublicationsDigest?.(
+        data.publishedSourcesDigest,
+        publicationRevision,
+      );
     }
   });
   registerHandler("operation-ack", (data: MediaMessage) => {
-    const operationId =
-      typeof data.operationId === "string" ? data.operationId : "";
+    const operationId = isExternalString(data.operationId)
+      ? data.operationId
+      : "";
     if (operationId) {
       if (data.accepted === false) {
         const error = createOperationError(data);
         onOperationError?.(operationId, error);
+        const nackRoomRevision = isExternalString(data.roomRevision)
+          ? data.roomRevision
+          : null;
+        if (nackRoomRevision) onRoomRevisionApplied?.(nackRoomRevision);
+        if (isExternalNumber(data.connectionEpoch)) {
+          onConnectionEpochUpdated?.(data.connectionEpoch);
+        }
         if (data.canonicalState) {
-          const topology =
-            typeof data.canonicalState === "object" &&
-            data.canonicalState !== null
-              ? (data.canonicalState as MediaMessage)
-              : null;
+          const topology = isExternalRecord(data.canonicalState)
+            ? data.canonicalState
+            : null;
           if (topology) {
             syncTopologyParticipants(topology);
-            queueTopology(
-              topology as import("./types/topology-controller.ts").TopologyData,
-            );
+            queueTopology(topology);
           }
         }
-        if (data.retryable === true) {
+        if (
+          data.retryable === true ||
+          data.code === "STALE_SOURCE_GENERATION"
+        ) {
           queueTargetedReconciliation?.(operationId, data);
         }
         return;
       }
       onOperationAck?.(operationId, data);
-      const roomRevision =
-        typeof data.roomRevision === "string" ? data.roomRevision : null;
+      const roomRevision = isExternalString(data.roomRevision)
+        ? data.roomRevision
+        : null;
       if (roomRevision) onRoomRevisionApplied?.(roomRevision);
       if (data.canonicalState) {
-        const topology =
-          typeof data.canonicalState === "object" &&
-          data.canonicalState !== null
-            ? (data.canonicalState as MediaMessage)
-            : null;
+        const topology = isExternalRecord(data.canonicalState)
+          ? data.canonicalState
+          : null;
         if (topology) {
           syncTopologyParticipants(topology);
-          queueTopology(
-            topology as import("./types/topology-controller.ts").TopologyData,
-          );
+          queueTopology(topology);
         }
       }
     }
   });
   registerHandler("heartbeat-nack", (data: MediaMessage) => {
     if (acknowledgeHeartbeat(data) && data.topology) {
-      const topology =
-        typeof data.topology === "object" && data.topology !== null
-          ? (data.topology as MediaMessage)
-          : null;
+      const topology = isExternalRecord(data.topology) ? data.topology : null;
       if (!topology) return;
       syncTopologyParticipants(topology);
-      queueTopology(
-        topology as import("./types/topology-controller.ts").TopologyData,
-      );
+      queueTopology(topology);
     }
-    if (typeof data.roomRevision === "string")
+    if (isExternalString(data.roomRevision))
       onRoomRevisionApplied?.(data.roomRevision);
-    if (typeof data.connectionEpoch === "number") {
+    if (isExternalNumber(data.connectionEpoch)) {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
   });
   registerHandler("state-nack", (data: MediaMessage) => {
-    const topology =
-      typeof data.topology === "object" && data.topology !== null
-        ? (data.topology as MediaMessage)
-        : null;
+    const topology = isExternalRecord(data.topology) ? data.topology : null;
     if (topology) {
       syncTopologyParticipants(topology);
-      queueTopology(
-        topology as import("./types/topology-controller.ts").TopologyData,
-      );
+      queueTopology(topology);
     }
-    if (typeof data.roomRevision === "string")
+    if (isExternalString(data.roomRevision))
       onRoomRevisionApplied?.(data.roomRevision);
-    // state-nack counts as heartbeat ACK for liveness
-    if (typeof data.sequence === "number") acknowledgeHeartbeat(data);
-    if (typeof data.connectionEpoch === "number") {
+    if (isExternalNumber(data.sequence)) acknowledgeHeartbeat(data);
+    if (isExternalNumber(data.connectionEpoch)) {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
   });
   registerHandler("topology-state", (data: MediaMessage) => {
     syncTopologyParticipants(data);
-    if (typeof data.connectionEpoch === "number") {
+    if (isExternalNumber(data.connectionEpoch)) {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
     return queueTopology(data);
@@ -172,42 +181,37 @@ export function setupMediaMessageHandlers({
       error: data?.error,
     });
     if (
-      typeof data.operationId === "string" &&
+      isExternalString(data.operationId) &&
       data.operationId &&
-      typeof data.code === "string"
+      isExternalString(data.code)
     )
       onOperationError?.(
         data.operationId,
         new Error(
           `${data.code}: ${
-            typeof data.error === "string" ? data.error : "operation failed"
+            isExternalString(data.error) ? data.error : "operation failed"
           }`,
         ),
       );
-    if (typeof data.roomRevision === "string")
+    if (isExternalString(data.roomRevision))
       onRoomRevisionApplied?.(data.roomRevision);
-    // Also trigger snapshot request for NACK codes
     if (
       data.code === "ROOM_REVISION_CONFLICT" ||
       data.code === "STALE_CONNECTION_EPOCH"
     )
       onSnapshotRequested?.();
-    if (typeof data.connectionEpoch === "number") {
+    if (isExternalNumber(data.connectionEpoch)) {
       onConnectionEpochUpdated?.(data.connectionEpoch);
     }
-    // Use typed failure taxonomy to determine scope
-    const scope = getFailureScope(data.code as string);
-    const retryable = isFailureRetryable(data.code as string);
-    // Only throw/fail session for control-session or protocol-fatal scope
+    const code = isExternalString(data.code) ? data.code : "";
+    const scope = getFailureScope(code);
     if (scope === "control-session" || scope === "protocol-fatal") {
       const error = new Error(
-        typeof data.error === "string" ? data.error : "Media control error",
+        isExternalString(data.error) ? data.error : "Media control error",
       );
-      if (typeof data.code === "string") error.code = data.code;
+      if (isExternalString(data.code)) error.code = data.code;
       throw error;
     }
-    // For operation/reconciliation scope, do not throw - let caller handle
-    // The onOperationError callback was already invoked above
   });
   registerHandler("provider-ticket", onProviderTicket);
   registerHandler("provider-failure", (data: MediaMessage) => {
@@ -225,14 +229,13 @@ export function setupMediaMessageHandlers({
       reason: data?.reason,
     });
     onProviderRecovering?.(data);
-    // Trigger topology controller to attempt return to recovered provider
     onProviderRecoveryTopology?.(data);
   });
   registerHandler("participant-voice-state", (data: MediaMessage) => {
     if (
       data?.userId &&
-      typeof data.muted === "boolean" &&
-      typeof data.deafened === "boolean"
+      isExternalBoolean(data.muted) &&
+      isExternalBoolean(data.deafened)
     )
       voiceStore.updateUserVoiceState(String(data.userId), data);
   });
@@ -243,32 +246,38 @@ export function setupMediaMessageHandlers({
     onP2pQualification?.({ ...data, type: "p2p-failed", failed: true }),
   );
   registerHandler("attenuation-state", onAttenuationState);
+
   registerHandler("p2p-signal", async (data: MediaMessage) => {
     const mesh = ensureP2p();
     if (!mesh) return;
     try {
       await mesh.receiveSignal(data);
     } catch (error) {
-      mesh.fail("signaling-failed", error);
+      mesh.fail("signaling-failed", asError(error, "P2P signaling failed"));
     }
   });
   registerHandler("currentlyInChannel", (data: MediaMessage) => {
-    lastInRoom.value = Array.isArray(data.inRoom) ? data.inRoom : [];
-    for (const profile of Array.isArray(data.profiles) ? data.profiles : [])
-      voiceStore.upsertUserProfile(profile);
-    syncConnectedUsers(data.inRoom);
+    const inRoom = Array.isArray(data.inRoom)
+      ? data.inRoom.filter(isExternalString)
+      : [];
+    lastInRoom.value = inRoom;
+    for (const profile of Array.isArray(data.profiles) ? data.profiles : []) {
+      if (isExternalRecord(profile) && isExternalString(profile.id))
+        voiceStore.upsertUserProfile({ ...profile, id: profile.id });
+    }
+    syncConnectedUsers(inRoom);
     for (const participantState of Array.isArray(data.participantStates)
       ? data.participantStates
       : [])
       voiceStore.updateUserVoiceState(
-        participantState.userId,
+        String(participantState.userId || ""),
         participantState,
       );
   });
   registerHandler("available-producers", (data: MediaMessage) => {
     const producers = Array.isArray(data.producers) ? data.producers : [];
     remoteProducersCount.value = producers.filter(
-      (id: unknown) => ![...sfuProducerIds()].includes(String(id)),
+      (id) => ![...sfuProducerIds()].includes(String(id)),
     ).length;
     return getSfu()?.handle("available-producers", data);
   });
@@ -297,7 +306,7 @@ export function setupMediaMessageHandlers({
     "soundboard-library-updated",
   ])
     registerHandler(type, (data: MediaMessage) => {
-      if (typeof window !== "undefined")
+      if (import.meta.client)
         window.dispatchEvent(
           new CustomEvent(`dspeak:${type}`, { detail: data }),
         );

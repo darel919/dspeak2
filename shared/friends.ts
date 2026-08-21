@@ -5,7 +5,9 @@ export const FRIEND_REQUEST_STATUSES = Object.freeze({
   blocked: "blocked",
 });
 
-function isFriendRequestStatus(value: unknown): value is FriendRequestStatus {
+function isFriendRequestStatus(
+  value: ExternalField,
+): value is FriendRequestStatus {
   return (
     value === FRIEND_REQUEST_STATUSES.pending ||
     value === FRIEND_REQUEST_STATUSES.accepted ||
@@ -14,7 +16,8 @@ function isFriendRequestStatus(value: unknown): value is FriendRequestStatus {
   );
 }
 
-export function normalizeFriendRequestStatus(value: unknown) {
+export function normalizeFriendRequestStatus(value: ExternalField) {
   return isFriendRequestStatus(value) ? value : FRIEND_REQUEST_STATUSES.pending;
 }
 import type { FriendRequestStatus } from "./types/friends.ts";
+import type { ExternalField } from "./types/external.ts";

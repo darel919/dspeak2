@@ -1,18 +1,18 @@
 export const DEFAULT_UPDATE_REPOSITORY = "darel919/dspeak2";
 export const DEFAULT_UPDATE_BRANCH = "next";
 
+import { parseExternalString } from "./types/external.ts";
+
 export function normalizeCommit(
-  value: unknown,
+  value: ExternalField,
   { short = false }: CommitOptions = {},
 ) {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
+  const normalized = (parseExternalString(value) || "").trim().toLowerCase();
   const pattern = short ? /^[0-9a-f]{7,40}$/ : /^[0-9a-f]{40}$/;
   return pattern.test(normalized) ? normalized : null;
 }
 
-export function normalizeRepository(value: unknown) {
+export function normalizeRepository(value: ExternalField) {
   const normalized = String(value || "")
     .trim()
     .replace(/^https?:\/\/github\.com\//i, "")
@@ -24,7 +24,7 @@ export function normalizeRepository(value: unknown) {
 }
 
 export function normalizeBranch(
-  value: unknown,
+  value: ExternalField,
   fallback: string = DEFAULT_UPDATE_BRANCH,
 ) {
   const normalized = String(value || "").trim();
@@ -55,3 +55,4 @@ export function createBuildIdentity({
   };
 }
 import type { BuildIdentityInput, CommitOptions } from "./types/app-build.ts";
+import type { ExternalField } from "./types/external.ts";

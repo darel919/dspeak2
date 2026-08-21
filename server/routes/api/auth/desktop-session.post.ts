@@ -1,3 +1,4 @@
+import { normalizeCommit } from "../../../../shared/app-build.ts";
 import {
   getUserFromToken,
   verifySupabaseAccessToken,
@@ -15,11 +16,18 @@ import {
   EmailIdentityConflictError,
 } from "../../../db/repositories/profiles.ts";
 import { persistAuthenticatedSession } from "../../../utils/auth.ts";
+import {
+  parseExternalString,
+  type ExternalError,
+} from "../../../../shared/types/external.ts";
 
-function safeErrorDetails(error: unknown): {
+type DesktopErrorDetails = {
   name: string;
   message: string;
-} {
+};
+type DesktopAuthLog = { statusCode: number } & Partial<DesktopErrorDetails>;
+
+function safeErrorDetails(error: ExternalError): DesktopErrorDetails {
   return {
     name: error instanceof Error ? error.name : "unknown",
     message: error instanceof Error ? error.message : "unknown",
@@ -29,21 +37,20 @@ function safeErrorDetails(error: unknown): {
 function desktopAuthFailure(
   code: string,
   statusCode: number,
-  error?: unknown,
+  error?: ExternalError,
 ): never {
-  console.error(`[DesktopAuth] ${code}`, {
-    statusCode,
-    ...(error ? safeErrorDetails(error) : {}),
-  });
+  const details: DesktopAuthLog = { statusCode };
+  if (error) Object.assign(details, safeErrorDetails(error));
+  console.error(`[DesktopAuth] ${code}`, details);
   throw createError({ statusCode, statusMessage: code });
 }
 
 export default defineEventHandler(async (event) => {
   const runtimeConfig = useRuntimeConfig(event);
-  const serverBuildCommit =
-    typeof runtimeConfig.public?.appBuild?.shortCommit === "string"
-      ? runtimeConfig.public.appBuild.shortCommit
-      : "";
+  const serverBuildCommit = normalizeCommit(
+    parseExternalString(runtimeConfig.public?.appBuild?.shortCommit),
+    { short: true },
+  );
   if (serverBuildCommit)
     setHeader(event, "X-dSpeak-Build-Commit", serverBuildCommit);
   if (configuredSupabaseProjectRef)
@@ -82,7 +89,11 @@ export default defineEventHandler(async (event) => {
       });
       return desktopAuthFailure("DESKTOP_SUPABASE_PROJECT_MISMATCH", 401);
     }
-    return desktopAuthFailure("DESKTOP_SESSION_TOKEN_INVALID", 401, error);
+    return desktopAuthFailure(
+      "DESKTOP_SESSION_TOKEN_INVALID",
+      401,
+      error instanceof Error ? error : "unknown",
+    );
   }
   if (!payload.sub)
     return desktopAuthFailure("DESKTOP_SESSION_TOKEN_INVALID", 401);
@@ -112,7 +123,7 @@ export default defineEventHandler(async (event) => {
     return desktopAuthFailure(
       "DESKTOP_SESSION_SUPABASE_USER_LOOKUP_FAILED",
       502,
-      error,
+      error instanceof Error ? error : "unknown",
     );
   }
   console.info("[DesktopAuth] DESKTOP_SESSION_SUPABASE_USER_RESOLVED", {
@@ -132,7 +143,11 @@ export default defineEventHandler(async (event) => {
         error,
       );
     }
-    return desktopAuthFailure("DESKTOP_PROFILE_PROVISION_FAILED", 500, error);
+    return desktopAuthFailure(
+      "DESKTOP_PROFILE_PROVISION_FAILED",
+      500,
+      error instanceof Error ? error : "unknown",
+    );
   }
   console.info("[DesktopAuth] DESKTOP_SESSION_PROFILE_PROVISION_SUCCEEDED");
 
@@ -140,7 +155,11 @@ export default defineEventHandler(async (event) => {
   try {
     profile = await profileRepository.findById(supabaseUser.id);
   } catch (error) {
-    return desktopAuthFailure("DESKTOP_PROFILE_PROVISION_FAILED", 500, error);
+    return desktopAuthFailure(
+      "DESKTOP_PROFILE_PROVISION_FAILED",
+      500,
+      error instanceof Error ? error : "unknown",
+    );
   }
   console.info("[DesktopAuth] DESKTOP_SESSION_PROFILE_RESOLVED", {
     hasProfile: Boolean(profile),
@@ -163,6 +182,10 @@ export default defineEventHandler(async (event) => {
     console.info("[DesktopAuth] DESKTOP_SESSION_CREATED");
     return session;
   } catch (error) {
-    return desktopAuthFailure("DESKTOP_SESSION_PERSIST_FAILED", 500, error);
+    return desktopAuthFailure(
+      "DESKTOP_SESSION_PERSIST_FAILED",
+      500,
+      error instanceof Error ? error : "unknown",
+    );
   }
 });

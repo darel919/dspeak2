@@ -5,7 +5,6 @@ import {
 } from "./native-mediasoup-utils.ts";
 import { isPairedScreenAudio } from "./media-source-ownership.ts";
 import {
-  candidateFrameCount,
   createCodecMigrationTelemetry,
   isPresentableVideoFrame,
   logicalVideoStreamId,
@@ -20,36 +19,62 @@ import {
 import { supportsCodecDirectionTarget } from "./video-codec-routing.ts";
 import type { NativeConsumerEntry } from "./types/native-mediasoup.ts";
 import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
+import type { ParticipantMediaCapabilities } from "./types/video-codec-capabilities.ts";
 
 export const NATIVE_CODEC_MIGRATION_TIMEOUT_MS = 5000;
 export const NATIVE_CODEC_MIGRATION_STABILIZATION_MS = 1500;
 export const NATIVE_CODEC_MIGRATION_REQUIRED_FRAMES = 3;
 export const NATIVE_CODEC_MIGRATION_MAX_FRAME_GAP_MS = 1000;
 
-function metadataRecord(value: unknown) {
-  if (!value || typeof value !== "object") return {};
-  return value as Record<string, unknown>;
+interface NativeConsumeRequest extends Record<string, unknown> {
+  requestId: string;
+  transportId: string;
+  producerId: string;
+  rtpCapabilities: Record<string, unknown> | null;
+  mediaCapabilities: ParticipantMediaCapabilities | null;
+  preferredCodecs: string[];
+  preferredCodec?: string;
+  preferredLayers?: { spatialLayer?: number; temporalLayer?: number };
+}
+
+interface NativePreferredLayers {
+  spatialLayer?: number;
+  temporalLayer?: number;
+}
+
+interface CodecMigrationStateData extends Record<string, unknown> {
+  receiverId: string;
+  logicalStreamId: string | null;
+  variantId: string | null;
+  generation: number;
+  state: "stable" | "abort";
+  reason?: string;
+}
+
+function metadataRecord<T>(value: T): Record<string, unknown> {
+  return isExternalRecord(value) ? value : {};
 }
 
 function metadataCodec(metadata: Record<string, unknown>) {
   return normalizeVideoCodecName(metadata.codec);
 }
 
-function metadataNumber(value: unknown) {
+function metadataNumber<T>(value: T) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
 }
 
 function metadataTarget(metadata: Record<string, unknown>) {
-  const nestedTarget =
-    metadata.target && typeof metadata.target === "object"
-      ? (metadata.target as Record<string, unknown>)
-      : null;
-  const target: {
-    width?: number;
-    height?: number;
-    fps?: number;
-  } = {};
+  const nestedTarget = isExternalRecord(metadata.target)
+    ? metadata.target
+    : null;
+  const target: NativeConsumerEntry["target"] = {};
   for (const key of ["width", "height", "fps"] as const) {
     const value = metadataNumber(nestedTarget?.[key] ?? metadata[key]);
     if (value) target[key] = value;
@@ -57,12 +82,11 @@ function metadataTarget(metadata: Record<string, unknown>) {
   return Object.keys(target).length ? target : undefined;
 }
 
-function normalizePreferredLayers(value: unknown) {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
+function normalizePreferredLayers<T>(value: T) {
+  const record = metadataRecord(value);
   const spatialLayer = Number(record.spatialLayer);
   const temporalLayer = Number(record.temporalLayer);
-  const result: { spatialLayer?: number; temporalLayer?: number } = {};
+  const result: NativePreferredLayers = {};
   if (Number.isFinite(spatialLayer))
     result.spatialLayer = Math.max(0, Math.min(2, Math.floor(spatialLayer)));
   if (Number.isFinite(temporalLayer))
@@ -76,16 +100,17 @@ function reportCodecMigrationState(
   state: "stable" | "abort",
   reason?: string,
 ) {
+  const data: CodecMigrationStateData = {
+    receiverId: session.localPeerId,
+    logicalStreamId: entry.logicalStreamId || null,
+    variantId: entry.variantId || null,
+    generation: entry.generation || 1,
+    state,
+  };
+  if (reason) data.reason = reason;
   return session.providerSignaling?.send?.({
     type: "codec-migration-state",
-    data: {
-      receiverId: session.localPeerId,
-      logicalStreamId: entry.logicalStreamId || null,
-      variantId: entry.variantId || null,
-      generation: entry.generation || 1,
-      state,
-      ...(reason ? { reason } : {}),
-    },
+    data,
   });
 }
 
@@ -114,21 +139,20 @@ function updateStableVideoConsumerMetadata(
     entry.migrationState !== "stable"
   )
     return false;
-  const logicalStreamId =
-    typeof metadata.logicalStreamId === "string"
-      ? metadata.logicalStreamId
-      : entry.logicalStreamId;
+  const logicalStreamId = isExternalString(metadata.logicalStreamId)
+    ? metadata.logicalStreamId
+    : entry.logicalStreamId;
   if (logicalStreamId) entry.logicalStreamId = logicalStreamId;
   const generation = Number(metadata.generation);
   if (Number.isFinite(generation) && generation > 0)
     entry.generation = Math.max(1, Math.floor(generation));
-  if (typeof metadata.variantId === "string" && metadata.variantId)
+  if (isExternalString(metadata.variantId) && metadata.variantId)
     entry.variantId = metadata.variantId;
   const codec = metadataCodec(metadata);
   if (codec) entry.codec = codec;
-  if (typeof metadata.codecAcceleration === "string")
+  if (isExternalString(metadata.codecAcceleration))
     entry.codecAcceleration = metadata.codecAcceleration;
-  if (typeof metadata.codecImplementation === "string")
+  if (isExternalString(metadata.codecImplementation))
     entry.codecImplementation = metadata.codecImplementation;
   entry.width = metadataNumber(metadata.width) ?? entry.width;
   entry.height = metadataNumber(metadata.height) ?? entry.height;
@@ -178,10 +202,9 @@ function shouldRequestProducer(
     !(metadata.emergency === true && isEmergencyUsable(capability))
   )
     return false;
-  const logicalStreamId =
-    typeof metadata.logicalStreamId === "string"
-      ? metadata.logicalStreamId
-      : null;
+  const logicalStreamId = isExternalString(metadata.logicalStreamId)
+    ? metadata.logicalStreamId
+    : null;
   if (!logicalStreamId) return true;
   const logicalState = session.logicalVideoStreams.get(logicalStreamId);
   if (logicalState?.candidateConsumerId) return false;
@@ -225,26 +248,24 @@ export function requestConsumer(
   const normalizedProducerId = String(producerId || "");
   if (!normalizedProducerId) return false;
   const force = metadataRecord(metadata).force === true;
+  const previousMetadata =
+    session.remoteProducerMetadata.get(normalizedProducerId) || {};
   const resolvedMetadata = {
-    ...(session.remoteProducerMetadata.get(normalizedProducerId) || {}),
+    ...previousMetadata,
     ...metadataRecord(metadata),
   };
   delete resolvedMetadata.force;
   if (Object.keys(resolvedMetadata).length)
     session.remoteProducerMetadata.set(normalizedProducerId, resolvedMetadata);
-  if (
-    !shouldRequestProducer(session, normalizedProducerId, {
-      ...resolvedMetadata,
-      ...(force ? { force: true } : {}),
-    })
-  )
+  const requestMetadata = { ...resolvedMetadata };
+  if (force) requestMetadata.force = true;
+  if (!shouldRequestProducer(session, normalizedProducerId, requestMetadata))
     return false;
   if (producersHasId(session, normalizedProducerId)) return false;
   if (!force) {
-    const logicalStreamId =
-      typeof resolvedMetadata.logicalStreamId === "string"
-        ? resolvedMetadata.logicalStreamId
-        : null;
+    const logicalStreamId = isExternalString(resolvedMetadata.logicalStreamId)
+      ? resolvedMetadata.logicalStreamId
+      : null;
     const current = logicalStreamId
       ? [...session.consumers.values()].find(
           (entry) =>
@@ -279,27 +300,27 @@ export function requestConsumer(
   session.requestedConsumers.add(normalizedProducerId);
   const requestId = session.requestId("consume");
   try {
+    const consumeData: NativeConsumeRequest = {
+      requestId,
+      transportId: session.recvTransport.id,
+      producerId: normalizedProducerId,
+      rtpCapabilities: session.lastSentClientRtpCapabilities,
+      mediaCapabilities: session.mediaCapabilities,
+      preferredCodecs: session.mediaCapabilities
+        ? efficientDecodeCodecs(session.mediaCapabilities)
+        : [],
+    };
+    const preferredCodec = metadataCodec(resolvedMetadata);
+    if (preferredCodec) consumeData.preferredCodec = preferredCodec;
+    if (preferredLayers) consumeData.preferredLayers = preferredLayers;
     session.sendOrThrow(
       {
         type: "consume",
-        data: {
-          requestId,
-          transportId: session.recvTransport.id,
-          producerId: normalizedProducerId,
-          rtpCapabilities: session.lastSentClientRtpCapabilities,
-          mediaCapabilities: session.mediaCapabilities,
-          preferredCodecs: session.mediaCapabilities
-            ? efficientDecodeCodecs(session.mediaCapabilities)
-            : [],
-          ...(metadataCodec(resolvedMetadata)
-            ? { preferredCodec: metadataCodec(resolvedMetadata) }
-            : {}),
-          ...(preferredLayers ? { preferredLayers } : {}),
-        },
+        data: consumeData,
       },
       "SFU consumer request",
     );
-  } catch (_) {
+  } catch {
     session.requestedConsumers.delete(normalizedProducerId);
     session.pendingConsumers.add(normalizedProducerId);
   }
@@ -324,12 +345,10 @@ export async function createConsumer(
 ) {
   const producerId = String(data.producerId || "");
   const dataId = String(data.id || "");
-  const appData =
-    data.appData && typeof data.appData === "object"
-      ? (data.appData as Record<string, unknown>)
-      : {};
+  const appData = metadataRecord(data.appData);
+  const previousMetadata = session.remoteProducerMetadata.get(producerId) || {};
   session.remoteProducerMetadata.set(producerId, {
-    ...(session.remoteProducerMetadata.get(producerId) || {}),
+    ...previousMetadata,
     ...appData,
     ...data,
   });
@@ -352,10 +371,9 @@ export async function createConsumer(
       appData: {
         userId: data.userId ?? appData.userId,
         source: data.source ?? appData.source,
-        ownerSource:
-          typeof (data.ownerSource ?? appData.ownerSource) === "string"
-            ? String(data.ownerSource ?? appData.ownerSource)
-            : null,
+        ownerSource: isExternalString(data.ownerSource ?? appData.ownerSource)
+          ? String(data.ownerSource ?? appData.ownerSource)
+          : null,
         logicalStreamId:
           data.logicalStreamId || appData.logicalStreamId || null,
         generation: data.generation || appData.generation || null,
@@ -387,10 +405,10 @@ export async function createConsumer(
     const source = String(
       data.source ?? appData.source ?? data.kind ?? "audio",
     );
+    const rawUserId = data.userId ?? appData.userId;
     const userId =
-      typeof (data.userId ?? appData.userId) === "string" ||
-      typeof (data.userId ?? appData.userId) === "number"
-        ? ((data.userId ?? appData.userId) as string | number)
+      isExternalString(rawUserId) || isExternalNumber(rawUserId)
+        ? rawUserId
         : null;
     const feedKey = nativeRemoteFeedKey(userId, source, consumerId);
     const logicalStream = String(
@@ -418,10 +436,9 @@ export async function createConsumer(
       producerId: String(result?.producerId || producerId),
       userId,
       source,
-      ownerSource:
-        typeof (data.ownerSource ?? appData.ownerSource) === "string"
-          ? String(data.ownerSource ?? appData.ownerSource)
-          : null,
+      ownerSource: isExternalString(data.ownerSource ?? appData.ownerSource)
+        ? String(data.ownerSource ?? appData.ownerSource)
+        : null,
       kind: String(result?.kind || data.kind || "audio"),
       track: null,
       stream: null,
@@ -432,38 +449,36 @@ export async function createConsumer(
       desiredReceiving: false,
       receivingRevision: 0,
       closed: false,
+      connectionEpoch: session.getControlConnectionEpoch?.() || 1,
       logicalStreamId: logicalStream,
       generation: Math.max(
         1,
         Math.floor(Number(data.generation || appData.generation) || 1),
       ),
-      variantId:
-        typeof (data.variantId || appData.variantId) === "string"
-          ? String(data.variantId || appData.variantId)
-          : null,
-      codec:
-        typeof (data.codec || appData.codec) === "string"
-          ? String(data.codec || appData.codec)
-          : null,
-      codecAcceleration:
-        typeof (data.codecAcceleration || appData.codecAcceleration) ===
-        "string"
-          ? String(data.codecAcceleration || appData.codecAcceleration)
-          : null,
-      codecImplementation:
-        typeof (data.codecImplementation || appData.codecImplementation) ===
-        "string"
-          ? String(data.codecImplementation || appData.codecImplementation)
-          : null,
+      receiverIncarnationId: `native-sfu:${consumerId}:${
+        session.getControlConnectionEpoch?.() || 1
+      }:${Math.max(1, Math.floor(Number(data.generation || appData.generation) || 1))}`,
+      variantId: isExternalString(data.variantId || appData.variantId)
+        ? String(data.variantId || appData.variantId)
+        : null,
+      codec: isExternalString(data.codec || appData.codec)
+        ? String(data.codec || appData.codec)
+        : null,
+      codecAcceleration: isExternalString(
+        data.codecAcceleration || appData.codecAcceleration,
+      )
+        ? String(data.codecAcceleration || appData.codecAcceleration)
+        : null,
+      codecImplementation: isExternalString(
+        data.codecImplementation || appData.codecImplementation,
+      )
+        ? String(data.codecImplementation || appData.codecImplementation)
+        : null,
       width: metadataNumber(data.width ?? appData.width),
       height: metadataNumber(data.height ?? appData.height),
       fps: metadataNumber(data.fps ?? appData.fps),
       bitrate: metadataNumber(data.bitrate ?? appData.bitrate),
-      target:
-        (data.target ?? appData.target) &&
-        typeof (data.target ?? appData.target) === "object"
-          ? ((data.target ?? appData.target) as Record<string, unknown>)
-          : null,
+      target: metadataTarget({ target: data.target ?? appData.target }) || null,
       targetAdjusted:
         data.targetAdjusted === true || appData.targetAdjusted === true,
       emergency: data.emergency === true || appData.emergency === true,
@@ -486,14 +501,12 @@ export async function createConsumer(
     if (entry.kind === "video") {
       const logicalState = session.logicalVideoStreams.get(logicalStream);
       if (isVideoMigration && previous) {
-        logicalState?.candidateConsumerId &&
-          session.consumers.get(logicalState.candidateConsumerId) &&
-          closeConsumer(
-            session,
-            session.consumers.get(
-              logicalState.candidateConsumerId,
-            ) as NativeConsumerEntry,
+        if (logicalState?.candidateConsumerId) {
+          const candidate = session.consumers.get(
+            logicalState.candidateConsumerId,
           );
+          if (candidate) closeConsumer(session, candidate);
+        }
         session.logicalVideoStreams.set(logicalStream, {
           logicalStreamId: logicalStream,
           generation: entry.generation || 1,
@@ -561,8 +574,10 @@ export async function adaptVideoReceiver(
   if (!current || current.kind !== "video" || !current.producerId) return false;
   const normalized = normalizePreferredLayers(preferredLayers);
   if (!normalized) return false;
+  const previousMetadata =
+    session.remoteProducerMetadata.get(current.producerId) || {};
   const metadata = {
-    ...(session.remoteProducerMetadata.get(current.producerId) || {}),
+    ...previousMetadata,
     force: true,
     preferredLayers: normalized,
   };
@@ -574,8 +589,8 @@ export function setRemoteReceiving(
   userIdOrKey: string,
   sourceOrReceiving: string | boolean,
   receivingValue?: boolean,
-): Promise<unknown> | false {
-  if (typeof sourceOrReceiving === "boolean" && receivingValue === undefined) {
+): Promise<boolean | boolean[]> | false {
+  if (isExternalBoolean(sourceOrReceiving) && receivingValue === undefined) {
     const entry =
       session.consumers.get(userIdOrKey) ||
       session.remoteVideoFeeds.get(userIdOrKey) ||
@@ -592,7 +607,7 @@ export function setRemoteReceiving(
   const userId = userIdOrKey;
   const source = sourceOrReceiving;
   const receiving = Boolean(receivingValue);
-  const operations: Array<Promise<unknown>> = [];
+  const operations: Array<Promise<boolean>> = [];
   session.remoteReceiving.set(
     `${String(userId)}:${String(source)}`,
     Boolean(receiving),
@@ -688,16 +703,13 @@ export async function setConsumerReceiving(
         `SFU consumer ${desired ? "resume" : "pause"}`,
       );
     } catch (error) {
-      session.pending.get(retryRequestId)?.reject(error);
+      session.pending
+        .get(retryRequestId)
+        ?.reject(asError(error, "SFU consumer control failed"));
     }
     try {
-      const result: unknown = await acknowledgement;
-      if (
-        result &&
-        typeof result === "object" &&
-        "consumerClosed" in result &&
-        result.consumerClosed === true
-      ) {
+      const result = await acknowledgement;
+      if (isExternalRecord(result) && result.consumerClosed === true) {
         if (entry.receivingRevision === revision) entry.receiving = false;
         closeConsumer(session, entry);
         return false;
@@ -1069,7 +1081,7 @@ export function closeConsumer(
     } catch {}
     session
       .invoke("media_close_consumer", { consumerId: entry.consumerId })
-      .catch((error: unknown) =>
+      .catch((error) =>
         session.onError?.(asError(error, "Native consumer close failed")),
       );
   }

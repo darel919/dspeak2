@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { readBody } from "h3";
 import { verifySupabaseAccessToken } from "../auth/supabase.ts";
 import { profileRepository } from "../db/repositories/profiles.ts";
 import { sameOriginAvatarPath } from "../../shared/avatar-path.ts";
@@ -21,6 +20,14 @@ const requiredCsrfSecret = CSRF_SECRET;
 type AuthProfile = NonNullable<
   Awaited<ReturnType<ProfileRepository["findById"]>>
 >;
+type PublicUserMetadata = {
+  id: string;
+  name: string;
+  username: string;
+  display_name: string;
+  handle: string;
+  avatar: string;
+};
 
 function csrfTokenForSession(userId: string): string {
   return createHmac("sha256", requiredCsrfSecret)
@@ -42,7 +49,7 @@ function sessionCookieOptions(maxAge = SESSION_LIFETIME_SECONDS) {
   };
 }
 
-function publicUserMetadata(user: AuthProfile): Record<string, string> {
+function publicUserMetadata(user: AuthProfile): PublicUserMetadata {
   return {
     id: String(user.id),
     name: user.displayName || "",
@@ -127,6 +134,10 @@ function verifiedPayloadForEvent(
   token: string,
 ): Promise<JWTPayload | null> {
   if (event.context.authToken === token && event.context.authPayload)
+    /*
+     * SAFETY: authPayload is assigned only after verifySupabaseAccessToken
+     * validates the issuer, subject, and audience in the bearer middleware.
+     */
     return Promise.resolve(event.context.authPayload as JWTPayload);
   if (
     event.context.authVerification?.token === token &&

@@ -7,6 +7,12 @@ import { useAuthStore } from "./auth";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 import { debugLog } from "../shared/debug";
 import { openRealtimeChannel } from "../shared/realtime-channel.ts";
+import type { RealtimeChannelLike } from "../shared/realtime-channel.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
 import type {
   NotificationFetchOptions,
   NotificationPreferences,
@@ -15,6 +21,45 @@ import type {
 } from "../shared/types/notifications.ts";
 
 const MAX_INBOX_ITEMS = 100;
+
+function parseNotification(value: ExternalField): NotificationRecord | null {
+  if (!isExternalRecord(value) || !isExternalString(value.id)) return null;
+  return {
+    ...value,
+    id: value.id,
+  };
+}
+
+function parseNotificationRealtime(
+  value: ExternalField,
+): NotificationRealtimePayload | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
+  return {
+    type: isExternalString(record.type) ? record.type : undefined,
+    data: parseExternalRecord(record.data) ?? undefined,
+  };
+}
+
+function parseNotificationPreferences(
+  value: ExternalField,
+): NotificationPreferences {
+  if (!isExternalRecord(value))
+    throw new Error("Invalid notification preferences");
+  if (
+    !isExternalString(value.mode) ||
+    (value.push !== true && value.push !== false) ||
+    (value.sound !== true && value.sound !== false) ||
+    (value.previews !== true && value.previews !== false)
+  )
+    throw new Error("Invalid notification preferences");
+  return {
+    mode: value.mode,
+    push: value.push,
+    sound: value.sound,
+    previews: value.previews,
+  };
+}
 
 export const useNotificationsStore = defineStore("notifications", () => {
   const notificationSupported = ref(false);
@@ -34,7 +79,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
   });
   const config = useRuntimeConfig();
   let initialization: Promise<void> | null = null;
-  let notificationsChannel: unknown = null;
+  let notificationsChannel: RealtimeChannelLike | null = null;
   let closeNotificationsChannel: (() => void) | null = null;
   let notificationsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let notificationsReconnectAttempts = 0;
@@ -103,6 +148,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
     openRealtimeChannel<NotificationRealtimePayload>(
       `notify:${normalizedUserId}`,
       {
+        decodePayload: parseNotificationRealtime,
         onMessage: (message) => receiveRealtime(message),
         onSubscribe: () => {
           notificationsReconnectAttempts = 0;
@@ -162,7 +208,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
   async function authenticatedFetch(
     path: string,
     options: NotificationFetchOptions = {},
-  ): Promise<Record<string, unknown>> {
+  ): Promise<ExternalField> {
     const userData = useAuthStore().getUserData();
     if (!userData?.id) throw new Error("User not authenticated");
     const response = await fetch(`${config.public.apiPath}/chat/${path}`, {
@@ -176,14 +222,18 @@ export const useNotificationsStore = defineStore("notifications", () => {
     });
     if (!response.ok)
       throw new Error(`Notification request failed: ${response.status}`);
-    return (await response.json()) as Record<string, unknown>;
+    return response.json();
   }
 
   async function fetchInbox() {
     const result = await authenticatedFetch("notifications");
-    inbox.value = boundInbox(
-      Array.isArray(result.items) ? (result.items as NotificationRecord[]) : [],
-    );
+    const resultRecord = isExternalRecord(result) ? result : {};
+    const items = Array.isArray(resultRecord.items)
+      ? resultRecord.items
+          .map(parseNotification)
+          .filter((item): item is NotificationRecord => item !== null)
+      : [];
+    inbox.value = boundInbox(items);
     return inbox.value;
   }
 
@@ -226,23 +276,27 @@ export const useNotificationsStore = defineStore("notifications", () => {
   }
 
   async function fetchPreferences() {
-    preferences.value = (await authenticatedFetch(
-      "notification-preferences",
-    )) as unknown as NotificationPreferences;
+    preferences.value = parseNotificationPreferences(
+      await authenticatedFetch("notification-preferences"),
+    );
     return preferences.value;
   }
 
   async function savePreferences(value: Partial<NotificationPreferences>) {
-    preferences.value = (await authenticatedFetch("notification-preferences", {
-      method: "PUT",
-      body: JSON.stringify({ ...preferences.value, ...value }),
-    })) as unknown as NotificationPreferences;
+    preferences.value = parseNotificationPreferences(
+      await authenticatedFetch("notification-preferences", {
+        method: "PUT",
+        body: JSON.stringify({ ...preferences.value, ...value }),
+      }),
+    );
     return preferences.value;
   }
 
   function receiveRealtime(message: NotificationRealtimePayload) {
     if (message?.type === "notification_created" && message.data) {
-      const senderId = message.data.senderId;
+      const notification = parseNotification(message.data);
+      if (!notification) return;
+      const senderId = notification.senderId;
       const currentUserId = useAuthStore().getUserData()?.id;
       if (
         senderId &&
@@ -252,26 +306,30 @@ export const useNotificationsStore = defineStore("notifications", () => {
         return;
       }
       inbox.value = boundInbox([
-        message.data,
-        ...inbox.value.filter((item) => item.id !== message.data?.id),
+        notification,
+        ...inbox.value.filter((item) => item.id !== notification.id),
       ]);
       if (preferences.value.push && preferences.value.mode !== "none") {
-        void showNotification(message.data.title || "dSpeak Notification", {
+        void showNotification(notification.title || "dSpeak Notification", {
           body:
-            message.data.body ||
-            message.data.content ||
+            notification.body ||
+            notification.content ||
             "You have a new notification.",
-          tag: message.data.id ? `notification-${message.data.id}` : undefined,
-          data: message.data.data || {},
+          tag: notification.id ? `notification-${notification.id}` : undefined,
+          data: notification.data || {},
         });
       }
     }
     if (message?.type === "notifications_changed")
-      fetchInbox().catch((cause: unknown) => {
+      fetchInbox().catch((cause) => {
         error.value = cause instanceof Error ? cause.message : String(cause);
       });
     if (message?.type === "notifications_read") {
-      const ids = new Set(message.data?.ids || []);
+      const ids = new Set(
+        Array.isArray(message.data?.ids)
+          ? message.data.ids.filter((id): id is string => isExternalString(id))
+          : [],
+      );
       const readAt = new Date().toISOString();
       inbox.value = inbox.value.map((item) =>
         !ids.size || ids.has(item.id) ? { ...item, read_at: readAt } : item,
@@ -338,10 +396,9 @@ export const useNotificationsStore = defineStore("notifications", () => {
     roomName: string | null,
   ) {
     const title = roomName ? `New message in ${roomName}` : "New message";
-    const senderName =
-      typeof message?.sender === "object"
-        ? message.sender?.name || "Someone"
-        : message?.sender || "Someone";
+    const senderName = isExternalRecord(message?.sender)
+      ? message.sender?.name || "Someone"
+      : message?.sender || "Someone";
     const content = String(message?.content || "");
     return showNotification(title, {
       body: `${senderName}: ${content}`.slice(0, 100),
@@ -357,14 +414,19 @@ export const useNotificationsStore = defineStore("notifications", () => {
     return notificationManager.shouldShowNotification();
   }
 
-  function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
     if (!base64String) throw new Error("VAPID public key is missing");
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
     const base64 = `${base64String}${padding}`
       .replace(/-/g, "+")
       .replace(/_/g, "/");
     const rawData = window.atob(base64);
-    return Uint8Array.from(rawData, (character) => character.charCodeAt(0));
+    const bytes = Uint8Array.from(rawData, (character) =>
+      character.charCodeAt(0),
+    );
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return buffer;
   }
 
   async function getExistingSubscription() {
@@ -401,7 +463,7 @@ export const useNotificationsStore = defineStore("notifications", () => {
         existing ||
         (await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
+          applicationServerKey: urlBase64ToArrayBuffer(vapidKey),
         }));
       const response = await fetch(
         `${config.public.apiPath}/push-subscriptions`,

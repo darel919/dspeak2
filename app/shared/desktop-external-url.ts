@@ -30,6 +30,5 @@ export async function openExternalUrl(
     await openUrl(url);
     return;
   }
-  if (typeof window !== "undefined")
-    window.open(url, "_blank", "noopener,noreferrer");
+  if (import.meta.client) window.open(url, "_blank", "noopener,noreferrer");
 }

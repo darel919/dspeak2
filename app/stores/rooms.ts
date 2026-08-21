@@ -2,6 +2,13 @@ import { defineStore } from "pinia";
 import { useRuntimeConfig } from "#app";
 import { useAuthStore } from "./auth";
 import { cacheRooms, getCachedRooms, isIdbAvailable } from "~/utils/idb";
+import { isExternalRecord } from "../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
+
+interface RoomCreatePayload {
+  name: string;
+  desc?: string;
+}
 import {
   isRoomRecord,
   type CreateRoomResponse,
@@ -37,18 +44,20 @@ export const useRoomsStore = defineStore("rooms", () => {
         else if (value !== undefined)
           body.set(
             key,
-            typeof value === "object" ? JSON.stringify(value) : String(value),
+            isExternalRecord(value) ? JSON.stringify(value) : String(value),
           );
       }
     }
-    const response = await fetch(`${apiPath}/room/`, {
+    const requestOptions: RequestInit = {
       method: "PUT",
       credentials: "include",
-      headers: {
-        ...(!hasFile ? { "Content-Type": "application/json" } : {}),
-      },
       body: body || JSON.stringify({ roomId, ...data }),
-    });
+    };
+    if (!hasFile)
+      Object.assign(requestOptions, {
+        headers: { "Content-Type": "application/json" },
+      });
+    const response = await fetch(`${apiPath}/room/`, requestOptions);
     if (!response.ok) throw new Error("Failed to update room");
     const updatedRoom: unknown = await response.json();
     if (!isRoomRecord(updatedRoom)) throw new Error("Invalid room response");
@@ -81,13 +90,11 @@ export const useRoomsStore = defineStore("rooms", () => {
     const authStore = useAuthStore();
     const userData = authStore.getUserData();
     const apiPath = config.public.apiPath;
-    if (!name || typeof name !== "string" || !name.trim())
-      throw new Error("Room name is required");
+    if (!name || !name.trim()) throw new Error("Room name is required");
     if (!userData || !userData.id) throw new Error("User not authenticated");
     if (!apiPath) throw new Error("API path is not defined");
-    const body: Record<string, unknown> = { name: name.trim() };
-    if (desc && typeof desc === "string" && desc.trim())
-      body.desc = desc.trim();
+    const body: RoomCreatePayload = { name: name.trim() };
+    if (desc && desc.trim()) body.desc = desc.trim();
     const response = await fetch(`${apiPath}/room/`, {
       method: "POST",
       credentials: "include",
@@ -139,7 +146,6 @@ export const useRoomsStore = defineStore("rooms", () => {
         },
       });
       if (!response.ok) {
-        const errorText = await response.text();
         throw new Error(`Failed to fetch rooms: ${response.status}`);
       }
       const data: unknown = await response.json();
@@ -231,7 +237,7 @@ export const useRoomsStore = defineStore("rooms", () => {
   async function joinRoom(
     roomId: string,
     inviteToken: string | null = null,
-  ): Promise<RoomRecord | unknown> {
+  ): Promise<RoomRecord | ExternalField> {
     loading.value = true;
     error.value = null;
 
@@ -243,7 +249,7 @@ export const useRoomsStore = defineStore("rooms", () => {
         throw new Error("User not authenticated");
       }
 
-      if (!roomId || typeof roomId !== "string" || !roomId.trim()) {
+      if (!roomId || !roomId.trim()) {
         throw new Error("Invalid room ID");
       }
 
@@ -253,7 +259,7 @@ export const useRoomsStore = defineStore("rooms", () => {
         (room) => room.id === trimmedRoomId,
       );
       if (existingRoom) {
-        if (typeof window !== "undefined") {
+        if (import.meta.client) {
           try {
             const { usePushSubscription } =
               await import("../composables/usePushSubscription");
@@ -325,7 +331,7 @@ export const useRoomsStore = defineStore("rooms", () => {
 
       await fetchRooms();
 
-      if (typeof window !== "undefined") {
+      if (import.meta.client) {
         try {
           const { usePushSubscription } =
             await import("../composables/usePushSubscription");
@@ -348,7 +354,7 @@ export const useRoomsStore = defineStore("rooms", () => {
     }
   }
 
-  async function leaveRoom(roomId: string): Promise<unknown> {
+  async function leaveRoom(roomId: string): Promise<ExternalField> {
     try {
       loading.value = true;
       error.value = null;
@@ -384,7 +390,7 @@ export const useRoomsStore = defineStore("rooms", () => {
 
       const data = await response.json();
 
-      if (typeof window !== "undefined") {
+      if (import.meta.client) {
         try {
           const { usePushSubscription } =
             await import("../composables/usePushSubscription");

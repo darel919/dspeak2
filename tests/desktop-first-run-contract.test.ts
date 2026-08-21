@@ -10,6 +10,10 @@ import {
   withDesktopAuthorization,
 } from "../app/shared/desktop-api-fetch.ts";
 import { buildPublicUrl } from "../app/shared/desktop-external-url.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 const defaultCapability = JSON.parse(
   await import("node:fs/promises").then(({ readFile }) =>
@@ -87,17 +91,17 @@ describe("desktop first-run URL and transport boundaries", () => {
   });
 
   it("keeps the checked-in native scopes narrow and production-specific", () => {
-    const permissions = defaultCapability.permissions.filter(
-      (permission: unknown) => typeof permission === "object",
-    ) as Array<{
-      identifier: string;
-      allow?: Array<{ url?: string }>;
-    }>;
+    const permissions = defaultCapability.permissions.flatMap((permission) => {
+      const record = parseExternalRecord(permission);
+      return record ? [record] : [];
+    });
     const httpPermission = permissions.find(
-      (permission) => permission.identifier === "http:default",
+      (permission) =>
+        parseExternalString(permission.identifier) === "http:default",
     );
     const openerPermission = permissions.find(
-      (permission) => permission.identifier === "opener:allow-open-url",
+      (permission) =>
+        parseExternalString(permission.identifier) === "opener:allow-open-url",
     );
 
     assert.ok(httpPermission);

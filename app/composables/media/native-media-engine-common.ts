@@ -1,3 +1,17 @@
+import {
+  isDesktopCaptureSelection,
+  type DesktopCaptureSelection,
+} from "../../shared/desktop-capture.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
+import type {
+  NativeCaptureRequest,
+  NativeMediaFlags,
+  NativeMediaStore,
+} from "../../shared/types/native-media.ts";
+
 export const NATIVE_EVENT_NAMES = [
   "media:state",
   "media:local-track",
@@ -66,36 +80,25 @@ export function canAttemptNativeCapture(flags: NativeMediaFlags): boolean {
 
 export function getCaptureSelection(
   request: NativeCaptureRequest | null | undefined,
-): NativeCaptureRequest | null {
+): DesktopCaptureSelection | null {
   const selection = request?.captureSelection;
-  if (selection && typeof selection === "object" && !Array.isArray(selection))
-    return selection as NativeCaptureRequest;
-  const source = request?.source;
-  if (
-    source &&
-    typeof source === "object" &&
-    !Array.isArray(source) &&
-    typeof (source as Record<string, unknown>).sourceId === "string"
-  )
-    return request;
-  return null;
+  return isDesktopCaptureSelection(selection) ? selection : null;
 }
 
 export function isSourceAwareCaptureRequest(
   request: NativeCaptureRequest | null | undefined,
 ): boolean {
   const selection = getCaptureSelection(request);
-  return Boolean(
-    selection &&
-    typeof selection === "object" &&
-    selection.source &&
-    typeof selection.source === "object" &&
-    !Array.isArray(selection.source) &&
-    typeof (selection.source as Record<string, unknown>).sourceId ===
-      "string" &&
-    typeof (selection.source as Record<string, unknown>).sourceType ===
-      "string" &&
-    typeof (selection.source as Record<string, unknown>).sourceKey === "string",
+  if (selection) return true;
+  const source = request?.source;
+  if (!isExternalRecord(source)) return false;
+  return (
+    "sourceId" in source &&
+    isExternalString(source.sourceId) &&
+    "sourceType" in source &&
+    isExternalString(source.sourceType) &&
+    "sourceKey" in source &&
+    isExternalString(source.sourceKey)
   );
 }
 
@@ -108,8 +111,3 @@ export function channelMediaPolicy(
       ?.mediaPolicy || null
   );
 }
-import type {
-  NativeCaptureRequest,
-  NativeMediaFlags,
-  NativeMediaStore,
-} from "../../shared/types/native-media.ts";

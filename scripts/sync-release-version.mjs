@@ -180,11 +180,11 @@ export function synchronizeVersionContents({
       ...tauriConfig,
       version: normalizedVersion,
       bundle: {
-        ...(tauriConfig.bundle ?? {}),
+        ...tauriConfig.bundle,
         windows: {
-          ...(tauriConfig.bundle?.windows ?? {}),
+          ...tauriConfig.bundle?.windows,
           wix: {
-            ...(tauriConfig.bundle?.windows?.wix ?? {}),
+            ...tauriConfig.bundle?.windows?.wix,
             version: wixVersion,
           },
         },

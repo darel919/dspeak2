@@ -1,5 +1,6 @@
 import { mediaDebug } from "./media-debug.ts";
 import type { HybridSessionTerminationContext } from "./types/hybrid-media-session.ts";
+import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
 export function createHybridMediaSessionTermination({
   capture,
@@ -42,11 +43,8 @@ export function createHybridMediaSessionTermination({
   resolveTopologyWaiter,
   transportReady,
 }: HybridSessionTerminationContext) {
-  function failSession(message: unknown) {
+  function failSession(message: OwnedErrorValue) {
     if (message instanceof Error) error.value = message.message;
-    else if (typeof message === "string") error.value = message;
-    else if (message && typeof message === "object" && "message" in message)
-      error.value = String(message.message);
     else error.value = String(message);
     iceConnectedBoth.value = false;
     mediaConnectionState.value = "failed";
@@ -57,15 +55,19 @@ export function createHybridMediaSessionTermination({
 
   function disconnect() {
     rtpStatsSamples.clear();
-    setIntentionalClose(true);
     cancelConnect?.();
     resolveTopologyWaiter(new Error("Media signaling connection stopped"));
     setChannelId(null);
     disposeVisibility();
-    if (connected.value) {
+
+    const wasConnected = connected.value;
+
+    let leavePromise: Promise<unknown> | null = null;
+    if (wasConnected) {
       try {
-        sendLeave();
-      } catch (leaveError: unknown) {
+        leavePromise = Promise.resolve(sendLeave());
+      } catch (leaveError) {
+        leavePromise = Promise.reject(leaveError);
         mediaDebug("session.leave-failed", {
           error:
             leaveError instanceof Error
@@ -74,7 +76,9 @@ export function createHybridMediaSessionTermination({
         });
       }
     }
-    signaling.stop();
+
+    setIntentionalClose(true);
+
     stopLocalVoiceDetection();
     stopSharedAudioMeter();
     clearAttenuation();
@@ -84,7 +88,7 @@ export function createHybridMediaSessionTermination({
       getP2pMesh,
       getSfu,
       handoff,
-      socket: signaling.getSocket(),
+      socket: null,
     });
     getProviderSocket()?.close();
     setProviderSocket(null);
@@ -109,6 +113,15 @@ export function createHybridMediaSessionTermination({
     refreshPublicMaps();
     refreshTopologyGraph();
     mediaDebug("session.disconnected");
+
+    if (wasConnected && leavePromise) {
+      const timeout = new Promise((resolve) => setTimeout(resolve, 750));
+      Promise.race([leavePromise, timeout]).then(() => {
+        signaling.stop();
+      });
+    } else {
+      signaling.stop();
+    }
   }
 
   return { disconnect, failSession };

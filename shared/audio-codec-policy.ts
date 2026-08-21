@@ -1,33 +1,16 @@
-/**
- * @file Shared Audio Codec Policy
- * Provider-neutral audio codec and capture configuration.
- * Maps to mediasoup, Cloudflare Realtime, P2P, and native libwebrtc.
- */
+import type {
+  AudioCaptureConstraints,
+  AudioCodecPolicyValue,
+  AudioSourceType,
+  CaptureProcessingMode,
+  CaptureSourceType,
+} from "./types/audio-codec.ts";
 
-/**
- * @typedef {'speech'|'music'} ContentHint
- */
-
-/**
- * @typedef {Object} AudioCodecPolicy
- * @property {'opus'} codec
- * @property {48000} clockRate
- * @property {1|2} channels
- * @property {number} maxBitrateBps
- * @property {10|20} ptimeMs
- * @property {boolean} fec
- * @property {boolean} dtx
- * @property {boolean} nack
- * @property {ContentHint} content
- * @property {'high'} priority
- */
-
-/**
- * @typedef {'raw'|'voice-safe'|'default'} CaptureProcessingMode
- */
+type CaptureConstraintTable = {
+  [sourceType in CaptureSourceType]: AudioCaptureConstraints;
+};
 
 export const AudioCodecPolicy = {
-  /** Standard microphone profile (mono, 96 kbps ceiling) */
   STANDARD_MICROPHONE: Object.freeze({
     codec: "opus",
     clockRate: 48000,
@@ -41,7 +24,6 @@ export const AudioCodecPolicy = {
     priority: "high",
   }),
 
-  /** HD microphone profile (stereo, 160 kbps ceiling) */
   HD_MICROPHONE: Object.freeze({
     codec: "opus",
     clockRate: 48000,
@@ -55,7 +37,6 @@ export const AudioCodecPolicy = {
     priority: "high",
   }),
 
-  /** Shared/system audio profile (stereo, 160 kbps default, up to 256 kbps) */
   SHARED_AUDIO: Object.freeze({
     codec: "opus",
     clockRate: 48000,
@@ -69,10 +50,8 @@ export const AudioCodecPolicy = {
     priority: "high",
   }),
 
-  /** Maximum shared audio bitrate ceiling */
   SHARED_AUDIO_MAX_KBPS: 256,
 
-  /** Capture processing modes */
   CaptureProcessingMode: Object.freeze({
     RAW: "raw",
     VOICE_SAFE: "voice-safe",
@@ -80,12 +59,6 @@ export const AudioCodecPolicy = {
   }),
 };
 
-/**
- * Gets the appropriate audio codec policy for a source type.
- * @param {'microphone'|'shared-audio'} sourceType
- * @param {boolean} hdAudio
- * @returns {AudioCodecPolicy}
- */
 export function getAudioCodecPolicy(
   sourceType: AudioSourceType,
   hdAudio = false,
@@ -98,12 +71,6 @@ export function getAudioCodecPolicy(
     : AudioCodecPolicy.STANDARD_MICROPHONE;
 }
 
-/**
- * Maps AudioCodecPolicy to mediasoup producer options.
- * @param {AudioCodecPolicy} policy
- * @param {MediaStreamTrack} track
- * @returns {Object} mediasoup producer options
- */
 export function toMediasoupProducerOptions(
   policy: AudioCodecPolicyValue,
   track: MediaStreamTrack,
@@ -127,11 +94,6 @@ export function toMediasoupProducerOptions(
   };
 }
 
-/**
- * Maps AudioCodecPolicy to Cloudflare Realtime track publish options.
- * @param {AudioCodecPolicy} policy
- * @returns {Object} Cloudflare track options
- */
 export function toCloudflareTrackOptions(policy: AudioCodecPolicyValue) {
   return {
     codec: policy.codec,
@@ -145,11 +107,6 @@ export function toCloudflareTrackOptions(policy: AudioCodecPolicyValue) {
   };
 }
 
-/**
- * Maps AudioCodecPolicy to P2P RTCPeerConnection codec preferences.
- * @param {AudioCodecPolicy} policy
- * @returns {Object} P2P codec constraints
- */
 export function toP2PCodecConstraints(policy: AudioCodecPolicyValue) {
   return {
     opus: {
@@ -165,19 +122,12 @@ export function toP2PCodecConstraints(policy: AudioCodecPolicyValue) {
   };
 }
 
-/**
- * Gets capture constraints for a source type and processing mode.
- * @param {'microphone'|'camera'|'screen-video'|'screen-audio'} sourceType
- * @param {CaptureProcessingMode} mode
- * @param {Object} [options]
- * @returns {MediaTrackConstraints}
- */
 export function getCaptureConstraints(
   sourceType: CaptureSourceType,
   mode: CaptureProcessingMode = AudioCodecPolicy.CaptureProcessingMode.DEFAULT,
   _options: MediaTrackConstraints = {},
 ) {
-  const baseConstraints: Record<CaptureSourceType, AudioCaptureConstraints> = {
+  const baseConstraints: CaptureConstraintTable = {
     microphone: {
       audio: {
         sampleRate: 48000,
@@ -230,10 +180,3 @@ export function getCaptureConstraints(
 
   return constraints;
 }
-import type {
-  AudioCaptureConstraints,
-  AudioCodecPolicyValue,
-  AudioSourceType,
-  CaptureProcessingMode,
-  CaptureSourceType,
-} from "./types/audio-codec.ts";

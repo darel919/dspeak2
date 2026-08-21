@@ -53,12 +53,12 @@ describe("native media authentication", () => {
         "channel-id",
         "room-id",
       );
+      await assert.doesNotReject(() => configured.refreshControl());
     } finally {
       globalThis.fetch = originalFetch;
     }
 
     assert.equal(request.input, "https://api.example.test/api/media/bootstrap");
     assert.equal(request.init.headers.Authorization, "Bearer access-token");
-    assert.equal(typeof configured.refreshControl, "function");
   });
 });

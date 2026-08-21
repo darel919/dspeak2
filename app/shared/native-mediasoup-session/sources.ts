@@ -2,7 +2,6 @@ import { asError } from "../native-mediasoup-utils.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
 import type {
   NativeProducerEntry,
-  NativeMediasoupSfuSessionSurface,
   NativeSourceEntry,
 } from "../types/native-mediasoup-session.ts";
 import {
@@ -25,6 +24,40 @@ import {
 } from "../types/video-codec-capabilities.ts";
 
 import { nativeProducerAppData, nativeVideoMetadata } from "./helpers.ts";
+import { isExternalRecord } from "../types/boundary.ts";
+import type { MediaCommandResult } from "../types/boundary.ts";
+
+function recordValue<T>(value: T): Record<string, unknown> {
+  return isExternalRecord(value) ? value : {};
+}
+
+function recordArray<T>(value: T): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((candidate): candidate is Record<string, unknown> =>
+    isExternalRecord(candidate),
+  );
+}
+
+interface NativeMediasoupProducerRequest extends Record<string, unknown> {
+  source?: string;
+  producerKey?: string;
+  paused?: boolean;
+  kind?: "audio" | "video";
+  appData?: Record<string, unknown>;
+  parameters?: Record<string, unknown>;
+}
+
+interface NativeCodecRoutingOptions {
+  allowEmergencySoftware: boolean;
+  allowTargetAdaptation: boolean;
+  sfuSupportedCodecs: string[];
+  target?: CodecRoutingTarget;
+}
+
+interface NativeMediaPublication extends Record<string, unknown> {
+  target?: CodecRoutingTarget;
+  targetAdjusted?: boolean;
+}
 
 function producerKey(entry: NativeSourceEntry) {
   return String(entry.producerKey || entry.source || "");
@@ -47,12 +80,9 @@ function cloudflareProducerSnapshot(
   producer: Record<string, unknown>,
   source: string,
 ): NativeSourceEntry {
-  const target =
-    producer.target && typeof producer.target === "object"
-      ? { ...(producer.target as Record<string, number>) }
-      : undefined;
+  const target = routingTargetValue(producer.target);
   const score = Number(producer.score);
-  return {
+  const snapshot: NativeSourceEntry = {
     source: String(producer.source || source),
     kind: "video",
     logicalStreamId: String(producer.logicalStreamId || "") || null,
@@ -63,28 +93,39 @@ function cloudflareProducerSnapshot(
     height: positiveNumber(producer.height),
     fps: positiveNumber(producer.fps),
     bitrate: positiveNumber(producer.bitrate),
-    ...(target ? { target } : {}),
-    ...(producer.targetAdjusted === true ? { targetAdjusted: true } : {}),
     receivers: Array.isArray(producer.receivers)
       ? producer.receivers.map(String)
       : [],
     emergency: producer.emergency === true,
-    ...(Number.isFinite(score) ? { routingScore: score } : {}),
   };
+  if (target) snapshot.target = target;
+  if (producer.targetAdjusted === true) snapshot.targetAdjusted = true;
+  if (Number.isFinite(score)) snapshot.routingScore = score;
+  return snapshot;
 }
 
 function routingTarget(
   entry: NativeSourceEntry,
 ): CodecRoutingTarget | undefined {
+  return routingTargetValue({
+    width: entry.width,
+    height: entry.height,
+    fps: entry.fps,
+    bitrate: entry.bitrate,
+  });
+}
+
+function routingTargetValue<T>(value: T): CodecRoutingTarget | undefined {
+  const record = recordValue(value);
   const target: CodecRoutingTarget = {};
   for (const key of ["width", "height", "fps", "bitrate"] as const) {
-    const value = Number(entry[key]);
-    if (Number.isFinite(value) && value > 0) target[key] = Math.floor(value);
+    const number = Number(record[key]);
+    if (Number.isFinite(number) && number > 0) target[key] = Math.floor(number);
   }
   return Object.keys(target).length ? target : undefined;
 }
 
-function positiveNumber(value: unknown) {
+function positiveNumber<T>(value: T) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
 }
@@ -100,37 +141,35 @@ function allVideoProducers(session: NativeMediasoupSfuSession) {
 }
 
 function producerSourceEntry(producer: NativeProducerEntry) {
-  return (
-    producer.entry && typeof producer.entry === "object"
-      ? producer.entry
-      : producer
-  ) as NativeSourceEntry;
+  return producer.entry;
 }
 
 function cloneNativeSourceEntry(entry: NativeSourceEntry): NativeSourceEntry {
-  return {
+  const clone: NativeSourceEntry = {
     ...entry,
-    ...(entry.receivers ? { receivers: [...entry.receivers] } : {}),
-    ...(entry.target ? { target: { ...entry.target } } : {}),
   };
+  if (entry.receivers) clone.receivers = [...entry.receivers];
+  if (entry.target) clone.target = { ...entry.target };
+  return clone;
 }
 
 function routingVariantFromProducerEntry(
   entry: NativeSourceEntry,
 ): CodecRoutingPlan["desiredVariants"][number] {
-  return {
+  const variant: CodecRoutingPlan["desiredVariants"][number] = {
     codec: normalizeVideoCodecName(entry.codec) || "H264",
     variantId: String(entry.variantId || ""),
     generation: Math.max(1, Math.floor(Number(entry.generation) || 1)),
     receivers: Array.isArray(entry.receivers) ? [...entry.receivers] : [],
-    ...(entry.target ? { target: { ...entry.target } } : {}),
-    ...(entry.targetAdjusted ? { targetAdjusted: true } : {}),
     emergency: entry.emergency === true,
     hardwareEncode: entry.codecAcceleration === "hardware",
     score: Number.isFinite(Number(entry.routingScore))
       ? Number(entry.routingScore)
       : 0,
   };
+  if (entry.target) variant.target = { ...entry.target };
+  if (entry.targetAdjusted) variant.targetAdjusted = true;
+  return variant;
 }
 
 function producerUsesHardwareEncoder(
@@ -224,13 +263,13 @@ async function applyProducerTarget(
   const parameters = producerTargetParameters(sourceEntry, variant);
   if (!Object.keys(parameters).length) return true;
   try {
-    await session.invoke("media_set_producer_parameters", {
+    const request: NativeMediasoupProducerRequest = {
       source: producer.source,
-      ...(producer.producerKey !== producer.source
-        ? { producerKey: producer.producerKey }
-        : {}),
       parameters,
-    });
+    };
+    if (producer.producerKey !== producer.source)
+      request.producerKey = producer.producerKey;
+    await session.invoke("media_set_producer_parameters", request);
     return true;
   } catch (error) {
     session.onError?.(asError(error, "Native codec target update failed"));
@@ -251,11 +290,9 @@ function preferredVideoCodec(
     : [];
   const available = (codec: string) =>
     deviceCodecs.some((candidate) => {
-      if (!candidate || typeof candidate !== "object") return false;
+      const candidateRecord = recordValue(candidate);
       const mimeType = String(
-        (candidate as Record<string, unknown>).mimeType ||
-          (candidate as Record<string, unknown>).mime_type ||
-          "",
+        candidateRecord.mimeType || candidateRecord.mime_type || "",
       ).toUpperCase();
       return mimeType === `VIDEO/${codec}`;
     });
@@ -280,11 +317,9 @@ function deviceVideoCodecs(session: NativeMediasoupSfuSession) {
     return [...VIDEO_CODEC_NAMES];
   return VIDEO_CODEC_NAMES.filter((codec) =>
     codecs.some((candidate) => {
-      if (!candidate || typeof candidate !== "object") return false;
+      const candidateRecord = recordValue(candidate);
       const mimeType = String(
-        (candidate as Record<string, unknown>).mimeType ||
-          (candidate as Record<string, unknown>).mime_type ||
-          "",
+        candidateRecord.mimeType || candidateRecord.mime_type || "",
       ).toUpperCase();
       return mimeType === `VIDEO/${codec}`;
     }),
@@ -327,7 +362,7 @@ function routingParticipants(
       ids
         .map((id) => session.remoteParticipantCapabilities.get(id))
         .find(Boolean) ||
-      (entry.mediaCapabilities && typeof entry.mediaCapabilities === "object"
+      (isExternalRecord(entry.mediaCapabilities)
         ? normalizeParticipantMediaCapabilities(entry.mediaCapabilities)
         : null);
     if (!mediaCapabilities) return null;
@@ -532,10 +567,11 @@ async function closeBaseProducer(
     producer.producerKey || producer.entry.producerKey || producer.source,
   );
   try {
-    await session.invoke("media_remove_capture_producer", {
+    const request: NativeMediasoupProducerRequest = {
       source: producer.source,
-      ...(producerKey !== producer.source ? { producerKey } : {}),
-    });
+    };
+    if (producerKey !== producer.source) request.producerKey = producerKey;
+    await session.invoke("media_remove_capture_producer", request);
   } catch (error) {
     session.onError?.(asError(error, "Native base codec close failed"));
     return false;
@@ -677,7 +713,7 @@ export function handleCodecMigrationState(
     updatedAt: Date.now(),
   });
   if (state === "stable")
-    retireReadyCodecVariants(session, logicalStreamId).catch((error: unknown) =>
+    retireReadyCodecVariants(session, logicalStreamId).catch((error) =>
       session.onError?.(asError(error, "Native codec retirement failed")),
     );
   return true;
@@ -687,33 +723,24 @@ async function applyCodecRoutingPlanInternal(
   session: NativeMediasoupSfuSession,
   plan: CodecRoutingPlan,
 ) {
-  if (
-    !plan ||
-    typeof plan.logicalStreamId !== "string" ||
-    !plan.logicalStreamId ||
-    !Array.isArray(plan.desiredVariants)
-  )
+  if (!plan || !plan.logicalStreamId || !Array.isArray(plan.desiredVariants))
     return false;
-  const normalizedVariants = plan.desiredVariants.map((variant) => ({
-    ...variant,
-    codec:
-      normalizeVideoCodecName(variant?.codec) ||
-      String(variant?.codec || "").toUpperCase(),
-    variantId: String(
-      variant?.variantId ||
-        `${plan.logicalStreamId}:${String(variant?.codec || "").toLowerCase()}`,
-    ),
-  }));
-  if (
-    normalizedVariants.some(
-      (variant) =>
-        !isVideoCodecName(variant.codec) || !Array.isArray(variant.receivers),
-    )
-  )
-    return false;
+  const normalizedVariants: CodecRoutingPlan["desiredVariants"] = [];
+  for (const variant of plan.desiredVariants) {
+    const codec = normalizeVideoCodecName(variant.codec);
+    if (!codec || !Array.isArray(variant.receivers)) return false;
+    normalizedVariants.push({
+      ...variant,
+      codec,
+      variantId: String(
+        variant.variantId ||
+          `${plan.logicalStreamId}:${String(variant.codec || "").toLowerCase()}`,
+      ),
+    });
+  }
   const normalizedPlan: CodecRoutingPlan = {
     ...plan,
-    desiredVariants: normalizedVariants as CodecRoutingPlan["desiredVariants"],
+    desiredVariants: normalizedVariants,
   };
   const source = sourceForPlan(normalizedPlan);
   const validationReceivers = routingParticipants(session);
@@ -868,9 +895,9 @@ async function applyCodecRoutingPlanInternal(
           receivers: [...variant.receivers],
           emergency: variant.emergency === true,
           routingScore: variant.score,
-          ...(target ? { target } : {}),
-          ...(variant.targetAdjusted ? { targetAdjusted: true } : {}),
         };
+        if (target) variantEntry.target = target;
+        if (variant.targetAdjusted) variantEntry.targetAdjusted = true;
         if (target)
           for (const key of ["width", "height", "fps", "bitrate"] as const) {
             const value = Number(target[key]);
@@ -1130,52 +1157,43 @@ async function applyCodecRoutingPlanInternal(
     }
     session.codecRoutingCandidatePlans.delete(normalizedPlan.logicalStreamId);
     session._sendSourceState();
+    const producerIds: NativeMediaPublication[] = [];
+    if (baseProducer) {
+      const publication: NativeMediaPublication = {
+        id: baseProducer.id,
+        variantId: baseVariant?.variantId || null,
+        codec: baseCodec,
+        base: true,
+        receivers: baseVariant?.receivers || [],
+        emergency: baseVariant?.emergency === true,
+        score: baseVariant?.score,
+      };
+      if (baseVariant?.target) publication.target = { ...baseVariant.target };
+      if (baseVariant?.targetAdjusted) publication.targetAdjusted = true;
+      producerIds.push(publication);
+    }
+    for (const producer of [...session.producerVariants.values()].filter(
+      (candidate) =>
+        candidate.entry.logicalStreamId === normalizedPlan.logicalStreamId,
+    )) {
+      const publication: NativeMediaPublication = {
+        id: producer.id,
+        variantId: producer.entry.variantId,
+        codec: producer.entry.codec,
+        receivers: producer.entry.receivers || [],
+        emergency: producer.entry.emergency === true,
+        score: producer.entry.routingScore,
+      };
+      if (producer.entry.target) publication.target = producer.entry.target;
+      if (producer.entry.targetAdjusted) publication.targetAdjusted = true;
+      producerIds.push(publication);
+    }
     session.signaling?.send?.({
       type: "codec-routing-applied",
       data: {
         ...normalizedPlan,
         source,
-        producerIds: [
-          ...(baseProducer
-            ? [
-                {
-                  id: baseProducer.id,
-                  variantId: baseVariant?.variantId || null,
-                  codec: baseCodec,
-                  base: true,
-                  receivers: baseVariant?.receivers || [],
-                  ...(baseVariant?.target
-                    ? { target: { ...baseVariant.target } }
-                    : {}),
-                  ...(baseVariant?.targetAdjusted
-                    ? { targetAdjusted: true }
-                    : {}),
-                  emergency: baseVariant?.emergency === true,
-                  score: baseVariant?.score,
-                },
-              ]
-            : []),
-          ...[...session.producerVariants.values()]
-            .filter(
-              (producer) =>
-                producer.entry.logicalStreamId ===
-                normalizedPlan.logicalStreamId,
-            )
-            .map((producer) => ({
-              id: producer.id,
-              variantId: producer.entry.variantId,
-              codec: producer.entry.codec,
-              receivers: producer.entry.receivers || [],
-              ...(producer.entry.target
-                ? { target: producer.entry.target }
-                : {}),
-              ...(producer.entry.targetAdjusted
-                ? { targetAdjusted: true }
-                : {}),
-              emergency: producer.entry.emergency === true,
-              score: producer.entry.routingScore,
-            })),
-        ],
+        producerIds,
       },
     });
     await retireReadyCodecVariants(session, normalizedPlan.logicalStreamId);
@@ -1272,7 +1290,7 @@ export class NativeMediasoupSourcesMethods {
         entry.logicalStreamId || `source:${String(entry.source)}`;
       const plan = this.codecRoutingPlans.get(logicalStreamId);
       if (!plan?.desiredVariants.length) return cloudflare.addSource(entry);
-      let result: unknown = null;
+      let result: MediaCommandResult = null;
       const created: string[] = [];
       try {
         for (const variant of plan.desiredVariants) {
@@ -1290,9 +1308,9 @@ export class NativeMediasoupSourcesMethods {
             receivers: [...variant.receivers],
             emergency: variant.emergency === true,
             routingScore: variant.score,
-            ...(target ? { target } : {}),
-            ...(variant.targetAdjusted ? { targetAdjusted: true } : {}),
           };
+          if (target) variantEntry.target = target;
+          if (variant.targetAdjusted) variantEntry.targetAdjusted = true;
           if (target)
             for (const key of ["width", "height", "fps", "bitrate"] as const) {
               const value = Number(target[key]);
@@ -1321,7 +1339,7 @@ export class NativeMediasoupSourcesMethods {
   enqueueSourceOperation(
     this: NativeMediasoupSfuSession,
     source: string,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
@@ -1544,7 +1562,7 @@ export class NativeMediasoupSourcesMethods {
       this.codecRoutingEvaluationTimer = null;
       if (this.codecRoutingEvaluationOperation) return;
       const operation = this.evaluateCodecRoutingPlans()
-        .catch((error: unknown) => {
+        .catch((error) => {
           this.onError?.(
             asError(error, "Native codec routing evaluation failed"),
           );
@@ -1605,6 +1623,12 @@ export class NativeMediasoupSourcesMethods {
         entry.logicalStreamId || defaultLogicalStreamId(entry.source),
       );
       const target = routingTarget(entry);
+      const routingOptions: NativeCodecRoutingOptions = {
+        allowEmergencySoftware: true,
+        allowTargetAdaptation: true,
+        sfuSupportedCodecs: deviceVideoCodecs(this),
+      };
+      if (target) routingOptions.target = target;
       const plan = createCodecRoutingPlan(
         {
           participantId: this.localPeerId,
@@ -1613,12 +1637,7 @@ export class NativeMediasoupSourcesMethods {
           mediaCapabilities: this.mediaCapabilities,
         },
         receivers,
-        {
-          allowEmergencySoftware: true,
-          allowTargetAdaptation: true,
-          sfuSupportedCodecs: deviceVideoCodecs(this),
-          ...(target ? { target } : {}),
-        },
+        routingOptions,
       );
       if (
         !plan.desiredVariants.length ||
@@ -1673,38 +1692,29 @@ export class NativeMediasoupSourcesMethods {
       : this.producers;
     await this.producerRemovals.get(key);
     if (registry.has(key)) return registry.get(key) || null;
-    const codecParameters =
+    const codecParameters: Record<string, unknown> | null =
       kind === "video" && effectiveEntry.codec && this.device?.rtpCapabilities
-        ? (Array.isArray(this.device.rtpCapabilities.codecs)
-            ? this.device.rtpCapabilities.codecs
-            : []
-          ).find((candidate) => {
-            if (!candidate || typeof candidate !== "object") return false;
+        ? recordArray(this.device.rtpCapabilities.codecs).find((candidate) => {
+            const candidateRecord = recordValue(candidate);
             const mimeType = String(
-              (candidate as Record<string, unknown>).mimeType ||
-                (candidate as Record<string, unknown>).mime_type ||
-                "",
+              candidateRecord.mimeType || candidateRecord.mime_type || "",
             ).toUpperCase();
             return (
               mimeType === `VIDEO/${String(effectiveEntry.codec).toUpperCase()}`
             );
-          })
+          }) || null
         : null;
-    const appData: Record<string, unknown> = {
+    const appData = {
       ...nativeProducerAppData(effectiveEntry, kind),
-      ...(codecParameters ? { codecParameters } : {}),
     };
+    if (codecParameters) appData.codecParameters = codecParameters;
     if (kind === "video" && effectiveEntry.codec) {
       const normalizedCapabilities = normalizeParticipantMediaCapabilities(
         this.mediaCapabilities,
       );
       const codec = String(effectiveEntry.codec).toUpperCase();
-      const capability = VIDEO_CODEC_NAMES.includes(
-        codec as (typeof VIDEO_CODEC_NAMES)[number],
-      )
-        ? normalizedCapabilities.videoCodecs[
-            codec as (typeof VIDEO_CODEC_NAMES)[number]
-          ]
+      const capability = isVideoCodecName(codec)
+        ? normalizedCapabilities.videoCodecs[codec]
         : null;
       if (capability) {
         appData.codecAcceleration = capability.encode.acceleration;
@@ -1714,11 +1724,15 @@ export class NativeMediasoupSourcesMethods {
     const previousDirection = this.pendingNativeDirection;
     this.pendingNativeDirection = "send";
     try {
-      const result = await this.invoke("media_create_capture_producer", {
+      const request: NativeMediasoupProducerRequest = {
         kind,
         appData,
-        ...(effectiveEntry.producerKey ? { producerKey: key } : {}),
-      });
+      };
+      if (effectiveEntry.producerKey) request.producerKey = key;
+      const result = await this.invoke(
+        "media_create_capture_producer",
+        request,
+      );
       const producer: NativeProducerEntry = {
         id: String(result?.id || ""),
         source: effectiveEntry.source,
@@ -1730,19 +1744,23 @@ export class NativeMediasoupSourcesMethods {
       if (!producer.id)
         throw new Error("Native producer did not return an identifier");
       if (this.closed || mediaRevision !== this.mediaRevision) {
-        await this.invoke("media_remove_capture_producer", {
+        const request: NativeMediasoupProducerRequest = {
           source: effectiveEntry.source,
-          ...(effectiveEntry.producerKey ? { producerKey: key } : {}),
-        }).catch(() => {});
+        };
+        if (effectiveEntry.producerKey) request.producerKey = key;
+        await this.invoke("media_remove_capture_producer", request).catch(
+          () => {},
+        );
         return null;
       }
       registry.set(key, producer);
       if (this.sourceTransmission.get(effectiveEntry.source) === false) {
-        await this.invoke("media_set_producer_paused", {
+        const request: NativeMediasoupProducerRequest = {
           source: effectiveEntry.source,
-          ...(effectiveEntry.producerKey ? { producerKey: key } : {}),
           paused: true,
-        });
+        };
+        if (effectiveEntry.producerKey) request.producerKey = key;
+        await this.invoke("media_set_producer_paused", request);
         producer.paused = true;
       }
       this._sendSourceState();
@@ -1775,14 +1793,13 @@ export class NativeMediasoupSourcesMethods {
       current.kind !== "video" ||
       !codec ||
       !this.sendTransport ||
-      !deviceVideoCodecs(this).includes(
-        codec as (typeof VIDEO_CODEC_NAMES)[number],
-      )
+      !isVideoCodecName(codec) ||
+      !deviceVideoCodecs(this).includes(codec)
     )
       return null;
     const capability = normalizeParticipantMediaCapabilities(
       this.mediaCapabilities,
-    ).videoCodecs[codec as (typeof VIDEO_CODEC_NAMES)[number]].encode;
+    ).videoCodecs[codec].encode;
     if (
       !isRealtimeEfficient(capability) &&
       !(variant.emergency === true && isEmergencyUsable(capability))
@@ -1812,9 +1829,9 @@ export class NativeMediasoupSourcesMethods {
         ? Number(variant.score)
         : current.routingScore,
       producerKey: id,
-      ...(variant.target ? { target: { ...variant.target } } : {}),
-      ...(variant.targetAdjusted ? { targetAdjusted: true } : {}),
     };
+    if (variant.target) entry.target = { ...variant.target };
+    if (variant.targetAdjusted) entry.targetAdjusted = true;
     if (variant.target) {
       for (const key of ["width", "height", "fps", "bitrate"] as const) {
         const value = Number(variant.target[key]);
@@ -1893,7 +1910,7 @@ export class NativeMediasoupSourcesMethods {
   async removeSourceInternal(
     this: NativeMediasoupSfuSession,
     source: string,
-  ): Promise<unknown> {
+  ): Promise<MediaCommandResult> {
     const entry = this.sources.get(source);
     this.sources.delete(source);
     this.localVideoFeeds.delete(source);
@@ -1918,10 +1935,14 @@ export class NativeMediasoupSourcesMethods {
       const producerKey = String(
         producer.producerKey || producer.entry.producerKey || source,
       );
-      const removal = this.invoke("media_remove_capture_producer", {
+      const removalRequest: NativeMediasoupProducerRequest = {
         source,
-        ...(producerKey !== source ? { producerKey } : {}),
-      })
+      };
+      if (producerKey !== source) removalRequest.producerKey = producerKey;
+      const removal = this.invoke(
+        "media_remove_capture_producer",
+        removalRequest,
+      )
         .catch((error) =>
           this.onError?.(asError(error, "Native producer close failed")),
         )
@@ -1967,13 +1988,13 @@ export class NativeMediasoupSourcesMethods {
     if (!targets.length) return false;
     await Promise.all(
       targets.map(async (target) => {
-        await this.invoke("media_set_producer_paused", {
+        const request: NativeMediasoupProducerRequest = {
           source: normalizedSource,
-          ...(target.producerKey !== normalizedSource
-            ? { producerKey: target.producerKey }
-            : {}),
           paused: !nextEnabled,
-        });
+        };
+        if (target.producerKey !== normalizedSource)
+          request.producerKey = target.producerKey;
+        await this.invoke("media_set_producer_paused", request);
         target.paused = !nextEnabled;
       }),
     );
@@ -2009,15 +2030,15 @@ export class NativeMediasoupSourcesMethods {
         ...[...this.producerVariants.values()].filter(
           (candidate) => candidate.source === producer.source,
         ),
-      ].map((target) =>
-        this.invoke("media_set_producer_parameters", {
+      ].map((target) => {
+        const request: NativeMediasoupProducerRequest = {
           source: target.source,
-          ...(target.producerKey !== target.source
-            ? { producerKey: target.producerKey }
-            : {}),
           parameters,
-        }),
-      ),
+        };
+        if (target.producerKey !== target.source)
+          request.producerKey = target.producerKey;
+        return this.invoke("media_set_producer_parameters", request);
+      }),
     );
     return true;
   }
@@ -2044,15 +2065,15 @@ export class NativeMediasoupSourcesMethods {
         ...[...this.producerVariants.values()].filter(
           (candidate) => candidate.source === producer.source,
         ),
-      ].map((target) =>
-        this.invoke("media_set_producer_parameters", {
+      ].map((target) => {
+        const request: NativeMediasoupProducerRequest = {
           source: target.source,
-          ...(target.producerKey !== target.source
-            ? { producerKey: target.producerKey }
-            : {}),
           parameters: { maxBitrate: Math.floor(bitrate) },
-        }),
-      ),
+        };
+        if (target.producerKey !== target.source)
+          request.producerKey = target.producerKey;
+        return this.invoke("media_set_producer_parameters", request);
+      }),
     );
     return true;
   }
@@ -2084,15 +2105,15 @@ export class NativeMediasoupSourcesMethods {
         ...[...this.producerVariants.values()].filter(
           (candidate) => candidate.source === producer.source,
         ),
-      ].map((target) =>
-        this.invoke("media_set_producer_parameters", {
+      ].map((target) => {
+        const request: NativeMediasoupProducerRequest = {
           source: target.source,
-          ...(target.producerKey !== target.source
-            ? { producerKey: target.producerKey }
-            : {}),
           parameters: updates,
-        }),
-      ),
+        };
+        if (target.producerKey !== target.source)
+          request.producerKey = target.producerKey;
+        return this.invoke("media_set_producer_parameters", request);
+      }),
     );
     return true;
   }
@@ -2109,7 +2130,7 @@ export class NativeMediasoupSourcesMethods {
           String(candidate.codec).toUpperCase() ===
           String(producer.entry.codec || "").toUpperCase(),
       );
-      return {
+      const publication: NativeMediaPublication = {
         producerId: producer.id,
         source: producer.source,
         logicalStreamId: producer.entry.logicalStreamId || null,
@@ -2123,14 +2144,6 @@ export class NativeMediasoupSourcesMethods {
         height: producer.entry.height || null,
         fps: producer.entry.fps || null,
         bitrate: producer.entry.bitrate || null,
-        ...(plannedVariant?.target
-          ? { target: { ...plannedVariant.target } }
-          : producer.entry.target
-            ? { target: { ...producer.entry.target } }
-            : {}),
-        ...(plannedVariant?.targetAdjusted || producer.entry.targetAdjusted
-          ? { targetAdjusted: true }
-          : {}),
         receivers: plannedVariant?.receivers || producer.entry.receivers || [],
         emergency:
           plannedVariant?.emergency === true ||
@@ -2138,6 +2151,11 @@ export class NativeMediasoupSourcesMethods {
         score: plannedVariant?.score ?? producer.entry.routingScore,
         base: true,
       };
+      const target = plannedVariant?.target || producer.entry.target;
+      if (target) publication.target = { ...target };
+      if (plannedVariant?.targetAdjusted || producer.entry.targetAdjusted)
+        publication.targetAdjusted = true;
+      return publication;
     });
     publications.push(
       ...[...this.producerVariants.values()].map((producer) => {
@@ -2150,7 +2168,7 @@ export class NativeMediasoupSourcesMethods {
             String(candidate.variantId || "") ===
             String(producer.entry.variantId || ""),
         );
-        return {
+        const publication: NativeMediaPublication = {
           producerId: producer.id,
           source: producer.source,
           logicalStreamId: producer.entry.logicalStreamId || null,
@@ -2169,16 +2187,13 @@ export class NativeMediasoupSourcesMethods {
             plannedVariant?.emergency === true ||
             producer.entry.emergency === true,
           score: plannedVariant?.score ?? producer.entry.routingScore,
-          ...(plannedVariant?.target
-            ? { target: { ...plannedVariant.target } }
-            : producer.entry.target
-              ? { target: producer.entry.target }
-              : {}),
-          ...(plannedVariant?.targetAdjusted || producer.entry.targetAdjusted
-            ? { targetAdjusted: true }
-            : {}),
           base: false,
         };
+        const target = plannedVariant?.target || producer.entry.target;
+        if (target) publication.target = { ...target };
+        if (plannedVariant?.targetAdjusted || producer.entry.targetAdjusted)
+          publication.targetAdjusted = true;
+        return publication;
       }),
     );
     this.signaling?.send?.({
@@ -2198,13 +2213,3 @@ export class NativeMediasoupSourcesMethods {
       });
   }
 }
-
-export interface NativeMediasoupSourcesMethods extends Omit<
-  NativeMediasoupSfuSessionSurface,
-  | "addSource"
-  | "removeSource"
-  | "setSourceTransmission"
-  | "updateAudioBitrate"
-  | "updateVideoBitrate"
-  | "updateVideoParameters"
-> {}

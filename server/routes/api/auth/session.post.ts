@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
       token,
       profile,
     );
-  } catch (error) {
+  } catch {
     throw createError({
       statusCode: 401,
       statusMessage: "Invalid or expired token",

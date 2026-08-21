@@ -2,9 +2,10 @@ import type {
   NotificationMode,
   NotificationRecord,
 } from "./types/notifications.ts";
+import { parseExternalBoolean, type ExternalField } from "./types/external.ts";
 
 export function normalizeNotificationMode(
-  value: unknown,
+  value: ExternalField,
   fallback: NotificationMode = "all",
 ): NotificationMode {
   return value === "all" || value === "mentions" || value === "muted"
@@ -32,12 +33,15 @@ export function notificationModeFromRecord(
 
 export function isChannelViewer(
   inRoom: readonly unknown[] | null | undefined,
-  userId: unknown,
+  userId: ExternalField,
 ) {
   return (inRoom || []).map(String).includes(String(userId));
 }
 
-export function messageMentionsHandle(content: unknown, handle: unknown) {
+export function messageMentionsHandle(
+  content: ExternalField,
+  handle: ExternalField,
+) {
   const normalizedHandle = String(handle || "")
     .trim()
     .toLowerCase();
@@ -50,8 +54,8 @@ export function messageMentionsHandle(content: unknown, handle: unknown) {
 }
 
 export function messageContainsBroadcastMention(
-  content: unknown,
-  mention: unknown,
+  content: ExternalField,
+  mention: ExternalField,
 ) {
   const normalizedMention = String(mention || "").toLowerCase();
   if (!new Set(["everyone", "here"]).has(normalizedMention)) return false;
@@ -72,14 +76,8 @@ export function resolveNotificationPreference(
     mode: roomPreference
       ? notificationModeFromRecord(roomPreference, globalMode)
       : globalMode,
-    push:
-      typeof roomValue.push === "boolean"
-        ? roomValue.push
-        : Boolean(globalValue.push),
-    sound:
-      typeof roomValue.sound === "boolean"
-        ? roomValue.sound
-        : globalValue.sound !== false,
+    push: parseExternalBoolean(roomValue.push) ?? Boolean(globalValue.push),
+    sound: parseExternalBoolean(roomValue.sound) ?? globalValue.sound !== false,
     previews: globalValue.previews !== false,
   };
 }
@@ -91,8 +89,8 @@ export function isMessageNotificationEligible({
   broadcastMention = false,
 }: {
   preference: { mode: NotificationMode };
-  content: unknown;
-  recipientHandle: unknown;
+  content: ExternalField;
+  recipientHandle: ExternalField;
   broadcastMention?: boolean;
 }) {
   if (preference.mode === "muted") return false;
@@ -107,8 +105,8 @@ export function notificationBody({
   content,
 }: {
   previews: boolean;
-  senderName: unknown;
-  content: unknown;
+  senderName: ExternalField;
+  content: ExternalField;
 }) {
   if (!previews) return "You have a new message.";
   return `${senderName || "Someone"}: ${String(content || "")}`;

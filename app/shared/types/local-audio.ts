@@ -1,16 +1,27 @@
+import type { ExternalValue, MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { NoiseFloorEstimator } from "./microphone-gate.ts";
 
 export interface LocalAudioProvider {
-  setSourceTransmission?: (source: string, enabled: boolean) => unknown;
-  reconfigureSource?: (source: string) => unknown;
-  updateAudioBitrate?: (source: string, bitrate: number | null) => unknown;
+  setSourceTransmission?: (
+    source: string,
+    enabled: boolean,
+  ) => MediaCommandResult;
+  reconfigureSource?: (source: string) => MediaCommandResult;
+  updateAudioBitrate?: (
+    source: string,
+    bitrate: number | null,
+  ) => MediaCommandResult;
   updateVideoBitrate?: (
     source: string,
     bitrate: number | null | undefined,
-  ) => unknown;
-  getOutboundTrackStats?: (source: string) => Promise<unknown>;
-  producers?: Map<string, { producer: { getStats: () => Promise<unknown> } }>;
+  ) => MediaCommandResult;
+  getOutboundTrackStats?: (source: string) => Promise<MediaCommandResult>;
+  producers?: Map<
+    string,
+    { producer: { getStats: () => Promise<MediaCommandResult> } }
+  >;
 }
 
 export interface LocalSourceEntry {
@@ -26,9 +37,9 @@ export interface AudioStatsSample {
 export interface LocalAudioContext {
   authStore: { getUserData: () => { id?: string | number } | null };
   automaticGateThreshold: (noiseFloorDb: number) => number;
-  capture: { stop: (source: string) => unknown };
+  capture: { stop: (source: string) => MediaCommandResult };
   collectOutboundAudioStats: (
-    report: unknown,
+    report: ExternalValue,
     previous: AudioStatsSample | null,
   ) => {
     sample?: AudioStatsSample | null;
@@ -43,12 +54,12 @@ export interface LocalAudioContext {
   getAudioStereo: (source: string) => boolean;
   getAttenuation?: () => { sensitivity?: string } | null;
   getEffectiveAudioBitrate: (source: string) => number | null;
-  getP2pMesh: () => unknown;
+  getP2pMesh: () => MediaCommandResult;
   getRequestedVideoSettings: (source: string) => { maxBitrate?: number | null };
-  getSfu: () => unknown;
+  getSfu: () => MediaCommandResult;
   localSources: Map<string, LocalSourceEntry>;
   microphoneLevelDb: (samples: Float32Array) => number;
-  onSpeakingChange?: (userId: string, speaking: boolean) => unknown;
+  onSpeakingChange?: (userId: string, speaking: boolean) => MediaCommandResult;
   settingsStore: {
     microphoneGate: { automatic: boolean; thresholdDb: number };
     audio?: { echoCancellation?: boolean };
@@ -68,10 +79,13 @@ export interface LocalAudioContext {
     estimator: NoiseFloorEstimator,
     levelDb: number,
     active: boolean,
-  ) => unknown;
+  ) => MediaCommandResult;
   voiceStore: {
     connectedUsers: Map<string, { id?: string; speaking?: boolean }>;
-    updateUserSpeaking: (userId: string, speaking: boolean) => unknown;
+    updateUserSpeaking: (
+      userId: string,
+      speaking: boolean,
+    ) => MediaCommandResult;
   };
 }
 

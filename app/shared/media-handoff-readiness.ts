@@ -3,10 +3,6 @@ import type {
   InitialMediaTopologyContext,
   MediaHandoffReadinessContext,
 } from "./types/media-handoff-readiness.ts";
-import type {
-  TopologyData,
-  TopologySourceEntry,
-} from "./types/topology-controller.ts";
 import type { TopologyHandoff } from "./types/topology-controller.ts";
 
 export function waitForMediaHandoff({
@@ -110,12 +106,12 @@ function waitForSfuHandoff({
       let readiness = null;
       if (tracksReady) {
         try {
-          if (typeof sfu?.mediaReadiness !== "function")
+          if (!(sfu?.mediaReadiness instanceof Function))
             throw new Error("SFU media readiness unavailable");
           readiness = await sfu.mediaReadiness(
             sfu?.expectedInboundFlowCount?.() ?? expected,
           );
-        } catch (error: unknown) {
+        } catch (error) {
           readiness = {
             ready: false,
             error: error instanceof Error ? error.message : String(error),

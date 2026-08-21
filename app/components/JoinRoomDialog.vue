@@ -7,7 +7,7 @@
       aria-modal="true"
       aria-labelledby="join-room-dialog-title"
     >
-      <div class="metro-flyout">
+      <div class="metro-flyout relative z-[1] w-full max-w-lg p-5">
         <h3 id="join-room-dialog-title" class="mb-4 text-lg font-bold">
           Join Room
         </h3>
@@ -29,7 +29,7 @@
           <Icon name="lucide:circle-x" class="size-6 shrink-0 stroke-current" />
           <span>{{ joinError }}</span>
         </div>
-        <div class="flex justify-end gap-3">
+        <div class="mt-6 flex justify-end gap-3">
           <button
             class="metro-btn metro-btn--ghost"
             :disabled="joining"
@@ -47,7 +47,7 @@
         </div>
       </div>
       <button
-        class="modal-backdrop"
+        class="fixed inset-0 z-0 border-0 bg-black/50 p-0"
         type="button"
         aria-label="Close join room dialog"
         @click="close"

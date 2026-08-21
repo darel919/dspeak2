@@ -1,3 +1,5 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+
 export interface DesktopUpdate {
   version?: string;
   [key: string]: unknown;
@@ -7,6 +9,6 @@ export type DesktopUpdateStatus =
 export interface DesktopUpdateState {
   status: DesktopUpdateStatus;
   update: DesktopUpdate | null;
-  error: unknown;
+  error: OwnedErrorValue;
   deferred: boolean;
 }

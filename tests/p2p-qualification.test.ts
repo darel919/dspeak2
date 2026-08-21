@@ -43,7 +43,6 @@ describe("p2p-qualification", () => {
 
   it("checks eligibility for direct mode", () => {
     const healthy = { "cloudflare-realtime": { healthy: true } };
-    const unhealthy = { "cloudflare-realtime": { healthy: false } };
 
     assert.ok(checkEligibility("direct", 2, false, healthy).eligible);
     assert.ok(checkEligibility("direct", 8, false, healthy).eligible);

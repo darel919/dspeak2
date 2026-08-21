@@ -1,14 +1,3 @@
-/**
- * @file Provider-neutral media metrics utilities
- * Shared between browser, native, DO, and tests.
- */
-
-/**
- * Maps peer round-trip times from edge measurements.
- * @param {Array} edges - Edge measurements with rtt and peerId
- * @param {Array} peers - Peer list with peerId and userId
- * @returns {Object} Mapping of peerId/userId to RTT in ms
- */
 export function mapPeerRoundTripTimes(
   edges: readonly PeerMetric[] = [],
   peers: readonly PeerMetric[] = [],
@@ -30,12 +19,6 @@ export function mapPeerRoundTripTimes(
   return values;
 }
 
-/**
- * Maps peer connection metrics from edge measurements.
- * @param {Array} edges - Edge measurements with rtt, packetLoss, jitter, peerId
- * @param {Array} peers - Peer list with peerId and userId
- * @returns {Object} Mapping of peerId/userId to metrics object
- */
 export function mapPeerConnectionMetrics(
   edges: readonly PeerMetric[] = [],
   peers: readonly PeerMetric[] = [],
@@ -64,12 +47,6 @@ export function mapPeerConnectionMetrics(
   return values;
 }
 
-/**
- * Calculates average jitter buffer delay per emitted sample in milliseconds.
- * @param {Object} stat - Current jitter buffer stats
- * @param {Object} [previous] - Previous jitter buffer stats for delta calculation
- * @returns {number|null} Average jitter buffer delay in ms, or null if not computable
- */
 export function getAverageJitterBufferDelayMs(
   stat: JitterBufferStat | null | undefined,
   previous: JitterBufferStat | null = null,
@@ -91,11 +68,6 @@ export function getAverageJitterBufferDelayMs(
   return (delay / emitted) * 1000;
 }
 
-/**
- * Extracts RTC signal metrics from transport stats.
- * @param {Array} transports - Transport objects with ICE connection state and stats
- * @returns {Object} Aggregated metrics: connected, rttMs, jitterMs, loss, score, label
- */
 export function getRtcSignalMetrics(transports: readonly PeerMetric[] = []) {
   const connected = transports.filter((transport) => {
     const state = transport?.pcStates?.iceConnectionState;
@@ -157,33 +129,17 @@ export function getRtcSignalMetrics(transports: readonly PeerMetric[] = []) {
   };
 }
 
-/**
- * Returns transport recovery delay based on ICE state.
- * @param {string} state - ICE connection state
- * @returns {number|null} Recovery delay in ms, or null if no delay needed
- */
-export function getTransportRecoveryDelayMs(state: unknown) {
+export function getTransportRecoveryDelayMs(state: ExternalField) {
   if (state === "failed") return 0;
   if (state === "disconnected") return 3000;
   return null;
 }
 
-/**
- * Calculates reconnection backoff delay.
- * @param {number} attempt - Reconnection attempt number (1-based)
- * @returns {number} Backoff delay in ms, capped at 8000ms
- */
 export function getReconnectDelayMs(attempt: number) {
   const normalizedAttempt = Math.max(1, Math.floor(Number(attempt) || 1));
   return Math.min(8000, 500 * 2 ** (normalizedAttempt - 1));
 }
 
-/**
- * Determines active media directions.
- * @param {number} localProducerCount - Number of local producers
- * @param {number} remoteProducerCount - Number of remote producers
- * @returns {Object} { send: boolean, receive: boolean }
- */
 export function getActiveMediaDirections(
   localProducerCount: number,
   remoteProducerCount: number,
@@ -205,3 +161,4 @@ import type {
   JitterBufferStat,
   PeerMetric,
 } from "./types/media.ts";
+import type { ExternalField } from "./types/external.ts";

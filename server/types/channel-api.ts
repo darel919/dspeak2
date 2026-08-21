@@ -5,10 +5,14 @@ import type {
   AuthorizationRoom,
   RoomMemberAccess,
 } from "./room-authorization.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 export interface ChannelApiDependencies {
-  broadcastToChannel: (channelId: string, message: unknown) => Promise<void>;
-  broadcastToRoom: (roomId: string, message: unknown) => Promise<void>;
+  broadcastToChannel: (
+    channelId: string,
+    message: ExternalField,
+  ) => Promise<void>;
+  broadcastToRoom: (roomId: string, message: ExternalField) => Promise<void>;
   canModerateVoiceMember: (
     actorRoles: readonly RoomRole[] | null | undefined,
     targetRoles: readonly RoomRole[] | null | undefined,
@@ -44,14 +48,14 @@ export interface ChannelApiDependencies {
     targetChannelId?: string | null,
   ) => Promise<number>;
   parseBody: (event: H3Event) => Promise<Record<string, unknown>>;
-  presentChannel: (channel: DSpeakChannelRow) => unknown;
-  presentUser: (profile: DSpeakProfileRow | null | undefined) => unknown;
+  presentChannel: (channel: DSpeakChannelRow) => ExternalField;
+  presentUser: (profile: DSpeakProfileRow | null | undefined) => ExternalField;
   requireAuthenticatedUser: (event: H3Event) => Promise<string>;
   requireRoomPermission: (
     room: AuthorizationRoom,
     userId: string,
     permission: string,
   ) => Promise<RoomMemberAccess>;
-  requireValue: (value: unknown, message: string) => string;
+  requireValue: (value: ExternalField, message: string) => string;
   setResponseStatus: (event: H3Event, statusCode: number) => void;
 }

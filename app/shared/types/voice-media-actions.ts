@@ -1,7 +1,18 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { MediaCaptureStartOptions } from "./media-capture.ts";
 import type { SoundSettings } from "../system-sounds.ts";
 import type { RtcStatsSnapshot } from "./rtc-stats.ts";
+import type { RemotePresentationObservationMode } from "../remote-source-convergence.ts";
+
+type VoiceMediaFeedValue = Map<string, unknown> | ReadonlyMap<string, unknown>;
+type VoiceMediaFeedState =
+  | VoiceMediaFeedValue
+  | Ref<VoiceMediaFeedValue>
+  | Readonly<Ref<ReadonlyMap<string, unknown>>>;
 
 export interface VoiceUserRecord {
   id: string;
@@ -39,47 +50,52 @@ export interface VoiceChannelsStoreLike {
   getChannelById: (
     channelId: string | null,
   ) => VoiceChannelRecord | null | undefined;
-  joinChannel: (channelId: string) => unknown;
-  leaveChannel: (channelId: string) => unknown;
+  joinChannel: (channelId: string) => MediaCommandResult;
+  leaveChannel: (channelId: string) => MediaCommandResult;
 }
 
 export interface VoiceProducerLike {
   track?: MediaStreamTrack | null;
-  on?: (event: string, listener: () => void) => unknown;
+  on?: (event: string, listener: () => void) => MediaCommandResult;
 }
 
 export interface VoiceMediaSessionLike {
   activeProvider?: Ref<string | null> | string | null;
   error?: Ref<string | null> | string | null;
   joinReady?: Ref<boolean> | boolean;
-  localVideoFeeds?: Ref<Map<string, unknown>> | Map<string, unknown>;
-  remoteVideoFeeds?: Ref<Map<string, unknown>> | Map<string, unknown>;
-  remoteAudioFeeds?: Ref<Map<string, unknown>> | Map<string, unknown>;
+  localVideoFeeds?: VoiceMediaFeedState;
+  remoteVideoFeeds?: VoiceMediaFeedState;
+  remoteAudioFeeds?: VoiceMediaFeedState;
   sharedAudioStats?: Ref<unknown> | unknown;
   sharedAudioAttenuation?: Ref<unknown> | unknown;
   sharedAudioDucking?: Ref<unknown> | unknown;
   transportReady?: Ref<boolean> | boolean;
-  connect: (channelId: string, options?: { roomId?: string | null }) => unknown;
-  disconnect?: () => unknown;
-  prepareAudioPlayback?: () => unknown;
-  startAudioProduction: () => Promise<VoiceProducerLike | null | undefined>;
-  stopAudioProduction?: () => Promise<unknown>;
+  connect: (
+    channelId: string,
+    options?: { roomId?: string },
+  ) => MediaCommandResult;
+  disconnect?: () => MediaCommandResult;
+  prepareAudioPlayback?: () => MediaCommandResult;
+  startAudioProduction: () => Promise<MediaCommandResult>;
+  stopAudioProduction?: () => Promise<MediaCommandResult>;
   startVideoProduction: (
-    source: string,
+    source: "camera" | "screen",
     options?: MediaCaptureStartOptions,
-  ) => Promise<VoiceProducerLike | null | undefined>;
-  stopVideoProduction: (source: string) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
+  stopVideoProduction: (
+    source: "camera" | "screen",
+  ) => Promise<MediaCommandResult>;
   startSystemAudioProduction: (
     options?: MediaCaptureStartOptions,
-  ) => Promise<VoiceProducerLike | null | undefined>;
-  stopSystemAudioProduction: () => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
+  stopSystemAudioProduction: () => Promise<MediaCommandResult>;
   sendParticipantVoiceState?: (state: {
     muted: boolean;
     deafened: boolean;
-  }) => unknown;
-  ensureAudioElements?: () => unknown;
-  applyOutputDeviceToAll?: () => unknown;
-  setSharedAudioVolume?: (volume: number) => unknown;
+  }) => MediaCommandResult;
+  ensureAudioElements?: () => MediaCommandResult;
+  applyOutputDeviceToAll?: () => MediaCommandResult;
+  setSharedAudioVolume?: (volume: number) => MediaCommandResult;
   setSharedAudioAttenuation?: (
     speaking: boolean,
     attenuation?: {
@@ -88,23 +104,37 @@ export interface VoiceMediaSessionLike {
       attackMs?: number;
       releaseMs?: number;
     },
-  ) => unknown;
-  setSystemAudioBitrate?: (bitrate: number) => unknown;
-  applyVolumeForUser?: (userId: string, volume: number) => unknown;
+  ) => MediaCommandResult;
+  setSystemAudioBitrate?: (bitrate: number) => MediaCommandResult;
+  applyVolumeForUser?: (userId: string, volume: number) => MediaCommandResult;
   applyVolumeForTrack?: (
     userId: string,
     source: string,
     volume: number,
-  ) => unknown;
-  setRemoteScreenReceiving?: (feedKey: string, receiving: boolean) => unknown;
+  ) => MediaCommandResult;
+  setRemoteScreenReceiving?: (
+    feedKey: string,
+    receiving: boolean,
+  ) => MediaCommandResult;
+  markRemoteFirstFrame?: (
+    key: string,
+    receiverIncarnationId?: string | null,
+    fallback?: boolean,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
+  ) => MediaCommandResult;
+  markRemoteFramePresented?: (
+    key: string,
+    receiverIncarnationId?: string | null,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
+  ) => MediaCommandResult;
   setRemoteSystemAudioReceiving?: (
     feedKey: string,
     receiving: boolean,
-  ) => unknown;
-  getOutboundRtpStats?: () => Promise<unknown>;
-  getInboundRtpStats?: () => Promise<unknown>;
+  ) => MediaCommandResult;
+  getOutboundRtpStats?: () => Promise<MediaCommandResult>;
+  getInboundRtpStats?: () => Promise<MediaCommandResult>;
   getWebRTCStatsSnapshot?: () => Promise<RtcStatsSnapshot>;
-  getWebRTCDiagnosticStats?: () => Promise<unknown>;
+  getWebRTCDiagnosticStats?: () => Promise<MediaCommandResult>;
   getVoiceTransportTimeout?: () => number;
 }
 
@@ -140,19 +170,19 @@ export interface VoiceMediaActionOptions {
   error: Ref<string | null>;
   getAuthenticatedUser: () => VoiceUserRecord | null;
   getVoiceStore: () => VoiceStoreLike;
-  joinChannel: (channelId: string) => unknown;
+  joinChannel: (channelId: string) => MediaCommandResult;
   joinGenerationState: { value: number };
-  leaveChannel: (channelId: string) => unknown;
+  leaveChannel: (channelId: string) => MediaCommandResult;
   micMuted: Ref<boolean>;
   nativeMediaInvalidated: Ref<boolean>;
   pageLifecycle: VoicePageLifecycleLike;
   p2pQualification: Ref<unknown>;
-  playFatalError: (error: unknown) => void;
+  playFatalError: (error: OwnedErrorValue) => void;
   protocolUpdateRequired: Ref<boolean>;
   screenSharing: Ref<boolean>;
   settingsStore: VoiceSettingsLike;
   soundboardActivityTimers: Map<string, ReturnType<typeof setTimeout>>;
-  stopBroadcast: () => Promise<unknown>;
+  stopBroadcast: () => Promise<MediaCommandResult>;
   systemAudioSharing: Ref<boolean>;
   sfuComposable: Ref<VoiceMediaSessionLike | null>;
   updateUserVoiceState: (

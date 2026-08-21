@@ -86,7 +86,7 @@
     </div>
 
     <div
-      v-if="typeof message.content === 'string'"
+      v-if="isExternalString(message.content)"
       class="metro-message-content"
       :class="{ 'metro-message-content--own': isOwnMessage }"
     >
@@ -227,6 +227,10 @@ import {
   isGifUrl,
 } from "../../shared/link-preview";
 import { extractInviteLink } from "../../shared/room-invite-link.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
 
 const { formatChatDisplayTime, getAvatarUrl } = useChatUtils();
 
@@ -387,7 +391,7 @@ function getStatusText() {
 const replyTargetMessage = computed(() => {
   if (!props.message.reply_to) return null;
   const replyTo = props.message.reply_to;
-  if (typeof replyTo === "object") return replyTo;
+  if (isExternalRecord(replyTo)) return replyTo;
   return chatStore.messages.find((m) => m.id === replyTo) || null;
 });
 

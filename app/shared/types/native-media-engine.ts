@@ -1,3 +1,5 @@
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type {
   NativeCaptureRequest,
   NativeMediaFlags,
@@ -15,23 +17,32 @@ export interface NativeVoiceStoreLike {
   cameraEnabled?: boolean;
   screenSharing?: boolean;
   systemAudioSharing?: boolean;
-  invalidateAfterFatalMediaError?: () => unknown;
+  invalidateAfterFatalMediaError?: () => MediaCommandResult;
   getChannelById?: NativeMediaStore["getChannelById"];
   getAuthenticatedUser?: () => { id?: string | number } | null;
-  upsertUserProfile?: (profile: Record<string, unknown>) => unknown;
+  upsertUserProfile?: (profile: Record<string, unknown>) => MediaCommandResult;
   isUserConnected?: (userId: string) => boolean;
-  addConnectedUser?: (userId: string, user: VoiceUserRecord) => unknown;
+  addConnectedUser?: (
+    userId: string,
+    user: VoiceUserRecord,
+  ) => MediaCommandResult;
   getConnectedUsersArray?: () => VoiceUserRecord[];
-  updateUserSpeaking?: (userId: string | number, speaking: boolean) => unknown;
-  removeConnectedUser?: (userId: string | number) => unknown;
+  updateUserSpeaking?: (
+    userId: string | number,
+    speaking: boolean,
+  ) => MediaCommandResult;
+  removeConnectedUser?: (userId: string | number) => MediaCommandResult;
   updateUserVoiceState?: (
     userId: string | number,
     state: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
 }
 
 export interface NativeTauriLike {
-  invoke: (command: string, payload?: NativeCaptureRequest) => Promise<unknown>;
+  invoke: (
+    command: string,
+    payload?: NativeCaptureRequest,
+  ) => Promise<MediaCommandResult>;
   listen: (
     event: string,
     callback: (event: { payload: unknown }) => void,
@@ -55,11 +66,12 @@ export interface NativeMediaEngineState {
   initialized: boolean;
   activeScreenCapture: NativeCaptureRequest | null;
   activeSystemAudioCapture: NativeCaptureRequest | null;
-  microphoneOperation: Promise<unknown>;
-  cameraOperation: Promise<unknown>;
-  screenOperation: Promise<unknown>;
-  nativeEventOperation: Promise<unknown> | null;
-  nativeActionHandler: ((action: NativeCaptureRequest) => unknown) | null;
+  microphoneOperation: Promise<MediaCommandResult>;
+  cameraOperation: Promise<MediaCommandResult>;
+  screenOperation: Promise<MediaCommandResult>;
+  nativeEventOperation: Promise<MediaCommandResult> | null;
+  nativeActionHandler:
+    ((action: NativeCaptureRequest) => MediaCommandResult) | null;
   nativeReceiveEventHandler: ((event: NativeCaptureRequest) => void) | null;
   nativeSession:
     import("../native-mediasoup-session.ts").NativeMediasoupSfuSession | null;
@@ -81,11 +93,11 @@ export interface NativeMediaEngineState {
   nativeP2pFailureEpoch: number | null;
   nativeTopologyKey: string | null;
   nativeTopologyGeneration: number;
-  nativeTopologyOperation: Promise<unknown> | null;
+  nativeTopologyOperation: Promise<MediaCommandResult> | null;
   onQoe: import("./native-media.ts").NativeMediaEngineOptions["onQoe"];
   qoeTimer: ReturnType<typeof setInterval> | null;
   nativeVideoAdaptationTimer: ReturnType<typeof setTimeout> | null;
-  nativeVideoAdaptationOperation: Promise<unknown> | null;
+  nativeVideoAdaptationOperation: Promise<MediaCommandResult> | null;
   nativeVideoAdaptationStates: Map<
     string,
     import("./adaptive-media.ts").AdaptiveVideoState

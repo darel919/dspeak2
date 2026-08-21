@@ -1,0 +1,399 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ref } from "vue";
+import {
+  RemoteMediaRegistry,
+  type RemoteMediaRegistryOptions,
+} from "../app/shared/remote-media-registry.ts";
+import type { RemoteMediaEntry } from "../app/shared/types/hybrid-media-registry.ts";
+import { FakeMediaStream, FakeMediaStreamTrack } from "./helpers/fake-media.ts";
+
+function createVideoRegistry(
+  options: Partial<RemoteMediaRegistryOptions> = {},
+) {
+  const videoFeeds = ref(new Map<string, RemoteMediaEntry>());
+  const audioFeeds = ref(new Map<string, RemoteMediaEntry>());
+  const registry = new RemoteMediaRegistry({
+    audioFeeds,
+    videoFeeds,
+    getVolume: () => 1,
+    getOutputDevice: () => null,
+    isDeafened: () => false,
+    isBroadcastMode: () => false,
+    onSpeaking: () => {},
+    onVideoReceivingChange: () => {},
+    onPlaybackState: () => {},
+    onEffectiveGain: () => {},
+    ...options,
+  });
+  return { registry, videoFeeds };
+}
+
+function entry(overrides: Partial<RemoteMediaEntry> = {}): RemoteMediaEntry {
+  const track = overrides.track || new FakeMediaStreamTrack("video", "track-a");
+  return {
+    key: "remote:user-1:camera",
+    provider: "sfu",
+    userId: "user-1",
+    peerId: "peer-1",
+    source: "camera",
+    track,
+    stream: overrides.stream || new FakeMediaStream([track]),
+    consumerId: "consumer-a",
+    connectionEpoch: 4,
+    sourceGeneration: 12,
+    ...overrides,
+  };
+}
+
+test("registry bind reaches transport-connected for a real remote track", () => {
+  const { registry } = createVideoRegistry();
+  const current = entry();
+  registry.bind(current);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  assert.equal(state.phase, "transport-connected");
+  assert.equal(state.incarnation.provider, "sfu");
+  assert.equal(state.incarnation.consumerId, "consumer-a");
+});
+
+test("frame-first evidence is retained until RTP progression", () => {
+  const { registry } = createVideoRegistry();
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  assert.equal(registry.markFirstFrame(current.key, token), true);
+  assert.equal(
+    registry.getConvergenceState(current.key)?.phase,
+    "transport-connected",
+  );
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesDecoded: 2,
+  });
+  assert.equal(registry.getConvergenceState(current.key)?.phase, "renderable");
+});
+
+test("RTP-first evidence reaches renderable after first frame", () => {
+  const { registry } = createVideoRegistry();
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesDecoded: 2,
+  });
+  assert.equal(registry.getConvergenceState(current.key)?.phase, "rtp-flowing");
+  assert.equal(registry.markFirstFrame(current.key, token), true);
+  assert.equal(registry.getConvergenceState(current.key)?.phase, "renderable");
+});
+
+test("old stats and frame evidence cannot mutate a replacement receiver", () => {
+  const { registry, videoFeeds } = createVideoRegistry();
+  const oldEntry = entry();
+  registry.bind(oldEntry);
+  const oldToken = registry.getConvergenceState(oldEntry.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(oldToken);
+  const replacement = entry({
+    track: new FakeMediaStreamTrack("video", "track-b"),
+    consumerId: "consumer-b",
+  });
+  registry.bind(replacement);
+  assert.equal(
+    registry.updateRtpStats(oldEntry.key, oldToken, {
+      bytesReceived: 10000,
+      packetsReceived: 100,
+      framesDecoded: 10,
+    }),
+    false,
+  );
+  assert.equal(registry.markFirstFrame(oldEntry.key, oldToken), false);
+  assert.equal(videoFeeds.value.get(oldEntry.key)?.consumerId, "consumer-b");
+  assert.equal(
+    registry.getConvergenceState(oldEntry.key)?.rtpEvidence.lastRtpSampleAt,
+    null,
+  );
+});
+
+test("old recovery completion cannot mutate a replacement receiver", async () => {
+  let resolveRecovery: ((value: boolean) => void) | null = null;
+  const { registry } = createVideoRegistry({
+    onReceiverRecovery: () =>
+      new Promise<boolean>((resolve) => {
+        resolveRecovery = resolve;
+      }),
+  });
+  const oldEntry = entry();
+  registry.bind(oldEntry);
+  const oldToken = registry.getConvergenceState(oldEntry.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(oldToken);
+  const oldState = registry.getConvergenceState(oldEntry.key);
+  assert.ok(oldState);
+  oldState.stallState.recoveryAttempt = 1;
+  const recovery = registry.runReceiverRecovery(oldEntry.key, oldToken);
+  registry.bind(entry({ consumerId: "consumer-replacement" }));
+  resolveRecovery(false);
+  await recovery;
+  assert.equal(
+    registry.getConvergenceState(oldEntry.key)?.incarnation.consumerId,
+    "consumer-replacement",
+  );
+  assert.equal(
+    registry.getConvergenceState(oldEntry.key)?.phase,
+    "transport-connected",
+  );
+});
+
+test("RTP resumption cancels a late recovery attempt", async () => {
+  let resolveRecovery: ((value: boolean) => void) | null = null;
+  const { registry } = createVideoRegistry({
+    onReceiverRecovery: () =>
+      new Promise<boolean>((resolve) => {
+        resolveRecovery = resolve;
+      }),
+  });
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesDecoded: 2,
+  });
+  registry.markFirstFrame(current.key, token);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.stallState.detected = true;
+  state.stallState.recoveryAttempt = 1;
+  state.phase = "recovering";
+  const recovery = registry.runReceiverRecovery(current.key, token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 3000,
+    packetsReceived: 30,
+    framesDecoded: 3,
+  });
+  resolveRecovery(false);
+  await recovery;
+  assert.equal(registry.getConvergenceState(current.key)?.phase, "renderable");
+  assert.equal(
+    registry.getConvergenceState(current.key)?.stallState.detected,
+    false,
+  );
+  assert.equal(
+    registry.getConvergenceState(current.key)?.stallState.recoveryAttempt,
+    0,
+  );
+  assert.equal(
+    registry.getConvergenceState(current.key)?.stallState.recoveryTimer,
+    null,
+  );
+  registry.clear();
+});
+
+test("decoder recovery waits for decode progression and ignores packet-only progress", async () => {
+  let resolveRecovery: ((value: boolean) => void) | null = null;
+  const { registry } = createVideoRegistry({
+    onReceiverRecovery: () =>
+      new Promise<boolean>((resolve) => {
+        resolveRecovery = resolve;
+      }),
+  });
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesReceived: 1,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesReceived: 2,
+    framesDecoded: 2,
+  });
+  registry.markFirstFrame(current.key, token);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.phase = "recovering";
+  state.stallState.detected = true;
+  state.stallState.cause = "decoder-stall";
+  state.stallState.recoveryAttempt = 1;
+  const recovery = registry.runReceiverRecovery(current.key, token);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 3000,
+    packetsReceived: 30,
+    framesReceived: 3,
+    framesDecoded: 2,
+  });
+  assert.equal(state.stallState.detected, true);
+  registry.updateRtpStats(current.key, token, {
+    bytesReceived: 4000,
+    packetsReceived: 40,
+    framesReceived: 4,
+    framesDecoded: 3,
+  });
+  assert.equal(state.stallState.detected, false);
+  resolveRecovery(false);
+  await recovery;
+  assert.equal(state.phase, "renderable");
+  registry.clear();
+});
+
+test("presentation recovery clears the render counter before a missing-stats sample", () => {
+  const { registry } = createVideoRegistry();
+  const current = entry();
+  registry.bind(current);
+  const token = registry.getConvergenceState(current.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(token);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.presentationObservationMode = "rvfc";
+  state.phase = "recovering";
+  state.stallState.detected = true;
+  state.stallState.cause = "render-stall";
+  if (state.rtpEvidence.kind !== "video")
+    throw new Error("Expected video convergence evidence");
+  state.rtpEvidence.renderStallSamples = 2;
+
+  assert.equal(
+    registry.markFramePresented(current.key, token, Date.now(), "rvfc"),
+    true,
+  );
+  assert.equal(state.stallState.detected, false);
+  assert.equal(state.rtpEvidence.renderStallSamples, 0);
+  assert.equal(registry.evaluateReceiverHealth(current.key, token), false);
+});
+
+test("missing receiver stats still trigger the no-RTP timeout", async () => {
+  const { registry } = createVideoRegistry({
+    getReceiverStats: async () => null,
+  });
+  const current = entry();
+  registry.bind(current);
+  const state = registry.getConvergenceState(current.key);
+  assert.ok(state);
+  state.phaseEnteredAt = Date.now() - 4000;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.stallState.detected, true);
+  assert.equal(state.phase, "recovering");
+  registry.clear();
+});
+
+test("re-enabling a receiver restarts an idle health sampler", async () => {
+  let sampleCount = 0;
+  const { registry } = createVideoRegistry({
+    getReceiverStats: async () => {
+      sampleCount += 1;
+      return { bytesReceived: sampleCount, packetsReceived: sampleCount };
+    },
+  });
+  const current = entry({ source: "screen", receiving: false });
+  registry.bind(current);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sampleCount, 0);
+  assert.equal(registry.setVideoReceiving(current.key, true), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(sampleCount > 0);
+  registry.clear();
+});
+
+test("provider handoff resets evidence when authority stays unchanged", () => {
+  const { registry } = createVideoRegistry();
+  const p2p = entry({
+    provider: "p2p",
+    consumerId: undefined,
+    receiverIncarnationId: undefined,
+  });
+  registry.bind(p2p);
+  const p2pToken = registry.getConvergenceState(p2p.key)?.incarnation
+    .receiverIncarnationId;
+  assert.ok(p2pToken);
+  registry.updateRtpStats(p2p.key, p2pToken, {
+    bytesReceived: 1000,
+    packetsReceived: 10,
+    framesDecoded: 1,
+  });
+  registry.updateRtpStats(p2p.key, p2pToken, {
+    bytesReceived: 2000,
+    packetsReceived: 20,
+    framesDecoded: 2,
+  });
+  registry.markFirstFrame(p2p.key, p2pToken);
+  assert.equal(registry.getConvergenceState(p2p.key)?.phase, "renderable");
+  const sfu = entry({
+    provider: "sfu",
+    consumerId: "consumer-sfu",
+    receiverIncarnationId: undefined,
+  });
+  registry.bind(sfu);
+  const state = registry.getConvergenceState(sfu.key);
+  assert.ok(state);
+  assert.notEqual(state.incarnation.receiverIncarnationId, p2pToken);
+  assert.equal(state.phase, "transport-connected");
+  assert.equal(state.rtpEvidence.lastRtpProgressAt, null);
+  assert.equal(state.firstFrameEvidence.received, false);
+});
+
+test("normal operation samples receiver stats without diagnostics", async () => {
+  let sampleCount = 0;
+  const { registry } = createVideoRegistry({
+    getReceiverStats: async () => {
+      sampleCount += 1;
+      return {
+        bytesReceived: sampleCount * 1000,
+        packetsReceived: sampleCount * 10,
+        framesDecoded: sampleCount,
+      };
+    },
+  });
+  const current = entry();
+  registry.bind(current);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(sampleCount >= 1);
+  assert.ok(
+    registry.getConvergenceState(current.key)?.rtpEvidence.lastRtpSampleAt,
+  );
+  registry.clear();
+});
+
+test("receiver stats rejection does not wedge the health sampler", async () => {
+  const { registry } = createVideoRegistry({
+    getReceiverStats: async () => {
+      throw new Error("stats unavailable");
+    },
+  });
+  registry.bind(entry());
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(registry.receiverHealthRunning, false);
+  registry.clear();
+});

@@ -2,6 +2,24 @@ import type {
   ChatMessage,
   ChatStoreContext,
 } from "../../shared/types/chat-store.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
+
+function isExternalArray<T>(value: T): value is T & T[] {
+  return Array.isArray(value);
+}
+
+function parseCachedMessage(value: ExternalField): ChatMessage | null {
+  if (!isExternalRecord(value) || !isExternalString(value.id)) return null;
+  return {
+    ...value,
+    id: value.id,
+    content: isExternalString(value.content) ? value.content : "",
+  };
+}
 
 export function createChatCacheActions(context: ChatStoreContext) {
   const { error } = context;
@@ -14,7 +32,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
     channelId: string | null,
     items: ChatMessage[],
     active = false,
-  ): ChatMessage[] | undefined {
+  ): ChatMessage[] {
     const normalizedChannelId = String(channelId);
     context.channelMessages.delete(normalizedChannelId);
     context.channelMessages.set(
@@ -77,7 +95,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
         if (cached && Array.isArray(cached.messages)) {
           context.setChannelMessages(normalizedChannelId, cached.messages);
         }
-      } catch (cacheError: unknown) {
+      } catch (cacheError) {
         console.warn(
           "[ChatStore] Unable to prepare cached channel messages:",
           cacheError,
@@ -105,16 +123,18 @@ export function createChatCacheActions(context: ChatStoreContext) {
         );
         if (!response.ok) return false;
 
-        const data = (await response.json()) as
-          { messages?: ChatMessage[] } | ChatMessage[];
+        const data: ExternalField = await response.json();
         if (preparationGeneration !== context.runtime.localDataGeneration)
           return false;
-        const serverMessages =
-          !Array.isArray(data) && Array.isArray(data.messages)
+        const serverMessages = isExternalArray(data)
+          ? data
+              .map(parseCachedMessage)
+              .filter((message): message is ChatMessage => message !== null)
+          : isExternalRecord(data) && isExternalArray(data.messages)
             ? data.messages
-            : Array.isArray(data)
-              ? data
-              : [];
+                .map(parseCachedMessage)
+                .filter((message): message is ChatMessage => message !== null)
+            : [];
         const preparedMessages =
           context.dependencies.mergeServerMessagesWithPending(
             serverMessages,
@@ -128,7 +148,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
             normalizedChannelId,
             preparedMessages,
           )
-          .catch((cacheError: unknown) => {
+          .catch((cacheError) => {
             console.warn(
               "[ChatStore] Unable to persist prepared channel messages:",
               cacheError,
@@ -161,7 +181,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
   async function prepareChannels(
     channelIds: string[],
     concurrency = 2,
-  ): Promise<unknown> {
+  ): Promise<void> {
     const pendingIds = [...new Set(channelIds.map(String))].filter(
       (channelId) => channelId && !context.isChannelPrepared(channelId),
     );
@@ -246,7 +266,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
       context.messages.value = nextMessages;
       context.dependencies
         .cacheChannelMessages(userData.id, channelId, nextMessages)
-        .catch((cacheError: unknown) => {
+        .catch((cacheError) => {
           console.warn(
             "[ChatStore] Unable to persist message cache:",
             cacheError,
@@ -299,7 +319,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
   function handleBackgroundSyncSuccess(pendingId: string): void {
     const authStore = context.dependencies.useAuthStore();
     const userId = authStore.getUserData()?.id;
-    for (const [channelId, cachedMessages] of [...context.channelMessages]) {
+    for (const [channelId, cachedMessages] of context.channelMessages) {
       const nextMessages = cachedMessages.filter(
         (message) => message.id !== pendingId,
       );
@@ -315,7 +335,7 @@ export function createChatCacheActions(context: ChatStoreContext) {
       if (userId) {
         context.dependencies
           .cacheChannelMessages(userId, channelId, nextMessages)
-          .catch((cacheError: unknown) => {
+          .catch((cacheError) => {
             console.warn(
               "[ChatStore] Unable to reconcile synced message cache:",
               cacheError,

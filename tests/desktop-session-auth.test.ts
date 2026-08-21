@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SupabaseAccessTokenClaims } from "../server/auth/supabase.ts";
+import type { ExternalError } from "../shared/types/external.ts";
 
 const previousSupabaseUrl = process.env.SUPABASE_URL;
 const previousSupabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -25,12 +26,12 @@ const validClaims: SupabaseAccessTokenClaims = {
 
 test("getClaims verifies a Supabase access token and returns claims", async () => {
   let receivedToken = "";
-  const auth = {
+  const auth: Parameters<typeof verifySupabaseAccessToken>[1] = {
     getClaims: async (token: string) => {
       receivedToken = token;
       return { data: { claims: validClaims }, error: null };
     },
-  } as Parameters<typeof verifySupabaseAccessToken>[1];
+  };
 
   const claims = await verifySupabaseAccessToken("test-token", auth);
 
@@ -40,12 +41,12 @@ test("getClaims verifies a Supabase access token and returns claims", async () =
 });
 
 test("invalid Supabase access tokens are rejected by the shared verifier", async () => {
-  const auth = {
+  const auth: Parameters<typeof verifySupabaseAccessToken>[1] = {
     getClaims: async () => ({
       data: null,
       error: new Error("invalid token"),
     }),
-  } as Parameters<typeof verifySupabaseAccessToken>[1];
+  };
 
   await assert.rejects(
     () => verifySupabaseAccessToken("invalid-token", auth),
@@ -54,7 +55,7 @@ test("invalid Supabase access tokens are rejected by the shared verifier", async
 });
 
 test("a verified token from another Supabase project maps to issuer mismatch", async () => {
-  const auth = {
+  const auth: Parameters<typeof verifySupabaseAccessToken>[1] = {
     getClaims: async () => ({
       data: {
         claims: {
@@ -64,17 +65,14 @@ test("a verified token from another Supabase project maps to issuer mismatch", a
       },
       error: null,
     }),
-  } as Parameters<typeof verifySupabaseAccessToken>[1];
+  };
 
   await assert.rejects(
     () => verifySupabaseAccessToken("cross-project-token", auth),
-    (error: unknown) => {
+    (error: ExternalError) => {
       assert.ok(error instanceof SupabaseTokenIssuerMismatchError);
-      const mismatch = error as InstanceType<
-        typeof SupabaseTokenIssuerMismatchError
-      >;
       assert.equal(
-        mismatch.receivedIssuer,
+        error.receivedIssuer,
         "https://other-project.supabase.co/auth/v1",
       );
       return true;
@@ -83,10 +81,10 @@ test("a verified token from another Supabase project maps to issuer mismatch", a
 });
 
 test("valid bearer authentication populates the request context", async () => {
-  const event = {
+  const event: Parameters<typeof ensureVerifiedBearer>[0] = {
     headers: new Headers({ Authorization: "Bearer test-token" }),
     context: {},
-  } as unknown as Parameters<typeof ensureVerifiedBearer>[0];
+  };
   const verifier = async () => validClaims;
 
   const payload = await ensureVerifiedBearer(event, verifier);
@@ -99,10 +97,10 @@ test("valid bearer authentication populates the request context", async () => {
 });
 
 test("concurrent bearer checks share one verification", async () => {
-  const event = {
+  const event: Parameters<typeof ensureVerifiedBearer>[0] = {
     headers: new Headers({ Authorization: "Bearer test-token" }),
     context: {},
-  } as unknown as Parameters<typeof ensureVerifiedBearer>[0];
+  };
   let verificationCount = 0;
   const verifier = async () => {
     verificationCount += 1;

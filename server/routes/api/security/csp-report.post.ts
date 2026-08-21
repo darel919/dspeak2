@@ -1,4 +1,9 @@
 import { enforceRateLimit } from "../../../utils/rate-limit.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../../../shared/types/external.ts";
 
 const allowedFields = new Set([
   "age",
@@ -20,11 +25,12 @@ const urlFields = new Set([
   "sourceFile",
 ]);
 
-function sanitizeValue(key: string, value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  if (!urlFields.has(key)) return value.slice(0, 1000);
+function sanitizeValue(key: string, value: ExternalField): ExternalField {
+  const text = parseExternalString(value);
+  if (text === null) return value;
+  if (!urlFields.has(key)) return text.slice(0, 1000);
   try {
-    const url = new URL(value);
+    const url = new URL(text);
     if (key === "documentURL" || key === "referrer") return url.origin;
     return `${url.origin}${url.pathname}`.slice(0, 1000);
   } catch {
@@ -32,10 +38,13 @@ function sanitizeValue(key: string, value: unknown): unknown {
   }
 }
 
-function sanitizeReport(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+function sanitizeReport(
+  value: ExternalField,
+): Record<string, ExternalField> | null {
+  const record = parseExternalRecord(value);
+  if (!record) return null;
   return Object.fromEntries(
-    Object.entries(value)
+    Object.entries(record)
       .filter(([key]) => allowedFields.has(key))
       .map(([key, item]) => [key, sanitizeValue(key, item)]),
   );
@@ -52,12 +61,9 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event);
   const reports = (Array.isArray(body) ? body : [body])
     .slice(0, 20)
-    .map((report: unknown) => {
-      const value =
-        report && typeof report === "object"
-          ? (report as { body?: unknown })
-          : {};
-      return sanitizeReport(value.body || report);
+    .map((report) => {
+      const record = parseExternalRecord(report);
+      return sanitizeReport(record?.body ?? report);
     })
     .filter(Boolean);
   for (const report of reports)

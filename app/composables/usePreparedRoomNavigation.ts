@@ -32,7 +32,7 @@ export function usePreparedRoomNavigation() {
         2,
       );
       return true;
-    } catch (error) {
+    } catch {
       return false;
     }
   }

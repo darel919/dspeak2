@@ -1,6 +1,5 @@
 import type {
   MediasoupClientSessionLike,
-  MediasoupTransportDirection,
   MediasoupTransportState,
 } from "./types/mediasoup-client.ts";
 
@@ -30,18 +29,16 @@ export function handleMediasoupTransportState(
   const direction = data.direction;
   if (direction !== "send" && direction !== "recv") return false;
   const state = data.state === "completed" ? "connected" : data.state;
-  if (
-    ![
-      "new",
-      "connecting",
-      "connected",
-      "disconnected",
-      "failed",
-      "closed",
-    ].includes(String(state))
-  )
-    return false;
-  const validState = state as MediasoupTransportState;
+  const validState: MediasoupTransportState | null =
+    state === "new" ||
+    state === "connecting" ||
+    state === "connected" ||
+    state === "disconnected" ||
+    state === "failed" ||
+    state === "closed"
+      ? state
+      : null;
+  if (!validState) return false;
   session.transportStates.set(direction, validState);
   const summary = getMediasoupConnectionState(session);
   session.onStateChange?.(direction, validState, summary);

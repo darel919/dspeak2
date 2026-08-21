@@ -4,6 +4,13 @@ import {
   type SupabaseAccessTokenClaims,
 } from "./supabase.ts";
 import type { AuthEvent } from "../types/auth.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
+
+type BearerEvent = Pick<H3Event, "headers" | "context">;
 
 export function hasVerifiedBearerContext(
   event: Pick<H3Event, "context">,
@@ -12,7 +19,7 @@ export function hasVerifiedBearerContext(
 }
 
 function setBearerAuthContext(
-  event: AuthEvent,
+  event: BearerEvent,
   token: string,
   payload: SupabaseAccessTokenClaims,
 ) {
@@ -27,26 +34,25 @@ function setBearerAuthContext(
   return payload;
 }
 
-function requireBearerClaims(payload: unknown): SupabaseAccessTokenClaims {
-  if (
-    !payload ||
-    typeof payload !== "object" ||
-    typeof (payload as { sub?: unknown }).sub !== "string" ||
-    !(payload as { sub: string }).sub
-  ) {
+function requireBearerClaims(
+  payload: ExternalField,
+): SupabaseAccessTokenClaims {
+  const record = parseExternalRecord(payload);
+  const subject = parseExternalString(record?.sub);
+  if (record === null || subject === null || !subject) {
     throw new Error("Supabase access token has no subject");
   }
-  return payload as SupabaseAccessTokenClaims;
+  return { ...record, sub: subject };
 }
 
 export async function ensureVerifiedBearer(
-  event: AuthEvent,
+  event: BearerEvent,
   verifier: (
     token: string,
   ) => Promise<SupabaseAccessTokenClaims> = verifySupabaseAccessToken,
 ) {
   if (hasVerifiedBearerContext(event))
-    return event.context.authPayload as SupabaseAccessTokenClaims;
+    return requireBearerClaims(event.context.authPayload);
 
   const token = extractBearerToken(event);
   if (!token) return null;
@@ -87,7 +93,7 @@ export async function requireAuth(event: AuthEvent) {
       role: payload.role,
     };
     return event.context.user;
-  } catch (error) {
+  } catch {
     throw createError({
       statusCode: 401,
       statusMessage: "Invalid or expired token",

@@ -1,6 +1,26 @@
-import type { Ref } from "vue";
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+import type { ExternalValue } from "./boundary.ts";
 
-export type LifecycleFunction = (...args: unknown[]) => unknown;
+import type { MediaCommandResult } from "./boundary.ts";
+
+import type { Ref } from "vue";
+import type { MediaAttenuationState } from "../media-attenuation-reporter.ts";
+import type {
+  MediaSignalingCloseOptions,
+  MediaSessionCleanupOptions,
+  MediaTelemetryResetOptions,
+} from "./media-session-cleanup.ts";
+import type { MediaMessageHandlersContext } from "./media-message-handlers.ts";
+import type { RemoteMediaHandoff } from "../remote-media-handoff.ts";
+import type { NativeP2pMeshSurface } from "./native-p2p.ts";
+import type {
+  TopologyData,
+  TopologySfuSession,
+} from "./topology-controller.ts";
+import type { CloudflarePublication } from "./cloudflare-media.ts";
+import type { ChannelRecord } from "./channels.ts";
+
+export type LifecycleFunction = (...args: unknown[]) => MediaCommandResult;
 
 export interface LifecycleBootstrap {
   baseApiPath: string;
@@ -18,17 +38,14 @@ export interface LifecycleDependencyContext {
     ticket?: string;
   }) => string;
   channelsStore: {
-    getChannelById: (channelId: string) => {
-      mediaPolicy?: { connectionMode?: string };
-      room?: { id?: string };
-    } | null;
+    getChannelById: (channelId: string) => ChannelRecord | null | undefined;
   };
   connected: Ref<boolean>;
   error: Ref<string | null>;
   getIntentionalClose: () => boolean;
   getMediaControlUrl: () => string | null;
   getRoomId: () => string | null;
-  getSfu: () => { handle: (type: string, data: unknown) => unknown } | null;
+  getSfu: () => TopologySfuSession | null;
   getSupabaseClient: () => {
     auth: {
       getSession: () => Promise<{
@@ -36,65 +53,107 @@ export interface LifecycleDependencyContext {
       }>;
     };
   } | null;
-  handleMediaSignalingClose: (options: Record<string, unknown>) => unknown;
-  handoff: unknown;
+  handleMediaSignalingClose: (
+    options: MediaSignalingCloseOptions,
+  ) => MediaCommandResult;
+  handoff: RemoteMediaHandoff;
   iceConnectedBoth: Ref<boolean>;
-  lastInRoom: Ref<unknown>;
+  lastInRoom: Ref<string[]>;
   mediaConnectionState: Ref<string>;
   mediaControlApiPath: string;
-  mediaControlTicketState: Ref<unknown>;
-  mediaControlSocketUrlState: Ref<unknown>;
+  mediaControlTicketState: Ref<string | null>;
+  mediaControlSocketUrlState: Ref<string | null>;
   mediaSessionSetup: {
-    getBootstrap: (
-      options: Record<string, unknown>,
-    ) => Promise<{ mediaControlUrl?: string; ticket: string }>;
+    getBootstrap: (options: {
+      accessToken?: string | null;
+      baseApiPath?: string;
+      channelId: string;
+      connectionMode: string;
+      deviceId: string;
+      roomId: string | null;
+    }) => Promise<{ mediaControlUrl?: string; ticket: string }>;
     getChannelId: () => string | null;
     getDeviceId: () => string;
     resetLifecycle: () => void;
-    setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => void;
-    closeProviders: (options: Record<string, unknown>) => unknown;
-    getP2pMesh: () => unknown;
-    getSfu: () => unknown;
-    mediaPathMetrics: Ref<unknown>;
-    peerRoundTripTimes: Ref<unknown>;
-    peerConnectionMetrics: Ref<unknown>;
-    sfuRoundTripTime: Ref<unknown>;
-    sendSourceState: () => unknown;
-    setupMessageHandlers: (options: Record<string, unknown>) => void;
-    resolveOperationAck: (operationId: string) => unknown;
-    rejectOperationAck: (operationId: string, error: unknown) => unknown;
+    setTopologyWaiter: (
+      waiter: ((error?: OwnedErrorValue) => void) | null,
+    ) => void;
+    closeProviders: (
+      options: Omit<MediaSessionCleanupOptions, "capture" | "socket">,
+    ) => MediaCommandResult;
+    getP2pMesh: () => NativeP2pMeshSurface | null;
+    getSfu: () => TopologySfuSession | null;
+    mediaPathMetrics: Ref<unknown[]>;
+    peerRoundTripTimes: Ref<Record<string, unknown>>;
+    peerConnectionMetrics: Ref<Record<string, unknown>>;
+    sfuRoundTripTime: Ref<number | null>;
+    sendSourceState: () => MediaCommandResult;
+    setupMessageHandlers: (options: MediaMessageHandlersContext) => void;
+    resolveOperationAck: (operationId: string) => MediaCommandResult;
+    rejectOperationAck: (
+      operationId: string,
+      error: OwnedErrorValue,
+    ) => MediaCommandResult;
     getConnectionEpoch: () => number;
+    setConnectionEpoch: (epoch: number) => void;
     getLastAppliedRoomRevision: () => string;
-    applyRoomRevision: (roomRevision: string) => unknown;
-    requestSnapshot: () => unknown;
-    receiveAttenuation: (data: unknown) => unknown;
-    handleProviderFailure: (data: unknown) => unknown;
-    handleProviderRecovering: (data: unknown) => unknown;
-    handleP2pQualification: (data: unknown) => unknown;
-    handleProviderTicket: (data: unknown) => unknown;
+    applyRoomRevision: (roomRevision: string) => MediaCommandResult;
+    requestSnapshot: () => MediaCommandResult;
+    receiveAttenuation: (data: MediaAttenuationState) => MediaCommandResult;
+    handleProviderFailure: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    handleProviderRecovering: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    handleP2pQualification: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    handleProviderTicket: (data: TopologyData) => MediaCommandResult;
     sfuProducerIds: () => string[];
-    queueCloudflarePublication: (data: unknown) => unknown;
+    queueCloudflarePublication: (
+      data: CloudflarePublication,
+    ) => MediaCommandResult;
     resolveTopologyWaiter?: (error: Error) => void;
-    ensureP2p: () => unknown;
-    ensureSfu: () => unknown;
-    sendParticipantVoiceState: () => unknown;
+    ensureP2p: () => NativeP2pMeshSurface | null;
+    ensureSfu: () => TopologySfuSession | null;
+    sendParticipantVoiceState: () => MediaCommandResult;
     queueTargetedReconciliation: (
       operationId: string,
-      data: unknown,
-    ) => unknown;
-    onConnectionEpochUpdated?: (connectionEpoch: number) => unknown;
+      data: Record<string, unknown>,
+    ) => MediaCommandResult;
+    processPendingRetirements?: () => Promise<void>;
+    onConnectionEpochUpdated?: (connectionEpoch: number) => MediaCommandResult;
+    handlePublicationsDigest: (
+      publications: unknown[],
+      publicationRevision?: string | number | null,
+    ) => Promise<MediaCommandResult>;
+    getLocalSources: () => Map<string, unknown>;
+    getLastAppliedPublicationRevision: () => string;
+    setLastAppliedPublicationRevision: (value: string) => void;
+    sourceController: {
+      getLocalSources?: () => Map<string, unknown>;
+      processPendingRetirements?: () => Promise<void>;
+    };
   };
-  messageHandlers: Map<string, (data: unknown) => unknown>;
-  participantSfuRoundTripTimes: Ref<unknown>;
+  messageHandlers: Map<
+    string,
+    (
+      data: import("./media-message-handlers.ts").MediaMessage,
+    ) => MediaCommandResult
+  >;
+  participantSfuRoundTripTimes: Ref<Record<string, unknown>>;
   protocolState: Ref<{
     mediaSessionId?: string;
     protocolVersion?: string;
   } | null>;
   protocolUpdateRequired: Ref<boolean>;
-  providerRecovery: { receive: (data: unknown) => unknown };
-  queueTopology: (data: unknown) => unknown;
+  providerRecovery: {
+    receive: (data?: Record<string, unknown>) => MediaCommandResult;
+  };
+  queueTopology: (data: TopologyData) => MediaCommandResult;
   remoteProducersCount: Ref<number>;
-  resetMediaTelemetryState: (options: Record<string, unknown>) => void;
+  resetMediaTelemetryState: (options: MediaTelemetryResetOptions) => void;
   resetTopologySequencing: (reason?: string) => void;
   runtimeConnectionTimeoutMs: number;
   setChannelId: (channelId: string | null) => void;
@@ -107,60 +166,97 @@ export interface LifecycleDependencyContext {
   setLocalPeerId: (peerId: string | null) => void;
   setMediaControlSocketUrl: (url: string) => void;
   setMediaControlTicket: (ticket: string) => void;
-  setP2pMesh: (mesh: unknown) => void;
-  setSfu: (sfu: unknown) => void;
-  setActiveProvider: (provider: string | null) => void;
+  setP2pMesh: (mesh: NativeP2pMeshSurface | null) => void;
+  setSfu: (sfu: TopologySfuSession | null) => void;
+  setActiveProvider: (provider: "p2p" | "sfu" | null) => void;
   signaling: {
-    open: () => Promise<unknown>;
+    open: () => Promise<MediaCommandResult>;
     getHeartbeatSequence: () => number;
     getLastHeartbeatAckSequence: () => number;
-    getSocket: () => unknown;
+    getSocket: () => { close: () => MediaCommandResult } | null;
     markReady: () => boolean;
-    acceptServerHello: (data: unknown) => boolean;
-    getProtocolState: () => Record<string, unknown>;
-    acknowledgeHeartbeat: (data: unknown) => unknown;
+    acceptServerHello: (data: ExternalValue) => boolean;
+    getProtocolState: () => Record<string, unknown> | null;
+    acknowledgeHeartbeat: (
+      sequence: number,
+      acknowledgedAt: number,
+    ) => MediaCommandResult;
   };
-  syncConnectedUsers: (data: unknown) => unknown;
+  syncConnectedUsers: (data?: unknown[]) => MediaCommandResult;
   topologyState: Ref<{ epoch: number; mode: string }>;
   transportReady: Ref<boolean>;
-  voiceStore: unknown;
+  voiceStore: MediaMessageHandlersContext["voiceStore"];
   getConnectionEpoch: () => number;
   setConnectionEpoch: (epoch: number) => void;
 }
 
-export interface RuntimeDependencyContext extends LifecycleDependencyContext {
-  sfuRoundTripTime: Ref<unknown>;
-  closeProviders: (options: Record<string, unknown>) => unknown;
-  ensureP2p: () => unknown;
-  ensureSfu: () => unknown;
+export type RuntimeDependencyContext = Omit<
+  LifecycleDependencyContext,
+  "mediaSessionSetup"
+> & {
+  sfuRoundTripTime: Ref<number | null>;
+  closeProviders: (
+    options: Omit<MediaSessionCleanupOptions, "capture" | "socket">,
+  ) => MediaCommandResult;
+  ensureP2p: () => NativeP2pMeshSurface | null;
+  ensureSfu: () => TopologySfuSession | null;
   getChannelId: () => string | null;
   getDeviceId: () => string;
-  getP2pMesh: () => unknown;
-  getBootstrap: (
-    options: Record<string, unknown>,
-  ) => Promise<{ mediaControlUrl?: string; ticket: string }>;
-  handleP2pQualification: (data: unknown) => unknown;
-  handleProviderFailure: (data: unknown) => unknown;
-  handleProviderRecovering: (data: unknown) => unknown;
-  handleProviderTicket: (data: unknown) => unknown;
-  mediaPathMetrics: Ref<unknown>;
-  peerConnectionMetrics: Ref<unknown>;
-  peerRoundTripTimes: Ref<unknown>;
-  receiveAttenuation: (data: unknown) => unknown;
+  getP2pMesh: () => NativeP2pMeshSurface | null;
+  getBootstrap: (options: {
+    accessToken?: string | null;
+    baseApiPath?: string;
+    channelId: string;
+    connectionMode: string;
+    deviceId: string;
+    roomId: string | null;
+  }) => Promise<{ mediaControlUrl?: string; ticket: string }>;
+  handleP2pQualification: (
+    data?: Record<string, unknown>,
+  ) => MediaCommandResult;
+  handleProviderFailure: (data?: Record<string, unknown>) => MediaCommandResult;
+  handleProviderRecovering: (
+    data?: Record<string, unknown>,
+  ) => MediaCommandResult;
+  handleProviderTicket: (data: TopologyData) => MediaCommandResult;
+  mediaPathMetrics: Ref<unknown[]>;
+  peerConnectionMetrics: Ref<Record<string, unknown>>;
+  peerRoundTripTimes: Ref<Record<string, unknown>>;
+  receiveAttenuation: (data: MediaAttenuationState) => MediaCommandResult;
   resetLifecycle: () => void;
   resolveTopologyWaiter: (error: Error) => void;
   sfuProducerIds: () => string[];
-  sendParticipantVoiceState: () => unknown;
-  sendSourceState: () => unknown;
-  resolveOperationAck: (operationId: string) => unknown;
-  rejectOperationAck: (operationId: string, error: unknown) => unknown;
+  sendParticipantVoiceState: () => MediaCommandResult;
+  sendSourceState: () => MediaCommandResult;
+  resolveOperationAck: (operationId: string) => MediaCommandResult;
+  rejectOperationAck: (
+    operationId: string,
+    error: OwnedErrorValue,
+  ) => MediaCommandResult;
   getConnectionEpoch: () => number;
   setConnectionEpoch: (epoch: number) => void;
   getLastAppliedRoomRevision: () => string;
-  applyRoomRevision: (roomRevision: string) => unknown;
-  requestSnapshot: () => unknown;
-  setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => void;
-  setupMessageHandlers: (options: Record<string, unknown>) => void;
-  queueCloudflarePublication: (data: unknown) => unknown;
-  queueTargetedReconciliation: (operationId: string, data: unknown) => unknown;
-}
+  getLastAppliedPublicationRevision: () => string;
+  setLastAppliedPublicationRevision: (value: string) => void;
+  applyRoomRevision: (roomRevision: string) => MediaCommandResult;
+  requestSnapshot: () => MediaCommandResult;
+  setTopologyWaiter: (
+    waiter: ((error?: OwnedErrorValue) => void) | null,
+  ) => void;
+  setupMessageHandlers: (options: MediaMessageHandlersContext) => void;
+  queueCloudflarePublication: (
+    data: CloudflarePublication,
+  ) => MediaCommandResult;
+  queueTargetedReconciliation: (
+    operationId: string,
+    data: Record<string, unknown>,
+  ) => MediaCommandResult;
+  handlePublicationsDigest: (
+    publications: unknown[],
+    publicationRevision?: string | number | null,
+  ) => Promise<MediaCommandResult>;
+  sourceController: {
+    getLocalSources?: () => Map<string, unknown>;
+    processPendingRetirements?: () => Promise<void>;
+  };
+};

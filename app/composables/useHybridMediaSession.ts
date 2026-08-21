@@ -2,9 +2,9 @@ import { computed, getCurrentScope, onScopeDispose, ref, watch } from "vue";
 import { useRuntimeConfig } from "#app";
 import { MediaCaptureManager } from "~/shared/media-capture.ts";
 import { MediasoupClientSession } from "~/shared/mediasoup-client-session.ts";
-import { MediasoupProviderSocket } from "~/shared/mediasoup-provider-socket.ts";
 import { CloudflareRealtimeSession } from "~/shared/cloudflare-realtime-session.ts";
 import { createCloudflarePublicationRegistry } from "~/shared/cloudflare-publication-registry.ts";
+import type { CloudflarePublication } from "~/shared/types/cloudflare-media.ts";
 import { NativeP2pMesh } from "~/shared/native-p2p.ts";
 import { createHybridMediaRegistry } from "~/shared/hybrid-media-registry.ts";
 import { createHybridMediaAudioState } from "~/shared/hybrid-media-audio-state.ts";
@@ -86,9 +86,11 @@ import {
 import type { MediaVideoFeed } from "~/shared/types/media-source-controller.ts";
 import type { RemoteMediaEntry } from "~/shared/types/hybrid-media-registry.ts";
 import type {
+  RemotePresentationObservationMode,
+  RemoteReceiverStats,
+} from "~/shared/remote-source-convergence.ts";
+import type {
   HybridP2pMesh,
-  HybridChannelRecord,
-  HybridRoomRecord,
   HybridProviderSocket,
   HybridSessionLifecycle,
   HybridSessionTermination,
@@ -96,7 +98,6 @@ import type {
   HybridSfuSession,
   HybridTopologyController,
   HybridTopologyState,
-  HybridTopologyPeer,
   HybridTopologyWaiter,
 } from "~/shared/types/hybrid-media-session.ts";
 import type { RuntimeDependencyContext } from "~/shared/types/hybrid-media-session-lifecycle.ts";
@@ -104,12 +105,32 @@ import type { HybridMediaSessionApiContext } from "~/shared/types/hybrid-media-s
 import type {
   TopologyData,
   TopologyP2pMesh,
-  TopologySfuSession,
   TopologySourceEntry,
   TopologyState,
 } from "~/shared/types/topology-controller.ts";
 import type { VideoSettings } from "~/shared/types/video-settings.ts";
 import type { ParticipantMediaCapabilities } from "~/shared/types/video-codec-capabilities.ts";
+import {
+  normalizeReceiverStats,
+  normalizeVideoStatsReport,
+  ownedErrorValue,
+  parseCloudflarePublication,
+  roomAttenuation,
+  TopologyMediasoupProviderSocket,
+  videoPolicy,
+  type MediaMessageHandler,
+} from "~/shared/hybrid-media-session-boundaries.ts";
+import { isExternalRecord, isExternalString } from "~/shared/types/boundary.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalValue,
+  parseThrownError,
+} from "~/utils/external-values.ts";
+import type { ExternalValue } from "~/shared/types/boundary.ts";
+import type { MediaCommandResult } from "~/shared/types/boundary.ts";
+import type { OwnedErrorValue } from "~/shared/types/shared-utilities.ts";
+
 export function useHybridMediaSession() {
   const runtimeConfig = useRuntimeConfig();
   const authStore = useAuthStore();
@@ -144,19 +165,20 @@ export function useHybridMediaSession() {
   const activeProviderState = ref<string | null>(null);
   const topologyState = ref<HybridTopologyState>(initialMediaTopologyState());
   const lastAppliedRoomRevision = ref("0");
+  const lastAppliedPublicationRevision = ref("0");
   let sessionConnectionEpoch = 1;
   const topologyGraph = ref(
     buildTopologyGraph({ mode: "idle", participantIds: [] }),
   );
   const producers = ref<Map<string, unknown>>(new Map());
   const consumers = ref<Map<string, unknown>>(new Map());
-  const messageHandlers = new Map<string, (...args: unknown[]) => void>();
+  const messageHandlers = new Map<string, MediaMessageHandler>();
   const localSources = new Map<string, TopologySourceEntry>();
   let channelId: string | null = null;
   const mediaControlSocketUrlState = ref<string | null>(null);
   const mediaControlTicketState = ref<string | null>(null);
   let localPeerId: string | null = null;
-  let iceServers: unknown[] = [];
+  let iceServers: MediaCommandResult[] = [];
   let p2pMesh: HybridP2pMesh | null = null;
   let sfu: HybridSfuSession | null = null;
   let providerSocket: HybridProviderSocket | null = null;
@@ -165,14 +187,163 @@ export function useHybridMediaSession() {
   let activeProvider: "sfu" | "p2p" | null = null;
   let intentionalClose = false;
   let topologyWaiter: HybridTopologyWaiter | null = null;
-  let lastP2pEdges: unknown[] = [];
+  let lastP2pEdges: MediaCommandResult[] = [];
   const rtpStatsSamples = new Map<string, RtpStatsSample>();
   const reportedSfuFailureState = ref<string | null>(null);
+  let nativeSfuStatsCache: {
+    promise: Promise<ExternalValue>;
+    consumers: number;
+  } | null = null;
+  async function getReceiverStats(
+    entry: RemoteMediaEntry,
+  ): Promise<RemoteReceiverStats | null> {
+    let directStats: ExternalValue = null;
+    try {
+      if (entry.consumer?.getStats)
+        directStats = parseExternalValue(await entry.consumer.getStats());
+      else if (entry.receiver?.getStats)
+        directStats = parseExternalValue(await entry.receiver.getStats());
+    } catch {
+      directStats = null;
+    }
+    if (directStats) return normalizeReceiverStats(directStats);
+    if (entry.provider === "p2p" && entry.track) {
+      let report: ExternalValue = null;
+      try {
+        report = parseExternalValue(
+          await p2pMesh?.getInboundTrackStats?.(
+            entry.peerId ?? "",
+            entry.track,
+          ),
+        );
+      } catch {
+        report = null;
+      }
+      return normalizeReceiverStats(report);
+    }
+    let reports: ExternalValue = null;
+    let statsCache: {
+      promise: Promise<ExternalValue>;
+      consumers: number;
+    } | null = null;
+    try {
+      if (!sfu?.stats) return null;
+      if (!nativeSfuStatsCache) {
+        let value: ExternalValue;
+        try {
+          value = parseExternalValue(sfu.stats());
+        } catch {
+          return null;
+        }
+        nativeSfuStatsCache = {
+          promise: Promise.resolve(value),
+          consumers: 0,
+        };
+      }
+      statsCache = nativeSfuStatsCache;
+      statsCache.consumers += 1;
+      reports = await statsCache.promise;
+    } catch {
+      reports = null;
+    } finally {
+      if (statsCache) {
+        statsCache.consumers -= 1;
+        if (statsCache.consumers === 0) nativeSfuStatsCache = null;
+      }
+    }
+    if (!Array.isArray(reports)) return null;
+    const matching = reports.find((report) => {
+      if (!isExternalRecord(report)) return false;
+      return (
+        String(report.consumerId || report.key || "") ===
+          String(entry.consumerId || entry.key || "") ||
+        (String(report.trackName || "") ===
+          String(entry.cloudflareTrackName || entry.trackName || "") &&
+          String(entry.cloudflareTrackName || entry.trackName || "").length >
+            0) ||
+        (String(report.mid || "") === String(entry.mid || "") &&
+          String(entry.mid || "").length > 0) ||
+        (String(report.userId || "") === String(entry.userId || "") &&
+          String(report.source || "") === String(entry.source || ""))
+      );
+    });
+    return normalizeReceiverStats(matching);
+  }
+
+  async function recoverReceiver(
+    entry: RemoteMediaEntry,
+    _attempt: number,
+    signal: AbortSignal,
+  ) {
+    if (signal.aborted) return false;
+    if (entry.provider === "p2p") {
+      const peer = p2pMesh?.connections.get(String(entry.peerId || ""));
+      if (!peer?.pc) return false;
+      peer.pc.restartIce();
+      return false;
+    }
+    const provider = sfu;
+    if (!provider) return false;
+    if (
+      entry.provider === "sfu" &&
+      !entry.producerId &&
+      entry.cloudflareTrackName &&
+      (("recoverRemotePublication" in provider &&
+        provider.recoverRemotePublication instanceof Function) ||
+        ("subscribe" in provider && provider.subscribe instanceof Function))
+    ) {
+      if (
+        "recoverRemotePublication" in provider &&
+        provider.recoverRemotePublication instanceof Function
+      )
+        await provider.recoverRemotePublication(
+          String(entry.cloudflareTrackName),
+          entry.receiverIncarnationId,
+        );
+      else {
+        const publication = cloudflarePublications
+          .values()
+          .find(
+            (candidate) =>
+              String(candidate.trackName || "") ===
+              String(entry.cloudflareTrackName),
+          );
+        if (
+          publication &&
+          "subscribe" in provider &&
+          provider.subscribe instanceof Function
+        )
+          await provider.subscribe(publication);
+      }
+      return false;
+    }
+    if (entry.provider !== "sfu" || !entry.producerId) return false;
+    if (
+      !("closeConsumerByProducer" in provider) ||
+      !(provider.closeConsumerByProducer instanceof Function) ||
+      !("requestConsumer" in provider) ||
+      !(provider.requestConsumer instanceof Function)
+    )
+      return false;
+    await provider.closeConsumerByProducer(String(entry.producerId));
+    if (signal.aborted) return false;
+    provider.requestConsumer(String(entry.producerId));
+    return false;
+  }
+
+  function failStalledReceiver(entry: RemoteMediaEntry) {
+    if (entry.provider === "sfu") reportSfuFailure("remote-receiver-stalled");
+  }
   let topologyController: HybridTopologyController | null = null;
   let sessionLifecycle: HybridSessionLifecycle | null = null;
   let sessionTermination: HybridSessionTermination | null = null;
   const lifecycleState = createMediaLifecycleState();
   const mediaGeneration = createMediaGeneration();
+  let mediaDeviceId: string | null = null;
+  function getMediaDeviceId() {
+    mediaDeviceId ??= getOrCreateDeviceId();
+    return mediaDeviceId;
+  }
   const setConnectionPhase = lifecycleState.record;
   const providerRecovery = createProviderRecoveryState({
     error,
@@ -205,26 +376,28 @@ export function useHybridMediaSession() {
     send,
   } = sessionOperations;
   const signaling = createHybridMediaSignaling({
-    buildClientHelloData: ({ mediaSessionId }: { mediaSessionId: string }) => ({
-      mediaSessionId,
-      connectionEpoch: sessionConnectionEpoch,
-      lastAppliedRoomRevision: lastAppliedRoomRevision.value,
-      providerCapabilities: ["cloudflare-realtime", "mediasoup"],
-      ...(mediaCapabilities.value
-        ? {
-            mediaCapabilities: mediaCapabilities.value,
-            capabilityProtocol: "video-codec-matrix-v1",
-          }
-        : {}),
-      ...(mediaControlTicketState.value
-        ? { ticket: mediaControlTicketState.value }
-        : {}),
-    }),
+    buildClientHelloData: ({ mediaSessionId }: { mediaSessionId: string }) => {
+      const hello = {
+        mediaSessionId,
+        connectionEpoch: sessionConnectionEpoch,
+        lastAppliedRoomRevision: lastAppliedRoomRevision.value,
+        providerCapabilities: ["cloudflare-realtime", "mediasoup"],
+      };
+      if (mediaCapabilities.value)
+        Object.assign(hello, {
+          mediaCapabilities: mediaCapabilities.value,
+          capabilityProtocol: "video-codec-matrix-v1",
+        });
+      if (mediaControlTicketState.value)
+        Object.assign(hello, { ticket: mediaControlTicketState.value });
+      return hello;
+    },
     buildHeartbeatData: (sequence: number) => ({
       sequence,
       connectionEpoch: sessionConnectionEpoch,
       topologyEpoch: topologyState.value.epoch,
       sourceRevision: topologyState.value.sourceRevision || 0,
+      publicationRevision: lastAppliedPublicationRevision.value,
       lastAppliedRoomRevision: lastAppliedRoomRevision.value,
       localSourceDigest: sourceController.getSourceFsmDigest(),
     }),
@@ -236,14 +409,18 @@ export function useHybridMediaSession() {
     connectionTimeoutMs: MEDIA_TIMING.connectionTimeoutMs,
     defaultHeartbeatIntervalMs: MEDIA_TIMING.heartbeatIntervalMs,
     defaultHeartbeatTimeoutMs: MEDIA_TIMING.heartbeatTimeoutMs,
-    getHandler: (type: string) => messageHandlers.get(type),
+    getHandler: (type: string) => {
+      const handler = messageHandlers.get(type);
+      if (!handler) return undefined;
+      return (data: ExternalValue): void => {
+        const message = parseExternalRecord(data);
+        if (message) void handler(message);
+      };
+    },
     isIntentionalClose: () => intentionalClose,
     onClose: handleSignalingClose,
-    onError: (signalingError: unknown) => {
-      error.value =
-        signalingError instanceof Error
-          ? signalingError.message
-          : String(signalingError);
+    onError: (signalingError: ExternalValue) => {
+      error.value = parseThrownError(signalingError).message;
     },
     onOpen: () => setConnectionPhase("protocol-negotiating"),
     onProtocolRejected: (event: CloseEvent) => {
@@ -264,7 +441,10 @@ export function useHybridMediaSession() {
       }
       await sessionLifecycle?.refreshControlTicket?.();
     },
-    onFailure: (message: unknown) => sessionOperations.failSession(message),
+    onFailure: (message) =>
+      sessionOperations.failSession(
+        ownedErrorValue(parseExternalValue(message)),
+      ),
     protocol: MEDIA_SIGNALING_CLIENT_PROTOCOL,
   });
   const joinReady = computed(() =>
@@ -272,7 +452,7 @@ export function useHybridMediaSession() {
       activeProvider,
       p2pReady: p2pMesh?.isMediaReady() === true,
       sfuReady:
-        typeof sfu?.connectionState === "function" &&
+        sfu?.connectionState instanceof Function &&
         sfu.connectionState().ready === true,
       signalingConnected: connected.value,
       topologyMode: topologyState.value.mode,
@@ -288,10 +468,7 @@ export function useHybridMediaSession() {
     attenuationReports,
     getRoomAttenuation: () =>
       voiceStore.currentRoomId
-        ? (
-            roomsStore.getRoomById(voiceStore.currentRoomId) as
-              HybridRoomRecord | null | undefined
-          )?.attenuation
+        ? roomAttenuation(roomsStore.getRoomById(voiceStore.currentRoomId))
         : undefined,
     getStreamAttenuation: () => settingsStore.streamAttenuation,
     getPeers: () => topologyState.value.peers,
@@ -314,6 +491,9 @@ export function useHybridMediaSession() {
     iceConnectedBoth,
     setConnectionPhase,
     getAttenuationReporter: () => attenuationReporter,
+    getReceiverStats,
+    onReceiverRecovery: recoverReceiver,
+    onReceiverFailed: failStalledReceiver,
   });
   let disposeVisibility: (() => void) | null = null;
   if (import.meta.client) {
@@ -371,10 +551,12 @@ export function useHybridMediaSession() {
   }
   function getRequestedVideoSettings(source: string) {
     const policy = voiceStore.currentChannelId
-      ? (
-          channelsStore.getChannelById(voiceStore.currentChannelId) as
-            HybridChannelRecord | null | undefined
-        )?.mediaPolicy
+      ? videoPolicy(
+          parseExternalValue(
+            channelsStore.getChannelById(voiceStore.currentChannelId)
+              ?.mediaPolicy,
+          ),
+        )
       : null;
     return resolveRequestedVideoSettings({
       policy,
@@ -385,7 +567,6 @@ export function useHybridMediaSession() {
   const {
     createSharedAudioSource,
     producerFacade,
-    refreshAudioSenderSettings,
     refreshMediaPolicy,
     setSharedAudioVolume,
     setSharedAudioAttenuation,
@@ -423,10 +604,7 @@ export function useHybridMediaSession() {
     () =>
       buildMediaAttenuationWatchKey({
         roomAttenuation: voiceStore.currentRoomId
-          ? (
-              roomsStore.getRoomById(voiceStore.currentRoomId) as
-                HybridRoomRecord | null | undefined
-            )?.attenuation
+          ? roomAttenuation(roomsStore.getRoomById(voiceStore.currentRoomId))
           : undefined,
         streamAttenuation: settingsStore.streamAttenuation,
         speaking: [...voiceStore.connectedUsers.values()].some(
@@ -442,10 +620,7 @@ export function useHybridMediaSession() {
         speaking,
         resolveMediaAttenuation(
           voiceStore.currentRoomId
-            ? (
-                roomsStore.getRoomById(voiceStore.currentRoomId) as
-                  HybridRoomRecord | null | undefined
-              )?.attenuation
+            ? roomAttenuation(roomsStore.getRoomById(voiceStore.currentRoomId))
             : undefined,
           settingsStore.streamAttenuation,
         ),
@@ -456,14 +631,16 @@ export function useHybridMediaSession() {
   registerEchoWarning(echoDetected);
   watch(
     () =>
-      (
-        channelsStore.getChannelById(voiceStore.currentChannelId) as
-          HybridChannelRecord | null | undefined
-      )?.mediaPolicy?.revision,
+      isExternalRecord(
+        channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy,
+      )
+        ? channelsStore.getChannelById(voiceStore.currentChannelId)?.mediaPolicy
+            ?.revision
+        : null,
     () => {
       if (connected.value)
-        refreshMediaPolicy().catch((policyError: unknown) => {
-          error.value = `Media policy could not be fully applied: ${String(policyError)}`;
+        refreshMediaPolicy().catch((policyError: ExternalValue) => {
+          error.value = `Media policy could not be fully applied: ${parseThrownError(policyError).message}`;
         });
     },
   );
@@ -491,7 +668,7 @@ export function useHybridMediaSession() {
     peerRoundTripTimes,
     producers,
     setP2pEdges: (edges: unknown[]) => {
-      lastP2pEdges = edges;
+      lastP2pEdges = edges.map((entry) => parseExternalValue(entry));
     },
     topologyGraph,
     topologyState,
@@ -506,15 +683,19 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     getIntentionalClose: () => intentionalClose,
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
+    getLastAppliedPublicationRevision: () =>
+      lastAppliedPublicationRevision.value,
+    setLastAppliedPublicationRevision: (value: string) => {
+      lastAppliedPublicationRevision.value = value;
+    },
     getP2pMesh: () => p2pMesh,
     getSfu: () => sfu,
     getVideoReport: (source: string) => {
       if (activeProvider === "sfu") {
-        const report = sfu?.producers.get(source)?.producer.getStats();
+        const report = sfu?.producers?.get(source)?.producer?.getStats();
         return report
-          ? Promise.resolve(report).then(
-              (value) =>
-                value as unknown as Map<string, Record<string, unknown>>,
+          ? Promise.resolve(parseExternalValue(report)).then(
+              normalizeVideoStatsReport,
             )
           : Promise.resolve(null);
       }
@@ -522,9 +703,8 @@ export function useHybridMediaSession() {
         return p2pMesh
           ? p2pMesh
               .getOutboundTrackStats(source)
-              .then(
-                (report) =>
-                  report as unknown as Map<string, Record<string, unknown>>,
+              .then((value) =>
+                normalizeVideoStatsReport(parseExternalValue(value)),
               )
           : Promise.resolve(null);
       return Promise.resolve(null);
@@ -540,12 +720,29 @@ export function useHybridMediaSession() {
     refreshPublicMaps,
     reportSfuFailure,
     send,
+    sendParticipantVoiceState: async (state: {
+      muted?: boolean;
+      deafened?: boolean;
+    }) => {
+      if (voiceStore.sfuComposable?.sendParticipantVoiceState) {
+        await voiceStore.sfuComposable.sendParticipantVoiceState({
+          muted: state.muted ?? false,
+          deafened: state.deafened ?? false,
+        });
+      }
+    },
     startLocalVoiceDetection,
     startSharedAudioMeter,
     stopLocalVoiceDetection,
     stopSharedAudioMeter,
     topologyState,
     voiceStore,
+    getLocalPeerId: () => localPeerId,
+    getLocalParticipantKey: () => {
+      const userId = authStore.getUserData()?.id;
+      if (!userId) return null;
+      return `${userId}:${getMediaDeviceId()}`;
+    },
   });
   const {
     restartAudioProduction,
@@ -645,7 +842,7 @@ export function useHybridMediaSession() {
       intentionalClose = value;
     },
     setLastP2pEdges: (value: unknown[]) => {
-      lastP2pEdges = value;
+      lastP2pEdges = value.map((entry) => parseExternalValue(entry));
     },
     setP2pMesh: (value: HybridP2pMesh | null) => {
       p2pMesh = value;
@@ -660,8 +857,8 @@ export function useHybridMediaSession() {
     signaling,
     stopLocalVoiceDetection,
     stopSharedAudioMeter,
-    resolveTopologyWaiter: (reason: unknown) => {
-      topologyWaiter?.(reason);
+    resolveTopologyWaiter: (reason: ExternalValue) => {
+      topologyWaiter?.(ownedErrorValue(reason));
       topologyWaiter = null;
     },
     transportReady,
@@ -669,7 +866,7 @@ export function useHybridMediaSession() {
   topologyController = createHybridMediaTopologyController({
     CloudflareRealtimeSession,
     MediasoupClientSession,
-    MediasoupProviderSocket,
+    MediasoupProviderSocket: TopologyMediasoupProviderSocket,
     NativeP2pMesh,
     buildP2pVideoSenderOptions,
     buildVoiceProducerOptions,
@@ -682,13 +879,14 @@ export function useHybridMediaSession() {
     getEffectiveAudioBitrate,
     getIceServers: () => iceServers,
     getMediaCapabilities: () => mediaCapabilities.value,
+    getConnectionEpoch: () => sessionConnectionEpoch,
     getLocalPeerId: () => localPeerId,
     getMessageHandler: (type: string) => messageHandlers.get(type),
     getProviderSocket: () => providerSocket,
     getRequestedVideoSettings,
     getSelectedSfuProvider: () => selectedSfuProvider,
-    getSfu: () => sfu as unknown as TopologySfuSession | null,
-    getP2pMesh: () => p2pMesh as unknown as TopologyP2pMesh | null,
+    getSfu: () => sfu,
+    getP2pMesh: () => p2pMesh,
     handoff,
     iceConnectedBoth,
     localSources,
@@ -703,7 +901,7 @@ export function useHybridMediaSession() {
       data: TopologyData,
       nextTopologyState: TopologyState,
     ) => {
-      for (const peer of nextTopologyState.peers as HybridTopologyPeer[]) {
+      for (const peer of nextTopologyState.peers) {
         const profileId = peer.profile?.id;
         if (peer.profile && profileId != null)
           voiceStore.upsertUserProfile({
@@ -725,23 +923,23 @@ export function useHybridMediaSession() {
       }
     },
     peerConnectionMetrics,
-    publishLocalSources: async (provider: unknown) => {
-      const p2pMeshLocal = p2pMesh as HybridP2pMesh | null;
-      const sfuLocal = sfu as HybridSfuSession | null;
-      if (provider === p2pMeshLocal && p2pMeshLocal) {
+    publishLocalSources: async (provider) => {
+      if (provider === p2pMesh && p2pMesh) {
         for (const entry of localSources.values()) {
-          await p2pMeshLocal.publishSource(
+          await p2pMesh.publishSource(
             entry.source,
             entry.track,
             entry.stream,
             entry,
           );
         }
-      } else if (provider === sfuLocal && sfuLocal) {
+      } else if (provider === sfu && sfu) {
         for (const entry of localSources.values()) {
-          await (sfuLocal as any).addSource(entry);
+          await sfu.addSource(entry);
         }
-        await (sfuLocal as any).startSubscriptions?.();
+        if (sfu.startSubscriptions instanceof Function) {
+          await sfu.startSubscriptions();
+        }
       }
     },
     refreshPublicMaps,
@@ -753,25 +951,19 @@ export function useHybridMediaSession() {
         const trackName = publication.trackName;
         const peerId = publication.peerId;
         const source = publication.source;
-        const track = (publication as Record<string, unknown>).track as
-          MediaStreamTrack | undefined;
-        const stream = (publication as Record<string, unknown>).stream as
-          MediaStream | undefined;
-        if (!trackName || !peerId || !source || !track) continue;
-        try {
-          await session.publishSource(source, track, stream, {
-            source,
-            track,
-            key: trackName,
-            provider: "sfu",
-            userId: peerId,
-            peerId: peerId,
-          });
-        } catch (err) {
-          mediaDebug("cloudflare-replay-failed", {
-            trackName,
-            error: err instanceof Error ? err.message : String(err),
-          });
+        if (!trackName || !peerId || !source) continue;
+        if ("handle" in session && session.handle instanceof Function) {
+          try {
+            await session.handle(
+              "cloudflare-publication-available",
+              publication,
+            );
+          } catch (err) {
+            mediaDebug("cloudflare-replay-failed", {
+              trackName,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
     },
@@ -779,16 +971,16 @@ export function useHybridMediaSession() {
     sfuRoundTripTime,
     setActiveProvider,
     setP2pMesh: (mesh: TopologyP2pMesh | null) => {
-      p2pMesh = mesh as unknown as HybridP2pMesh | null;
+      p2pMesh = mesh;
     },
     setProviderSocket: (socket) => {
-      providerSocket = socket as HybridProviderSocket | null;
+      providerSocket = socket;
     },
     setSelectedSfuProvider: (provider: string) => {
       selectedSfuProvider = provider;
     },
     setSfu: (session) => {
-      sfu = session as HybridSfuSession | null;
+      sfu = session;
     },
     setConnectionPhase,
     setRouteConnectionState,
@@ -834,7 +1026,7 @@ export function useHybridMediaSession() {
     },
     setConnectionPhase,
     setIceServers: (value: unknown[]) => {
-      iceServers = value;
+      iceServers = value.map((entry) => parseExternalValue(entry));
     },
     setIntentionalClose: (value: boolean) => {
       intentionalClose = value;
@@ -863,14 +1055,15 @@ export function useHybridMediaSession() {
     ensureP2p,
     ensureSfu,
     getChannelId: () => channelId,
-    getDeviceId: getOrCreateDeviceId,
+    getDeviceId: getMediaDeviceId,
     getP2pMesh: () => p2pMesh,
     getBootstrap: getMediaControlBootstrap,
     handleP2pQualification,
     handleProviderFailure,
-    handleProviderRecovering: (data: Record<string, unknown>) =>
-      topologyController?.handleProviderRecovering(data),
-    handleProviderTicket: (data: Record<string, unknown>) =>
+    handleProviderRecovering: (data: Record<string, unknown> = {}) => {
+      return topologyController?.handleProviderRecovering(data);
+    },
+    handleProviderTicket: (data: TopologyData) =>
       topologyController?.handleProviderTicket(data),
     mediaPathMetrics,
     peerConnectionMetrics,
@@ -878,8 +1071,8 @@ export function useHybridMediaSession() {
     sfuRoundTripTime,
     receiveAttenuation: attenuationReporter.receive,
     resetLifecycle: lifecycleState.reset,
-    resolveTopologyWaiter: (reason: unknown) => {
-      topologyWaiter?.(reason);
+    resolveTopologyWaiter: (reason: ExternalValue) => {
+      topologyWaiter?.(ownedErrorValue(reason));
       topologyWaiter = null;
     },
     sfuProducerIds,
@@ -890,12 +1083,13 @@ export function useHybridMediaSession() {
     getConnectionEpoch: () => sessionConnectionEpoch,
     setConnectionEpoch: (epoch: number) => {
       sessionConnectionEpoch = epoch;
+      if (sfu) sfu.controlConnectionEpoch = epoch;
     },
     getLastAppliedRoomRevision: () => lastAppliedRoomRevision.value,
     applyRoomRevision,
     requestSnapshot,
-    setTopologyWaiter: (waiter: ((error?: unknown) => void) | null) => {
-      topologyWaiter = waiter;
+    setTopologyWaiter: (waiter: ((error?: OwnedErrorValue) => void) | null) => {
+      topologyWaiter = waiter ? (error) => waiter(error) : null;
     },
     setupMessageHandlers: setupMediaMessageHandlers,
     queueCloudflarePublication: (data: Record<string, unknown>) =>
@@ -904,7 +1098,108 @@ export function useHybridMediaSession() {
       operationId: string,
       data: Record<string, unknown>,
     ) => sourceController.queueTargetedReconciliation(operationId, data),
-  } as unknown as RuntimeDependencyContext);
+    handlePublicationsDigest,
+    sourceController,
+    getLastAppliedPublicationRevision: () =>
+      lastAppliedPublicationRevision.value,
+    setLastAppliedPublicationRevision: (value: string) => {
+      lastAppliedPublicationRevision.value = value;
+    },
+  } satisfies RuntimeDependencyContext);
+
+  function normalizeServerRevision(value: ExternalValue): string {
+    if (isExternalString(value) && value !== "" && /^\d+$/.test(value)) {
+      return value;
+    }
+    const numeric = parseExternalNumber(value);
+    if (numeric !== null && Number.isSafeInteger(numeric) && numeric >= 0) {
+      return String(numeric);
+    }
+    return lastAppliedPublicationRevision.value;
+  }
+
+  async function handlePublicationsDigest<T>(
+    digest: T[],
+    publicationRevision?: string | number | null,
+  ): Promise<void> {
+    if (!Array.isArray(digest)) return;
+
+    const serverPublications: CloudflarePublication[] = [];
+    const envelopeRevision = normalizeServerRevision(publicationRevision);
+    let maxPublicationRevision = envelopeRevision;
+    for (const rawEntry of digest) {
+      const entry = parseCloudflarePublication(parseExternalValue(rawEntry));
+      if (!entry) continue;
+      serverPublications.push(entry);
+      if (
+        !publicationRevision &&
+        "publicationRevision" in entry &&
+        (isExternalString(entry.publicationRevision) ||
+          parseExternalNumber(parseExternalValue(entry.publicationRevision)) !==
+            null)
+      ) {
+        const entryRevision = normalizeServerRevision(
+          parseExternalValue(entry.publicationRevision),
+        );
+        if (BigInt(entryRevision) > BigInt(maxPublicationRevision)) {
+          maxPublicationRevision = entryRevision;
+        }
+      }
+    }
+
+    if (
+      BigInt(maxPublicationRevision) <
+      BigInt(lastAppliedPublicationRevision.value)
+    ) {
+      mediaDebug("publications-digest-stale", {
+        digestRevision: maxPublicationRevision,
+        appliedRevision: lastAppliedPublicationRevision.value,
+      });
+      return;
+    }
+
+    const { canonicalSnapshot, removed } =
+      cloudflarePublications.reconcileExact(serverPublications);
+
+    if (
+      BigInt(maxPublicationRevision) >
+      BigInt(lastAppliedPublicationRevision.value)
+    ) {
+      lastAppliedPublicationRevision.value = maxPublicationRevision;
+    }
+
+    if (removed.length > 0) {
+      mediaDebug("publications-digest-removed", {
+        count: removed.length,
+        tracks: removed.map((p) => p.trackName),
+      });
+    }
+
+    const session = sfu;
+    if (!session) return;
+    if (
+      "reconcilePublications" in session &&
+      session.reconcilePublications instanceof Function
+    ) {
+      try {
+        const isStale = () =>
+          BigInt(maxPublicationRevision) <
+          BigInt(lastAppliedPublicationRevision.value);
+        await session.reconcilePublications(
+          canonicalSnapshot,
+          removed,
+          isStale,
+          () => cloudflarePublications.values(),
+          () => lastAppliedPublicationRevision.value,
+        );
+      } catch (err) {
+        mediaDebug("publications-digest-reconcile-failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
   watch(
     () => [peerConnectionMetrics.value, sfuRoundTripTime.value],
     () => {
@@ -925,7 +1220,14 @@ export function useHybridMediaSession() {
     getInboundRtpStats,
     getOutboundRtpStats,
     getVoiceTransportTimeout: providerRecovery.timeout,
-    getWebRTCDiagnosticStats,
+    getWebRTCDiagnosticStats: async () => {
+      const value = await getWebRTCDiagnosticStats();
+      return Array.isArray(value)
+        ? value
+            .map((entry) => parseExternalValue(entry))
+            .filter(isExternalRecord)
+        : [];
+    },
     getWebRTCStatsSnapshot,
     iceConnectedBoth,
     isProducing: computed(() => localSources.size > 0),
@@ -957,11 +1259,41 @@ export function useHybridMediaSession() {
     sharedAudioStats,
     sfuRoundTripTime,
     sendParticipantVoiceState,
-    setMediaCapabilities: (value: unknown) => {
-      mediaCapabilities.value = value as ParticipantMediaCapabilities | null;
+    setMediaCapabilities: (value: ParticipantMediaCapabilities | null) => {
+      mediaCapabilities.value = value;
     },
     setRemoteScreenReceiving: (feedKey: string, receiving: boolean) =>
       registry.setVideoReceiving(feedKey, receiving),
+    markRemoteFirstFrame: (
+      key: string,
+      receiverIncarnationId?: string | null,
+      fallback = false,
+      observationMode?: Exclude<
+        RemotePresentationObservationMode,
+        "unavailable"
+      >,
+    ) =>
+      registry.markFirstFrame(
+        key,
+        receiverIncarnationId || null,
+        Date.now(),
+        fallback,
+        observationMode,
+      ),
+    markRemoteFramePresented: (
+      key: string,
+      receiverIncarnationId?: string | null,
+      observationMode?: Exclude<
+        RemotePresentationObservationMode,
+        "unavailable"
+      >,
+    ) =>
+      registry.markFramePresented(
+        key,
+        receiverIncarnationId || null,
+        Date.now(),
+        observationMode,
+      ),
     setRemoteSystemAudioReceiving: (key: string, on: boolean) =>
       registry.setAudioReceiving(key, on),
     setSharedAudioAttenuation,
@@ -969,10 +1301,19 @@ export function useHybridMediaSession() {
     setSystemAudioBitrate,
     startAudioProduction,
     startSystemAudioProduction,
-    startVideoProduction,
-    stopAudioProduction,
+    startVideoProduction: (source, options) =>
+      Promise.resolve(startVideoProduction(source, options)).then((value) =>
+        parseExternalValue(value),
+      ),
+    stopAudioProduction: () =>
+      Promise.resolve(stopAudioProduction()).then((value) =>
+        parseExternalValue(value),
+      ),
     stopSystemAudioProduction,
-    stopVideoProduction,
+    stopVideoProduction: (source) =>
+      Promise.resolve(stopVideoProduction(source)).then((value) =>
+        parseExternalValue(value),
+      ),
     topologyGraph,
     topologyState,
     transportReady,
@@ -982,5 +1323,5 @@ export function useHybridMediaSession() {
     applyVolumeForTrack: (userId: string, source: string, volume: number) =>
       registry.applyVolume(userId, source, volume),
     ensureAudioElements: () => registry.ensurePlayback(),
-  } as unknown as HybridMediaSessionApiContext);
+  } satisfies HybridMediaSessionApiContext);
 }

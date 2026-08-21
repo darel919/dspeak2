@@ -2,18 +2,39 @@ import { applyRtpSenderSettings } from "./rtp-sender-settings.ts";
 import { findRtpStat } from "./rtc-media-stats.ts";
 import { sortP2pVideoCodecPreferences } from "./video-settings.ts";
 import {
+  isExternalRecord,
+  isExternalString,
+  type MediaCommandResult,
+} from "./types/boundary.ts";
+import {
   normalizeVideoCodecName,
   type VideoCodecName,
 } from "./types/video-codec-capabilities.ts";
-import type { VideoCodec } from "./types/video-settings.ts";
 
-type P2pStat = RTCStats & Record<string, unknown>;
+type P2pStat = {
+  id?: string;
+  type: string;
+  [key: string]: unknown;
+};
 type P2pTrackEntry =
   MediaStreamTrack | { track?: MediaStreamTrack | null; key?: string };
 interface P2pFlowEntry {
   key: string;
   bytes: number;
   flowing: boolean;
+}
+
+function isRecord<T>(value: T): value is T & Record<string, unknown> {
+  return isExternalRecord(value);
+}
+
+function p2pStat<T>(value: T): P2pStat | null {
+  if (!isExternalRecord(value)) return null;
+  if (!isExternalString(value.type)) return null;
+  const { id, ...properties } = value;
+  if (isExternalString(id))
+    return { ...properties, type: value.type, id } satisfies P2pStat;
+  return { ...properties, type: value.type } satisfies P2pStat;
 }
 
 export const P2P_ACTIVE_HEALTH_TIMEOUT_MS = 20000;
@@ -114,7 +135,7 @@ export function applyOpusAudioProfile(sdp: string, stereo = true) {
     .join("");
 }
 
-function p2pCodecNameFromMimeType(value: unknown) {
+function p2pCodecNameFromMimeType<T>(value: T) {
   const mimeType =
     String(value || "")
       .replace(/^video\//i, "")
@@ -123,7 +144,7 @@ function p2pCodecNameFromMimeType(value: unknown) {
   return normalizeVideoCodecName(mimeType);
 }
 
-function isAuxiliaryP2pVideoCodec(value: unknown) {
+function isAuxiliaryP2pVideoCodec<T>(value: T) {
   return /^(video\/)?(rtx|red|ulpfec|flexfec)/i.test(String(value || ""));
 }
 
@@ -135,17 +156,16 @@ export function applyP2pVideoCodecPreferences(
     globalThis.RTCRtpReceiver?.getCapabilities?.("video")?.codecs ||
     globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs;
   if (!capabilities?.length) return false;
-  const sortedPreferences = sortP2pVideoCodecPreferences(
-    capabilities as unknown as VideoCodec[],
-  );
+  const sortedPreferences = sortP2pVideoCodecPreferences(capabilities);
   const allowed = new Set(allowedCodecs || []);
   const preferences = allowed.size
     ? sortedPreferences.filter(
         (codec) =>
           isAuxiliaryP2pVideoCodec(codec.mimeType) ||
-          allowed.has(
-            p2pCodecNameFromMimeType(codec.mimeType) as VideoCodecName,
-          ),
+          (() => {
+            const codecName = p2pCodecNameFromMimeType(codec.mimeType);
+            return codecName !== null && allowed.has(codecName);
+          })(),
       )
     : sortedPreferences;
   const selectedPreferences = preferences.length
@@ -157,28 +177,46 @@ export function applyP2pVideoCodecPreferences(
       transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind;
     if (kind !== "video" || !transceiver.setCodecPreferences) continue;
     try {
-      transceiver.setCodecPreferences(
-        selectedPreferences as unknown as Parameters<
-          RTCRtpTransceiver["setCodecPreferences"]
-        >[0],
-      );
+      transceiver.setCodecPreferences(selectedPreferences);
       applied = true;
     } catch {}
   }
   return applied;
 }
 
-export function directIceServers(servers: unknown): RTCIceServer[] {
-  return (Array.isArray(servers) ? servers : []).flatMap((value: unknown) => {
-    if (!value || typeof value !== "object") return [];
-    const server = value as Record<string, unknown>;
+export function directIceServers<T>(servers: T): RTCIceServer[] {
+  return normalizeIceServers(servers).flatMap((server) => {
     const urls = (
       Array.isArray(server.urls) ? server.urls : [server.urls]
     ).filter(
-      (url) => typeof url === "string" && url.toLowerCase().startsWith("stun:"),
+      (url) => isExternalString(url) && url.toLowerCase().startsWith("stun:"),
     );
-    if (!urls.length) return [];
-    return [{ urls: Array.isArray(server.urls) ? urls : urls[0] }];
+    const firstUrl = urls[0];
+    if (!firstUrl) return [];
+    return [{ urls: Array.isArray(server.urls) ? urls : firstUrl }];
+  });
+}
+
+export function normalizeIceServers<T>(servers: T): RTCIceServer[] {
+  return (Array.isArray(servers) ? servers : []).flatMap((value) => {
+    if (!isRecord(value)) return [];
+    const server = value;
+    const rawUrls: string[] = [];
+    const candidateUrls = Array.isArray(server.urls)
+      ? server.urls
+      : [server.urls];
+    for (const url of candidateUrls)
+      if (isExternalString(url) && url.length > 0) rawUrls.push(url);
+    const firstUrl = rawUrls[0];
+    if (!firstUrl) return [];
+    const normalized: RTCIceServer = {
+      urls: Array.isArray(server.urls) ? rawUrls : firstUrl,
+    };
+    if (isExternalString(server.username))
+      normalized.username = server.username;
+    if (isExternalString(server.credential))
+      normalized.credential = server.credential;
+    return [normalized];
   });
 }
 
@@ -188,18 +226,23 @@ export async function selectedPairSnapshot(
 ) {
   const report = suppliedReport || (await pc.getStats());
   const byId = new Map<string, P2pStat>();
-  report.forEach((stat) => byId.set(stat.id, stat as P2pStat));
+  report.forEach((stat) => {
+    const parsed = p2pStat(stat);
+    if (parsed?.id) byId.set(parsed.id, parsed);
+  });
   let pair: P2pStat | null = null;
   let selectedPairId = "";
   report.forEach((rawStat) => {
-    const stat = rawStat as P2pStat;
+    const stat = p2pStat(rawStat);
+    if (!stat) return;
     if (stat.type === "transport" && stat.selectedCandidatePairId)
       selectedPairId = String(stat.selectedCandidatePairId);
   });
   if (selectedPairId) pair = byId.get(selectedPairId) || null;
   if (!pair) {
     report.forEach((rawStat) => {
-      const stat = rawStat as P2pStat;
+      const stat = p2pStat(rawStat);
+      if (!stat) return;
       if (
         stat.type === "candidate-pair" &&
         stat.state === "succeeded" &&
@@ -306,7 +349,8 @@ export async function mediaFlowSnapshot(
     addTrackFlow(inboundTracks, "inbound-rtp", "bytesReceived", inboundFlows);
   } else {
     report.forEach((rawStat) => {
-      const stat = rawStat as P2pStat;
+      const stat = p2pStat(rawStat);
+      if (!stat) return;
       if (
         stat.type === "outbound-rtp" &&
         !stat.isRemote &&
@@ -338,14 +382,8 @@ export async function mediaFlowSnapshot(
 export function isViableP2pPair(
   pair: Record<string, unknown> | null | undefined,
 ) {
-  const local =
-    pair?.local && typeof pair.local === "object"
-      ? (pair.local as Record<string, unknown>)
-      : null;
-  const remote =
-    pair?.remote && typeof pair.remote === "object"
-      ? (pair.remote as Record<string, unknown>)
-      : null;
+  const local = isRecord(pair?.local) ? pair.local : null;
+  const remote = isRecord(pair?.remote) ? pair.remote : null;
   return (
     !!pair &&
     pair.state === "succeeded" &&
@@ -362,7 +400,10 @@ export function configureP2pSender(
       source: string,
       track: MediaStreamTrack,
     ) => Record<string, unknown> | null;
-    updateSender: (sender: RTCRtpSender, operation: () => unknown) => unknown;
+    updateSender: (
+      sender: RTCRtpSender,
+      operation: () => Promise<MediaCommandResult>,
+    ) => Promise<MediaCommandResult>;
   },
   sender: RTCRtpSender,
   source: string,

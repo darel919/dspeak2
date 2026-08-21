@@ -1,6 +1,9 @@
-import type { MediasoupClientSession } from "../../shared/mediasoup-client-session.ts";
-import type { MediasoupProviderSocket } from "../../shared/mediasoup-provider-socket.ts";
-import type { NativeP2pMesh } from "../../shared/native-p2p.ts";
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
+import type { NativeP2pMeshSurface } from "./native-p2p.ts";
 import type { createHybridMediaSessionTermination } from "../../shared/hybrid-media-session-termination.ts";
 import type { createHybridMediaSessionRuntime } from "../../shared/hybrid-media-session-runtime.ts";
 import type { createHybridMediaTopologyController } from "../../shared/hybrid-media-topology-controller.ts";
@@ -8,81 +11,135 @@ import type { createMediaSourceController } from "../../shared/media-source-cont
 import type { createHybridMediaSessionApi } from "../../shared/hybrid-media-session-api.ts";
 import type { createCloudflarePublicationRegistry } from "../../shared/cloudflare-publication-registry.ts";
 import type { VideoPolicy } from "./video-settings.ts";
+import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type { Ref } from "vue";
-import type { TopologyData } from "./topology-controller.ts";
+import type {
+  TopologyData,
+  TopologyProviderSocket,
+  TopologySfuSession,
+} from "./topology-controller.ts";
 import type { SignalingMessage } from "./media-signaling.ts";
 import type { MediaCaptureManager } from "../../shared/media-capture.ts";
 import type { RemoteMediaHandoff } from "../../shared/remote-media-handoff.ts";
+import type { MediaVideoFeed } from "./media-source-controller.ts";
+import type { RemoteMediaEntry } from "./hybrid-media-registry.ts";
+import type { RtcStatsSnapshot } from "./rtc-stats.ts";
+import type { MediaCaptureStartOptions } from "./media-capture.ts";
+import type { RemotePresentationObservationMode } from "../remote-source-convergence.ts";
 
-export type HybridSessionDynamicFunction = (...args: unknown[]) => unknown;
+export type HybridSessionDynamicFunction = (
+  ...args: unknown[]
+) => MediaCommandResult;
 export interface HybridMediaSessionApiContext {
-  activeProviderState: Ref<unknown>;
-  areTransportsIceConnected: HybridSessionDynamicFunction;
-  connect: HybridSessionDynamicFunction;
-  connected: Ref<unknown>;
-  connectionPhase: Ref<unknown>;
-  disconnect: HybridSessionDynamicFunction;
-  echoDetected: Ref<unknown>;
-  error: Ref<unknown>;
-  getInboundRtpStats: HybridSessionDynamicFunction;
-  getOutboundRtpStats: HybridSessionDynamicFunction;
-  getVoiceTransportTimeout: HybridSessionDynamicFunction;
-  getWebRTCDiagnosticStats: HybridSessionDynamicFunction;
-  getWebRTCStatsSnapshot: HybridSessionDynamicFunction;
-  iceConnectedBoth: Ref<unknown>;
-  isProducing: Ref<unknown>;
-  joinReady: Ref<unknown>;
+  activeProviderState: Ref<string | null>;
+  areTransportsIceConnected: () => Promise<boolean>;
+  connect: (
+    channelId: string,
+    options?: { roomId?: string },
+  ) => MediaCommandResult;
+  connected: Ref<boolean>;
+  connectionPhase: Ref<string>;
+  disconnect: () => MediaCommandResult;
+  echoDetected: Ref<boolean>;
+  error: Ref<string | null>;
+  getInboundRtpStats: () => Promise<Array<Record<string, unknown>>>;
+  getOutboundRtpStats: () => Promise<Array<Record<string, unknown>>>;
+  getVoiceTransportTimeout: () => number;
+  getWebRTCDiagnosticStats: () => Promise<Array<Record<string, unknown>>>;
+  getWebRTCStatsSnapshot: () => Promise<RtcStatsSnapshot>;
+  iceConnectedBoth: Ref<boolean>;
+  isProducing: Ref<boolean>;
+  joinReady: Ref<boolean>;
   lastInRoom: Ref<unknown>;
-  lastReceivedConsumerParams: HybridSessionDynamicFunction;
-  lastSentClientRtpCapabilities: HybridSessionDynamicFunction;
+  lastReceivedConsumerParams: () => MediaCommandResult;
+  lastSentClientRtpCapabilities: () => MediaCommandResult;
   consumers: Ref<unknown>;
   lifecycle: Ref<unknown>;
-  localVideoFeeds: Ref<unknown>;
-  mediaConnectionState: Ref<unknown>;
-  mediaCapabilities: Ref<unknown>;
+  localVideoFeeds: Ref<Map<string, MediaVideoFeed>>;
+  mediaConnectionState: Ref<string>;
+  mediaCapabilities: Ref<ParticipantMediaCapabilities | null>;
   mediaPathMetrics: Ref<unknown>;
   microphoneDeviceState: Ref<unknown>;
   participantSfuRoundTripTimes: Ref<unknown>;
   peerConnectionMetrics: Ref<unknown>;
   peerRoundTripTimes: Ref<unknown>;
   playbackState: Ref<unknown>;
-  prepareAudioPlayback: HybridSessionDynamicFunction;
+  prepareAudioPlayback: () => MediaCommandResult;
   producers: Ref<unknown>;
   protocolState: Ref<unknown>;
   protocolUpdateRequired: Ref<unknown>;
-  remoteAudioFeeds: Ref<unknown>;
+  remoteAudioFeeds: Ref<Map<string, RemoteMediaEntry>>;
   remoteProducersCount: Ref<unknown>;
-  remoteVideoFeeds: Ref<unknown>;
-  restartAudioProduction: HybridSessionDynamicFunction;
+  remoteVideoFeeds: Ref<Map<string, RemoteMediaEntry>>;
+  restartAudioProduction: () => MediaCommandResult;
+  markRemoteFirstFrame: (
+    key: string,
+    receiverIncarnationId?: string | null,
+    fallback?: boolean,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
+  ) => MediaCommandResult;
+  markRemoteFramePresented: (
+    key: string,
+    receiverIncarnationId?: string | null,
+    observationMode?: Exclude<RemotePresentationObservationMode, "unavailable">,
+  ) => MediaCommandResult;
   sharedAudioAttenuation: Ref<unknown>;
   sharedAudioDucking: Ref<unknown>;
   sharedAudioStats: Ref<unknown>;
   sfuRoundTripTime: Ref<unknown>;
-  sendParticipantVoiceState: HybridSessionDynamicFunction;
-  setMediaCapabilities: HybridSessionDynamicFunction;
-  setRemoteScreenReceiving: HybridSessionDynamicFunction;
-  setRemoteSystemAudioReceiving: HybridSessionDynamicFunction;
-  setSharedAudioAttenuation: HybridSessionDynamicFunction;
-  setSharedAudioVolume: HybridSessionDynamicFunction;
-  setSystemAudioBitrate: HybridSessionDynamicFunction;
-  startAudioProduction: HybridSessionDynamicFunction;
-  startSystemAudioProduction: HybridSessionDynamicFunction;
-  startVideoProduction: HybridSessionDynamicFunction;
-  stopAudioProduction: HybridSessionDynamicFunction;
-  stopSystemAudioProduction: HybridSessionDynamicFunction;
-  stopVideoProduction: HybridSessionDynamicFunction;
+  sendParticipantVoiceState: (state?: {
+    muted?: boolean;
+    deafened?: boolean;
+  }) => MediaCommandResult;
+  setMediaCapabilities: (value: ParticipantMediaCapabilities | null) => void;
+  setRemoteScreenReceiving: (
+    feedKey: string,
+    receiving: boolean,
+  ) => MediaCommandResult;
+  setRemoteSystemAudioReceiving: (
+    feedKey: string,
+    receiving: boolean,
+  ) => MediaCommandResult;
+  setSharedAudioAttenuation: (
+    speaking: boolean,
+    attenuation?: {
+      enabled?: boolean;
+      reductionPercent?: number;
+      attackMs?: number;
+      releaseMs?: number;
+    } | null,
+  ) => MediaCommandResult;
+  setSharedAudioVolume: (volume: number) => MediaCommandResult;
+  setSystemAudioBitrate: (bitrate: number) => MediaCommandResult;
+  startAudioProduction: () => Promise<MediaCommandResult>;
+  startSystemAudioProduction: (
+    options?: MediaCaptureStartOptions,
+  ) => Promise<MediaCommandResult>;
+  startVideoProduction: (
+    source: "camera" | "screen",
+    options?: MediaCaptureStartOptions,
+  ) => Promise<MediaCommandResult>;
+  stopAudioProduction: () => Promise<MediaCommandResult>;
+  stopSystemAudioProduction: () => Promise<MediaCommandResult>;
+  stopVideoProduction: (
+    source: "camera" | "screen",
+  ) => Promise<MediaCommandResult>;
   topologyGraph: Ref<unknown>;
   topologyState: Ref<unknown>;
-  transportReady: Ref<unknown>;
-  applyOutputDeviceToAll: HybridSessionDynamicFunction;
-  applyVolumeForTrack: HybridSessionDynamicFunction;
-  applyVolumeForUser: HybridSessionDynamicFunction;
-  ensureAudioElements: HybridSessionDynamicFunction;
+  transportReady: Ref<boolean>;
+  applyOutputDeviceToAll: () => MediaCommandResult;
+  applyVolumeForTrack: (
+    userId: string,
+    source: string,
+    volume: number,
+  ) => MediaCommandResult;
+  applyVolumeForUser: (userId: string, volume: number) => MediaCommandResult;
+  ensureAudioElements: () => MediaCommandResult;
 }
 
-export type HybridP2pMesh = InstanceType<typeof NativeP2pMesh>;
-export type HybridSfuSession = InstanceType<typeof MediasoupClientSession>;
-export type HybridProviderSocket = InstanceType<typeof MediasoupProviderSocket>;
+export type HybridP2pMesh = NativeP2pMeshSurface;
+export type HybridSfuSession = TopologySfuSession;
+export type HybridProviderSocket = TopologyProviderSocket;
 export type HybridTopologyController = ReturnType<
   typeof createHybridMediaTopologyController
 >;
@@ -99,7 +156,7 @@ export type HybridSessionApi = ReturnType<typeof createHybridMediaSessionApi>;
 export type HybridPublicationRegistry = ReturnType<
   typeof createCloudflarePublicationRegistry
 >;
-export type HybridTopologyWaiter = (reason?: unknown) => void;
+export type HybridTopologyWaiter = (reason?: OwnedErrorValue) => void;
 export type HybridTopologyState = ReturnType<
   typeof import("../../shared/media-session-state.ts").initialMediaTopologyState
 > & { sourceRevision?: number };
@@ -114,39 +171,46 @@ export type HybridTopologyPeer = { profile?: Record<string, unknown> };
 export interface HybridSessionOperationsContext {
   getSignaling: () => { send: (message: SignalingMessage) => boolean };
   getTopologyController: () => {
-    ensureP2p: () => unknown;
-    ensureSfu: () => unknown;
-    handleProviderFailure: (data?: Record<string, unknown>) => unknown;
-    handleP2pQualification: (data?: Record<string, unknown>) => unknown;
-    queueTopology: (data: TopologyData) => unknown;
-    reportSfuFailure: (reason: string) => unknown;
+    ensureP2p: () => HybridP2pMesh | null;
+    ensureSfu: () => HybridSfuSession | null;
+    handleProviderFailure: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    handleP2pQualification: (
+      data?: Record<string, unknown>,
+    ) => MediaCommandResult;
+    queueTopology: (data: TopologyData) => MediaCommandResult;
+    reportSfuFailure: (reason: string) => MediaCommandResult;
   } | null;
   getSessionTermination: () => {
-    failSession: (message: unknown) => unknown;
-    disconnect: () => unknown;
+    failSession: (message: OwnedErrorValue) => MediaCommandResult;
+    disconnect: () => MediaCommandResult;
   } | null;
   getSessionLifecycle: () => {
-    connect: (channelId: string, options?: { roomId?: string }) => unknown;
+    connect: (
+      channelId: string,
+      options?: { roomId?: string },
+    ) => MediaCommandResult;
     handleSignalingClose: (
       event: CloseEvent,
       protocolRejected: boolean,
-    ) => unknown;
+    ) => MediaCommandResult;
   } | null;
 }
 
 export interface HybridSessionTerminationContext {
   capture: MediaCaptureManager;
-  clearAttenuation: () => unknown;
+  clearAttenuation: () => MediaCommandResult;
   closeMediaSessionTransports: (options: {
     capture: MediaCaptureManager;
     getP2pMesh: () => HybridP2pMesh | null;
     getSfu: () => HybridSfuSession | null;
     handoff: RemoteMediaHandoff;
     socket: WebSocket | null;
-  }) => unknown;
+  }) => MediaCommandResult;
   connected: Ref<boolean>;
-  cancelConnect?: () => unknown;
-  disposeVisibility: () => unknown;
+  cancelConnect?: () => MediaCommandResult;
+  disposeVisibility: () => MediaCommandResult;
   error: Ref<string | null>;
   handoff: RemoteMediaHandoff;
   iceConnectedBoth: Ref<boolean>;
@@ -154,7 +218,10 @@ export interface HybridSessionTerminationContext {
   getProviderSocket: () => HybridProviderSocket | null;
   getSfu: () => HybridSfuSession | null;
   lifecycleState: {
-    record: (phase: string, details?: Record<string, unknown>) => unknown;
+    record: (
+      phase: string,
+      details?: Record<string, unknown>,
+    ) => MediaCommandResult;
   };
   mediaConnectionState: Ref<string>;
   mediaPathMetrics: Ref<unknown[]>;
@@ -164,25 +231,25 @@ export interface HybridSessionTerminationContext {
   playbackState: Ref<string>;
   protocolState: Ref<Record<string, unknown> | null>;
   protocolUpdateRequired: Ref<boolean>;
-  refreshPublicMaps: () => unknown;
-  refreshTopologyGraph: () => unknown;
-  resetTopologySequencing: (reason?: string) => unknown;
+  refreshPublicMaps: () => MediaCommandResult;
+  refreshTopologyGraph: () => MediaCommandResult;
+  resetTopologySequencing: (reason?: string) => MediaCommandResult;
   rtpStatsSamples: Map<string, unknown>;
   sfuRoundTripTime: Ref<number | null>;
-  setActiveProvider: (provider: "p2p" | "sfu" | null) => unknown;
-  setChannelId: (value: string | null) => unknown;
-  setIntentionalClose: (value: boolean) => unknown;
-  setLastP2pEdges: (value: unknown[]) => unknown;
-  setP2pMesh: (value: HybridP2pMesh | null) => unknown;
-  setProviderSocket: (value: HybridProviderSocket | null) => unknown;
-  setSfu: (value: HybridSfuSession | null) => unknown;
-  sendLeave: () => unknown;
+  setActiveProvider: (provider: "p2p" | "sfu" | null) => MediaCommandResult;
+  setChannelId: (value: string | null) => MediaCommandResult;
+  setIntentionalClose: (value: boolean) => MediaCommandResult;
+  setLastP2pEdges: (value: ExternalValue[]) => MediaCommandResult;
+  setP2pMesh: (value: HybridP2pMesh | null) => MediaCommandResult;
+  setProviderSocket: (value: HybridProviderSocket | null) => MediaCommandResult;
+  setSfu: (value: HybridSfuSession | null) => MediaCommandResult;
+  sendLeave: () => MediaCommandResult;
   signaling: {
     getSocket: () => WebSocket | null;
-    stop: () => unknown;
+    stop: () => MediaCommandResult;
   };
-  stopLocalVoiceDetection: () => unknown;
-  stopSharedAudioMeter: () => unknown;
-  resolveTopologyWaiter: (reason: unknown) => unknown;
+  stopLocalVoiceDetection: () => MediaCommandResult;
+  stopSharedAudioMeter: () => MediaCommandResult;
+  resolveTopologyWaiter: (reason: OwnedErrorValue) => MediaCommandResult;
   transportReady: Ref<boolean>;
 }

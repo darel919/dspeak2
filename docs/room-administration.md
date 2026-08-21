@@ -1,7 +1,7 @@
 # Room administration contract
 
 Room administration covers branding, roles, memberships, channel media policy,
-notifications, user identity, stream attenuation, and room soundboards.
+notifications, user identity, stream attenuation, room soundboards, and DJ mode.
 
 ## Migration behavior
 
@@ -151,3 +151,12 @@ the complete library.
 
 See [Room soundboards and system sounds](soundboards.md) for file conversion,
 authorization, playback, and limits.
+
+## DJ mode
+
+`dspeak_dj_sessions` stores broadcast session state including channel ID, status,
+current track metadata, and playback position. The DJ session is created via
+`POST /api/dj/session` and managed through the media-control Durable Object for
+synchronized playback across participants. Room owners and roles with
+`room.manage_dj` can start/stop broadcasts. The session emits
+`dj_session_updated` through Supabase Realtime for real-time track updates.

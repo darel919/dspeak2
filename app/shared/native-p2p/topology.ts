@@ -21,6 +21,22 @@ import type {
   NativeP2pMeshSurface,
   NativeP2pRemoteTrackEntry,
 } from "../types/native-p2p.ts";
+import type { MediaCommandResult } from "../types/boundary.ts";
+import { asError } from "../native-mediasoup-utils.ts";
+
+type SourceAnnouncementMessage = {
+  trackId: string;
+  source: string;
+  ownerSource: string | null;
+  connectionEpoch: number;
+  generation?: number;
+};
+
+type SourceRemovedMessage = {
+  source: string;
+  connectionEpoch: number;
+  generation?: number;
+};
 
 interface NativeP2pTopologyPeer {
   peerId: string;
@@ -111,7 +127,10 @@ export class NativeP2pTopologyMethods {
       try {
         await this.receiveSignal(payload);
       } catch (error) {
-        this.fail("signaling-failed", error);
+        this.fail(
+          "signaling-failed",
+          asError(error, "Native P2P signaling failed"),
+        );
       }
     }
   }
@@ -125,15 +144,30 @@ export class NativeP2pTopologyMethods {
       for (const [source, sender] of state.senders) {
         const entry = this.localSources.get(source);
         if (entry?.track) {
-          this.signal(state.peerId, {
-            source: {
-              trackId: entry.track.id,
-              source,
-              ownerSource: entry.ownerSource || null,
-            },
-          });
+          const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+          const sourceAnnouncement: SourceAnnouncementMessage = {
+            trackId: entry.track.id,
+            source,
+            ownerSource: entry.ownerSource || null,
+            connectionEpoch,
+          };
+          const announcementGeneration = Math.floor(Number(entry.generation));
+          if (
+            Number.isFinite(announcementGeneration) &&
+            announcementGeneration > 0
+          )
+            sourceAnnouncement.generation = announcementGeneration;
+          this.signal(state.peerId, { source: sourceAnnouncement });
         } else if (!sender.track) {
-          this.signal(state.peerId, { sourceRemoved: { source } });
+          const removalGeneration = Number(entry?.generation) || 0;
+          const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+          const sourceRemoved: SourceRemovedMessage = {
+            source,
+            connectionEpoch,
+          };
+          if (removalGeneration > 0)
+            sourceRemoved.generation = removalGeneration;
+          this.signal(state.peerId, { sourceRemoved });
         }
       }
       state.capabilitiesSent = false;
@@ -280,7 +314,7 @@ export class NativeP2pTopologyMethods {
   enqueuePeerSignaling(
     this: NativeP2pMeshSurface,
     state: NativeP2pConnectionState,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
     phase = "signal",
   ) {
     return enqueuePeerSignaling(this, state, operation, phase);
@@ -371,8 +405,14 @@ export class NativeP2pTopologyMethods {
       key,
       peerId: state.peerId,
       userId: state.userId,
+      provider: "p2p",
       source,
       ownerSource: this.remoteSourceOwners.get(sourceKey) ?? null,
+      connectionEpoch: this.getControlConnectionEpoch?.() || 1,
+      sourceGeneration: this.remoteSourceGenerations.get(sourceKey) || 1,
+      nativeTrackHandle: track.id,
+      receiver: event.receiver,
+      receiverIncarnationId: `p2p:${state.peerId}:${track.id}`,
       track,
       stream: new MediaStream([track]),
     };
@@ -401,4 +441,5 @@ export class NativeP2pTopologyMethods {
   }
 }
 
-export interface NativeP2pTopologyMethods extends NativeP2pMeshSurface {}
+export type NativeP2pTopologyContract = NativeP2pMeshSurface &
+  NativeP2pTopologyMethods;

@@ -9,12 +9,13 @@ interface RemoteMediaEntry {
   source: string;
   provider: RemoteMediaProvider;
   track?: MediaStreamTrack | null;
+  incarnationId?: string;
   [key: string]: unknown;
 }
 
 interface RemoteMediaRegistry {
   bind(entry: RemoteMediaEntry, options?: { staged?: boolean }): void;
-  remove(key: string, entry?: unknown): void;
+  remove(key: string, entry?: RemoteMediaEntry): void;
   clear(): void;
   clearProvider(provider: RemoteMediaProvider): void;
   clearReceivingPreference?(key: string): void;
@@ -99,7 +100,7 @@ export class RemoteMediaHandoff {
         );
     }
     for (const provider of providers) {
-      for (const entry of [...this.entries(provider)]) {
+      for (const entry of this.entries(provider)) {
         if (!expected.has(entry.key)) this.remove(entry);
       }
     }
@@ -114,6 +115,7 @@ export class RemoteMediaHandoff {
       ...entry,
       transportKey: entry.key,
       key: remoteMediaFeedKey(entry),
+      incarnationId: entry.incarnationId,
     };
     const tracks = this.provider(normalized.provider);
     const replaced: Array<[string, RemoteMediaEntry]> = [];

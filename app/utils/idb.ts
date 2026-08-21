@@ -1,5 +1,11 @@
 import type { ChatMessage } from "../shared/types/chat-store.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import type { ExternalValue } from "../shared/types/boundary.ts";
 import { isRoomRecord, type RoomRecord } from "../shared/types/rooms-store.ts";
+import { parseExternalValue } from "./external-values.ts";
 
 const HEALTH_EVENT = "dspeak:idb-health";
 const OPEN_TIMEOUT_MS = 5000;
@@ -63,7 +69,7 @@ interface IdbErrorContext {
 
 interface CachedRoomsRecord extends StorageRecord {
   userId: string;
-  rooms: unknown[];
+  rooms: ExternalValue[];
 }
 
 interface CachedMessagesRecord extends StorageRecord {
@@ -74,24 +80,18 @@ interface CachedMessagesRecord extends StorageRecord {
   updatedAt: number;
 }
 
-interface PendingReadsRecord extends StorageRecord {
-  userId: string;
-  messageIds: string[];
-  updatedAt: number;
-}
-
 export interface QueuedMessage extends StorageRecord {
   id: string;
   channelId?: string;
   content?: string;
-  ownerId?: string;
+  ownerId?: string | number;
   pendingId?: string;
   attachments?: unknown[];
   replyTo?: unknown;
 }
 
 interface ServiceWorkerClientLike {
-  postMessage(message: unknown): void;
+  postMessage(message: ExternalValue): void;
 }
 
 interface ServiceWorkerClientsLike {
@@ -114,7 +114,7 @@ export class IdbOperationError extends Error {
   readonly recoverable: boolean;
   readonly canReset: boolean;
 
-  constructor(issue: IdbIssue, cause: unknown) {
+  constructor(issue: IdbIssue, cause: ExternalValue) {
     super(issue.message, { cause });
     this.code = issue.code;
     this.database = issue.database;
@@ -135,17 +135,15 @@ function databaseDefinition(databaseId: DatabaseId): DatabaseDefinition {
   return definition;
 }
 
-function errorName(error: unknown): string {
+function errorName(error: ExternalValue): string {
   if (error instanceof Error) return error.name || "UnknownError";
-  if (error && typeof error === "object" && "name" in error) {
-    const name = error.name;
-    if (typeof name === "string" && name) return name;
-  }
+  if (isExternalRecord(error) && isExternalString(error.name) && error.name)
+    return error.name;
   return "UnknownError";
 }
 
 export function classifyIdbError(
-  error: unknown,
+  error: ExternalValue,
   context: IdbErrorContext = {},
 ): IdbIssue {
   const name = errorName(error);
@@ -233,7 +231,7 @@ export function classifyIdbError(
   return issue;
 }
 
-function storageSnapshot(value: unknown): unknown {
+function storageSnapshot(value: ExternalValue): ExternalValue {
   try {
     const serialized = JSON.stringify(value);
     if (serialized === undefined)
@@ -241,9 +239,9 @@ function storageSnapshot(value: unknown): unknown {
         "Local record is not JSON-compatible",
         "DataCloneError",
       );
-    return JSON.parse(serialized) as unknown;
-  } catch (error: unknown) {
-    if (errorName(error) === "DataCloneError") throw error;
+    return JSON.parse(serialized);
+  } catch (error) {
+    if (errorName(parseExternalValue(error)) === "DataCloneError") throw error;
     throw new DOMException(
       error instanceof Error
         ? error.message
@@ -278,11 +276,16 @@ export function reportIdbHealth(issue: IdbIssue): void {
   if (Date.now() - lastReport < 2000) return;
   recentReports.set(signature, Date.now());
 
-  if (typeof window !== "undefined" && typeof CustomEvent !== "undefined") {
-    window.dispatchEvent(new CustomEvent(HEALTH_EVENT, { detail: report }));
+  const browserWindow = globalThis.window;
+  const customEventConstructor = globalThis.CustomEvent;
+  if (browserWindow && customEventConstructor instanceof Function) {
+    browserWindow.dispatchEvent(
+      new customEventConstructor(HEALTH_EVENT, { detail: report }),
+    );
     return;
   }
 
+  /* SAFETY: Service-worker execution provides globalThis.clients, and this branch runs only after the browser-window branch above. */
   const workerClients = (
     globalThis as typeof globalThis & {
       clients?: ServiceWorkerClientsLike;
@@ -296,7 +299,7 @@ export function reportIdbHealth(issue: IdbIssue): void {
           client.postMessage({ type: "IDB_HEALTH", issue: report });
         }
       })
-      .catch((error: unknown) => {
+      .catch((error) => {
         console.warn(
           "[IndexedDB] Unable to report worker storage health:",
           error,
@@ -461,7 +464,8 @@ async function runTransaction<T>(
       }
       return result;
     } catch (error: unknown) {
-      const issue = classifyIdbError(error, {
+      const parsedError = parseExternalValue(error);
+      const issue = classifyIdbError(parsedError, {
         database: definition.name,
         operation,
         store: storeName,
@@ -472,7 +476,7 @@ async function runTransaction<T>(
         continue;
       }
       reportIdbHealth(issue);
-      throw new IdbOperationError(issue, error);
+      throw new IdbOperationError(issue, parsedError);
     } finally {
       database?.close();
     }
@@ -487,8 +491,8 @@ export function isIdbAvailable() {
 export async function putRecord(
   databaseId: DatabaseId,
   storeName: StoreName,
-  value: unknown,
-): Promise<unknown> {
+  value: ExternalValue,
+): Promise<IDBValidKey> {
   return runTransaction(
     databaseId,
     storeName,
@@ -502,7 +506,7 @@ export async function getRecord(
   databaseId: DatabaseId,
   storeName: StoreName,
   key: IDBValidKey,
-): Promise<unknown> {
+): Promise<ExternalValue> {
   return runTransaction(
     databaseId,
     storeName,
@@ -515,7 +519,7 @@ export async function getRecord(
 export async function getAllRecords(
   databaseId: DatabaseId,
   storeName: StoreName,
-): Promise<unknown[]> {
+): Promise<ExternalValue[]> {
   return runTransaction(
     databaseId,
     storeName,
@@ -529,7 +533,7 @@ export async function deleteRecord(
   databaseId: DatabaseId,
   storeName: StoreName,
   key: IDBValidKey,
-): Promise<unknown> {
+): Promise<undefined> {
   return runTransaction(
     databaseId,
     storeName,
@@ -543,7 +547,7 @@ async function deleteRecordsWhere(
   databaseId: DatabaseId,
   storeName: StoreName,
   operation: string,
-  predicate: (record: unknown) => boolean,
+  predicate: (record: ExternalValue) => boolean,
 ): Promise<void> {
   return runTransaction(
     databaseId,
@@ -573,7 +577,7 @@ async function deleteRecordsWhere(
 
 export async function cacheRooms(
   userId: string | number,
-  rooms: unknown[],
+  rooms: ExternalValue[],
 ): Promise<void> {
   await putRecord("rooms", "roomsCache", { userId, rooms });
 }
@@ -586,31 +590,18 @@ export async function getCachedRooms(
   return record.rooms.filter(isRoomRecord);
 }
 
-function isCachedRoomsRecord(value: unknown): value is CachedRoomsRecord {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    "rooms" in value &&
-    Array.isArray(value.rooms),
-  );
+function isCachedRoomsRecord(value: ExternalValue): value is CachedRoomsRecord {
+  return Boolean(isExternalRecord(value) && Array.isArray(value.rooms));
 }
 
-function isCachedMessagesRecord(value: unknown): value is CachedMessagesRecord {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    "messages" in value &&
-    Array.isArray(value.messages),
-  );
+function isCachedMessagesRecord(
+  value: ExternalValue,
+): value is CachedMessagesRecord {
+  return Boolean(isExternalRecord(value) && Array.isArray(value.messages));
 }
 
-function isQueuedMessage(value: unknown): value is QueuedMessage {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    "id" in value &&
-    typeof value.id === "string",
-  );
+function isQueuedMessage(value: ExternalValue): value is QueuedMessage {
+  return Boolean(isExternalRecord(value) && isExternalString(value.id));
 }
 
 function channelCacheKey(userId: string | number, channelId: string): string {
@@ -658,14 +649,9 @@ export async function getPendingReadIds(
   userId: string | number,
 ): Promise<string[]> {
   const record = await getRecord("chat", "pendingReads", String(userId || ""));
-  if (
-    record &&
-    typeof record === "object" &&
-    "messageIds" in record &&
-    Array.isArray(record.messageIds)
-  )
-    return record.messageIds.filter(
-      (messageId): messageId is string => typeof messageId === "string",
+  if (isExternalRecord(record) && Array.isArray(record.messageIds))
+    return record.messageIds.filter((messageId): messageId is string =>
+      isExternalString(messageId),
     );
   return [];
 }
@@ -704,10 +690,16 @@ export async function purgeUserLocalData(userId: string): Promise<void> {
   ]);
 }
 
-function recordField(record: unknown, field: string): string {
-  if (!record || typeof record !== "object" || !(field in record)) return "";
-  const value = (record as Record<string, unknown>)[field];
+function recordField(record: ExternalValue, field: string): string {
+  if (!isExternalRecord(record) || !(field in record)) return "";
+  const value = Object.getOwnPropertyDescriptor(record, field)?.value;
   return String(value || "");
+}
+
+function databaseIds(): DatabaseId[] {
+  return Object.keys(DATABASES).filter(
+    (databaseId): databaseId is DatabaseId => databaseId in DATABASES,
+  );
 }
 
 function deleteDatabase(databaseId: DatabaseId): Promise<void> {
@@ -738,9 +730,7 @@ function deleteDatabase(databaseId: DatabaseId): Promise<void> {
 }
 
 export async function resetLocalDatabases(): Promise<void> {
-  const results = await Promise.allSettled(
-    (Object.keys(DATABASES) as DatabaseId[]).map(deleteDatabase),
-  );
+  const results = await Promise.allSettled(databaseIds().map(deleteDatabase));
   const failure = results.find((result) => result.status === "rejected");
   if (failure) {
     const issue = classifyIdbError(failure.reason, {
@@ -766,7 +756,7 @@ export async function resetLocalDatabases(): Promise<void> {
 }
 
 export async function probeLocalDatabases(): Promise<boolean> {
-  for (const databaseId of Object.keys(DATABASES) as DatabaseId[]) {
+  for (const databaseId of databaseIds()) {
     const definition = DATABASES[databaseId];
     let database: IDBDatabase | null = null;
     try {

@@ -9,7 +9,6 @@ export function useIdleDetection() {
   const isIdle = computed(() => presenceStore.isIdle);
 
   let idleTimeout: ReturnType<typeof setTimeout> | null = null;
-  let lastActivity = Date.now();
   const events = [
     "mousedown",
     "keydown",
@@ -28,7 +27,6 @@ export function useIdleDetection() {
   };
 
   function resetIdleTimer() {
-    lastActivity = Date.now();
     if (idleTimeout) {
       clearTimeout(idleTimeout);
       idleTimeout = null;

@@ -1,8 +1,10 @@
-import type {
-  MediaControlModerationResponse,
-  MediaControlParticipantsResponse,
-  MediaControlRequestOptions,
-} from "../types/media-control-admin.ts";
+import type { MediaControlRequestOptions } from "../types/media-control-admin.ts";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 function mediaControlUrl(channelId: string, action: string): string | null {
   const base = process.env.CF_MEDIA_CONTROL_URL;
@@ -17,7 +19,7 @@ async function request(
   channelId: string,
   action: string,
   options: MediaControlRequestOptions = {},
-): Promise<unknown> {
+): Promise<ExternalField> {
   const url = mediaControlUrl(channelId, action);
   const token = process.env.CF_MEDIA_CONTROL_ADMIN_TOKEN;
   if (!url || !token) return null;
@@ -38,15 +40,14 @@ export async function isActiveVoiceParticipant(
   channelId: string,
   userId: string,
 ): Promise<boolean> {
-  const result = (await request(
-    channelId,
-    "participants",
-  )) as MediaControlParticipantsResponse | null;
-  return Boolean(
-    result?.participants?.some(
-      (participant) => String(participant.userId) === String(userId),
-    ),
-  );
+  const result = parseExternalRecord(await request(channelId, "participants"));
+  const participants = Array.isArray(result?.participants)
+    ? result.participants
+    : [];
+  return participants.some((participant) => {
+    const record = parseExternalRecord(participant);
+    return parseExternalString(record?.userId) === userId;
+  });
 }
 
 export async function moderateVoiceParticipant(
@@ -54,11 +55,13 @@ export async function moderateVoiceParticipant(
   userId: string,
   targetChannelId: string | null = null,
 ): Promise<number> {
-  const result = (await request(channelId, "moderate", {
-    method: "POST",
-    body: JSON.stringify({ userId, targetChannelId }),
-  })) as MediaControlModerationResponse | null;
-  return Number(result?.affected || 0);
+  const result = parseExternalRecord(
+    await request(channelId, "moderate", {
+      method: "POST",
+      body: JSON.stringify({ userId, targetChannelId }),
+    }),
+  );
+  return parseExternalNumber(result?.affected) || 0;
 }
 
 export function disconnectVoiceParticipant(
@@ -68,7 +71,9 @@ export function disconnectVoiceParticipant(
   return moderateVoiceParticipant(channelId, userId, null);
 }
 
-export function updateActiveUserProfile(profile: unknown): Promise<boolean> {
+export function updateActiveUserProfile(
+  profile: ExternalField,
+): Promise<boolean> {
   void profile;
   return Promise.resolve(false);
 }

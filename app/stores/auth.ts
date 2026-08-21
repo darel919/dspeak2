@@ -25,11 +25,15 @@ import type {
   DesktopAuthError,
 } from "../shared/types/auth.ts";
 import { isAuthSessionRecord } from "../shared/types/auth.ts";
+import { nativeHttpFetch, extractProvenance } from "~/shared/desktop-http";
 import {
-  nativeHttpFetch,
-  extractProvenance,
-  type DesktopHttpProvenance,
-} from "~/shared/desktop-http";
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import {
+  parseThrownError,
+  type ParsedExternalError,
+} from "../utils/external-values.ts";
 
 function validateDesktopApiConfig(
   config: ReturnType<typeof useRuntimeConfig>,
@@ -74,10 +78,11 @@ function validateDesktopApiConfig(
 }
 
 function clientFingerprint(config: ReturnType<typeof useRuntimeConfig>) {
-  const clientBuildCommit =
-    typeof config.public?.appBuild?.shortCommit === "string"
-      ? config.public.appBuild.shortCommit
-      : "";
+  const clientBuildCommit = isExternalString(
+    config.public?.appBuild?.shortCommit,
+  )
+    ? config.public.appBuild.shortCommit
+    : "";
   const clientProjectRef = supabaseProjectRef(
     String(config.public?.supabaseUrl || ""),
   );
@@ -105,7 +110,7 @@ export const useAuthStore = defineStore("auths", () => {
   let supabaseAuthSubscription: Subscription | null = null;
   let desktopCallbackPromise: Promise<boolean> | null = null;
   let desktopCallbackCode = "";
-  let desktopCallbackPromiseError: unknown = null;
+  let desktopCallbackPromiseError: ParsedExternalError | null = null;
   const desktopOAuth = createDesktopOAuthStateStore();
   let desktopOAuthCallbackReceived = false;
   let desktopOAuthSessionExchanged = false;
@@ -126,13 +131,19 @@ export const useAuthStore = defineStore("auths", () => {
     const result = client.auth.onAuthStateChange((event, session) => {
       if (!session?.access_token) return;
       if (event !== "TOKEN_REFRESHED") return;
-      fetch(`${config.public.apiPath}/auth/${sessionBridgePath()}`, {
-        method: "POST",
-        credentials: runtimeStore.isTauri ? "omit" : "include",
-        headers: deviceHeaders({
-          Authorization: `Bearer ${session.access_token}`,
-        }),
-      }).catch(() => {});
+      const sessionFetch = runtimeStore.isTauri
+        ? nativeHttpFetch
+        : globalThis.fetch;
+      void sessionFetch(
+        `${config.public.apiPath}/auth/${sessionBridgePath()}`,
+        {
+          method: "POST",
+          credentials: runtimeStore.isTauri ? "omit" : "include",
+          headers: deviceHeaders({
+            Authorization: `Bearer ${session.access_token}`,
+          }),
+        },
+      ).catch(() => {});
     });
     supabaseAuthSubscription = result.data.subscription;
   }
@@ -330,7 +341,7 @@ export const useAuthStore = defineStore("auths", () => {
     await captureSupabaseSession().catch(() => null);
     try {
       validateDesktopApiConfig(config, runtimeStore);
-      const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
+      const { clientBuildCommit } = clientFingerprint(config);
       const supabaseClient = getSupabaseClient();
       bridgeSupabaseSession(supabaseClient);
       const sessionResult = await supabaseClient?.auth.getSession();
@@ -367,7 +378,9 @@ export const useAuthStore = defineStore("auths", () => {
         return false;
       }
       if (!response.ok) return false;
-      setUser((await response.json()) as AuthSessionRecord);
+      const session = await response.json();
+      if (!isAuthSessionRecord(session)) return false;
+      setUser(session);
       return true;
     } catch {
       return false;
@@ -398,7 +411,7 @@ export const useAuthStore = defineStore("auths", () => {
     await captureSupabaseSession().catch(() => null);
     try {
       validateDesktopApiConfig(config, runtimeStore);
-      const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
+      const { clientBuildCommit } = clientFingerprint(config);
       const supabaseClient = getSupabaseClient();
       bridgeSupabaseSession(supabaseClient);
       const sessionResult = await supabaseClient?.auth.getSession();
@@ -446,7 +459,7 @@ export const useAuthStore = defineStore("auths", () => {
         };
       }
       try {
-        const session = (await response.json()) as AuthSessionRecord;
+        const session = await response.json();
         if (!isAuthSessionRecord(session)) {
           return { ok: false, reason: "INVALID_PAYLOAD" };
         }
@@ -461,18 +474,14 @@ export const useAuthStore = defineStore("auths", () => {
   }
 
   async function completeWebSignIn(code: string) {
-    const fetchUnknown = $fetch as unknown as (
-      url: string,
-      options: Record<string, unknown>,
-    ) => Promise<unknown>;
-    const tokens = (await fetchUnknown(
+    const tokens = await $fetch<AuthTokenResponse>(
       `${config.public.apiPath}/auth/callback-session`,
       {
         method: "POST",
         credentials: "include",
         body: { code },
       },
-    )) as AuthTokenResponse;
+    );
     const { getSupabaseClient } = await import("~/utils/supabase-client");
     const client = getSupabaseClient();
     if (!client) throw new Error("Supabase client is not configured");
@@ -593,6 +602,15 @@ export const useAuthStore = defineStore("auths", () => {
           clientProjectRef,
           requestId,
           transport: runtimeStore.isTauri ? "tauri-http" : "webview-fetch",
+          requestUrl: diagnostic.requestUrl,
+          responseUrl: diagnostic.responseUrl,
+          redirected: diagnostic.redirected,
+          statusText: diagnostic.statusText,
+          retryAfter: diagnostic.retryAfter,
+          serverHeader: diagnostic.serverHeader,
+          viaHeader: diagnostic.viaHeader,
+          vercelRequestId: diagnostic.vercelRequestId,
+          cloudflareRay: diagnostic.cloudflareRay,
         },
       );
     }
@@ -731,10 +749,9 @@ export const useAuthStore = defineStore("auths", () => {
         clearDesktopOAuthAttempt();
         console.error("[DesktopAuth] DESKTOP_OAUTH_CODE_EXCHANGE_FAILED", {
           name: exchangeError instanceof Error ? exchangeError.name : "unknown",
-          code:
-            exchangeError && typeof exchangeError === "object"
-              ? String((exchangeError as { code?: unknown }).code || "")
-              : "",
+          code: isExternalRecord(exchangeError)
+            ? String(exchangeError.code || "")
+            : "",
           message:
             exchangeError instanceof Error
               ? exchangeError.message
@@ -767,13 +784,9 @@ export const useAuthStore = defineStore("auths", () => {
       desktopOAuthSessionExchanged = true;
       desktopOAuth.clear();
       console.info("[DesktopAuth] DESKTOP_OAUTH_CODE_EXCHANGE_SUCCEEDED");
-      try {
-        const completed = await bridgeDesktopSession(data.session.access_token);
-        console.info("[DesktopAuth] DESKTOP_SIGN_IN_COMPLETE");
-        return completed;
-      } catch (error) {
-        throw error;
-      }
+      const completed = await bridgeDesktopSession(data.session.access_token);
+      console.info("[DesktopAuth] DESKTOP_SIGN_IN_COMPLETE");
+      return completed;
     })();
     desktopCallbackPromise = request;
     request.then(
@@ -785,7 +798,9 @@ export const useAuthStore = defineStore("auths", () => {
       },
       (error) => {
         if (desktopCallbackPromise !== request) return;
-        desktopCallbackPromiseError = error;
+        desktopCallbackPromiseError = isDesktopAuthError(error)
+          ? error
+          : parseThrownError(error);
         desktopCallbackPromise = null;
         desktopCallbackCode = "";
       },
@@ -796,14 +811,15 @@ export const useAuthStore = defineStore("auths", () => {
   async function completePendingDesktopSignIn() {
     if (!runtimeStore.isTauri) return false;
     const { invoke } = await import("@tauri-apps/api/core");
-    const pending = (await invoke("get_pending_oauth_callback")) as {
-      code?: string;
-      state?: string;
-      error?: string;
-      error_description?: string;
-    } | null;
-    if (!pending) return false;
-    if (pending.error) {
+    const pendingValue = await invoke("get_pending_oauth_callback");
+    if (!isExternalRecord(pendingValue)) return false;
+    const pendingCode = isExternalString(pendingValue.code)
+      ? pendingValue.code
+      : null;
+    const pendingState = isExternalString(pendingValue.state)
+      ? pendingValue.state
+      : "";
+    if (isExternalString(pendingValue.error) && pendingValue.error) {
       clearDesktopOAuthAttempt();
       throw withDesktopDiagnostics(
         config,
@@ -812,8 +828,8 @@ export const useAuthStore = defineStore("auths", () => {
         { stage: "oauth-callback" },
       );
     }
-    if (!pending.code) return false;
-    return completeDesktopSignIn(pending.code, pending.state || "");
+    if (!pendingCode) return false;
+    return completeDesktopSignIn(pendingCode, pendingState);
   }
 
   async function ensureSession() {
@@ -833,10 +849,8 @@ export const useAuthStore = defineStore("auths", () => {
   function storedUserId(): string {
     if (!import.meta.client) return "";
     try {
-      const metadata = JSON.parse(
-        localStorage.getItem("userData") || "null",
-      ) as AuthStorageValue | null;
-      return String(metadata?.id || "");
+      const metadata = JSON.parse(localStorage.getItem("userData") || "null");
+      return isExternalRecord(metadata) ? String(metadata.id || "") : "";
     } catch {
       return "";
     }
@@ -927,7 +941,7 @@ export const useAuthStore = defineStore("auths", () => {
   function updateUserData(update: AuthStorageValue | null | undefined) {
     if (!user.value?.user || !update) return;
     const userMetadata = {
-      ...(user.value.user.user_metadata || {}),
+      ...user.value.user.user_metadata,
       ...update,
     };
     user.value = {

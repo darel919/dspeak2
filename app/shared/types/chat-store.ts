@@ -1,6 +1,11 @@
+import type { ExternalValue } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { RealtimeChannelLike } from "../realtime-channel.ts";
 import type { ChatMessageInput } from "./composables.ts";
+import type { ReaderValue } from "./shared-utilities.ts";
 
 export interface ChatSender {
   id: string;
@@ -16,7 +21,7 @@ export interface ChatMessage extends Omit<ChatMessageInput, "sender"> {
   sender?: ChatSender | null;
   created?: string | number | Date;
   updated?: string | number | Date;
-  read_by?: string[];
+  read_by?: ReaderValue[];
   client_id?: string;
   attachments?: unknown[];
   reply_to?: unknown;
@@ -67,46 +72,113 @@ export interface ChatDependencies {
   useRoomsStore: typeof import("../../stores/rooms.ts").useRoomsStore;
   useChannelsStore: typeof import("../../stores/channels.ts").useChannelsStore;
   useNotificationsStore: typeof import("../../stores/notifications.ts").useNotificationsStore;
-  cacheChannelMessages: (...args: unknown[]) => Promise<unknown>;
-  dequeueMessage: (...args: unknown[]) => Promise<unknown>;
-  enqueueMessage: (...args: unknown[]) => Promise<unknown>;
-  getCachedChannelMessages: (
-    ...args: unknown[]
-  ) => Promise<{ messages?: ChatMessage[] } | null>;
-  getPendingReadIds: (...args: unknown[]) => Promise<string[]>;
-  IdbOperationError: new (...args: never[]) => Error;
-  savePendingReadIds: (...args: unknown[]) => Promise<unknown>;
-  addReader: (...args: unknown[]) => string[];
-  hasReader: (...args: unknown[]) => boolean;
-  mergeReaders: (...args: unknown[]) => string[];
-  chatApiErrorMessage: (...args: unknown[]) => string;
-  mergeServerMessagesWithPending: (
-    serverMessages: ChatMessage[],
-    pendingMessages: ChatMessage[],
-  ) => ChatMessage[];
-  pendingMessageClientId: (message: ChatMessage) => string | null;
-  removeMessageAliases: (
-    messages: ChatMessage[],
-    message: ChatMessage | string,
-    clientMessageId?: string,
-  ) => ChatMessage[];
-  reconcileIncomingMessage: (
-    messages: ChatMessage[],
-    message: ChatMessage,
-  ) => { inserted: boolean; message?: ChatMessage };
-  reconcileSentMessage: (
-    messages: ChatMessage[],
-    pendingId: string,
-    message: ChatMessage,
-  ) => unknown;
-  isSlowModeCooldownActive: (...args: unknown[]) => boolean;
-  slowModeRemainingMs: (...args: unknown[]) => number;
-  debugLog: (...args: unknown[]) => void;
+  cacheChannelMessages: typeof import("../../utils/idb.ts").cacheChannelMessages;
+  dequeueMessage: typeof import("../../utils/idb.ts").dequeueMessage;
+  enqueueMessage: typeof import("../../utils/idb.ts").enqueueMessage;
+  getCachedChannelMessages: typeof import("../../utils/idb.ts").getCachedChannelMessages;
+  getPendingReadIds: typeof import("../../utils/idb.ts").getPendingReadIds;
+  IdbOperationError: typeof import("../../utils/idb.ts").IdbOperationError;
+  savePendingReadIds: typeof import("../../utils/idb.ts").savePendingReadIds;
+  addReader: typeof import("../../shared/read-receipts.ts").addReader;
+  hasReader: typeof import("../../shared/read-receipts.ts").hasReader;
+  mergeReaders: typeof import("../../shared/read-receipts.ts").mergeReaders;
+  chatApiErrorMessage: typeof import("../../shared/chat-messages.ts").chatApiErrorMessage;
+  mergeServerMessagesWithPending: typeof import("../../shared/chat-messages.ts").mergeServerMessagesWithPending;
+  pendingMessageClientId: typeof import("../../shared/chat-messages.ts").pendingMessageClientId;
+  removeMessageAliases: typeof import("../../shared/chat-messages.ts").removeMessageAliases;
+  reconcileIncomingMessage: typeof import("../../shared/chat-messages.ts").reconcileIncomingMessage;
+  reconcileSentMessage: typeof import("../../shared/chat-messages.ts").reconcileSentMessage;
+  isSlowModeCooldownActive: typeof import("../../../shared/channel-policy.ts").isSlowModeCooldownActive;
+  slowModeRemainingMs: typeof import("../../../shared/channel-policy.ts").slowModeRemainingMs;
+  debugLog: typeof import("../../shared/debug.ts").debugLog;
   hasTauriRuntimeMarker: () => boolean;
   getSupabaseClient: typeof import("../../utils/supabase-client.ts").getSupabaseClient;
 }
 
-export interface ChatStoreContext {
+export interface ChatActionSet {
+  boundedMessages: (items: ChatMessage[], limit: number) => ChatMessage[];
+  setChannelMessages: (
+    channelId: string | null,
+    items: ChatMessage[],
+    active?: boolean,
+  ) => ChatMessage[];
+  isChannelPrepared: (channelId: string) => boolean;
+  prepareChannel: (channelId: string) => Promise<boolean>;
+  prepareChannels: (
+    channelIds: string[],
+    concurrency?: number,
+  ) => Promise<void>;
+  fetchMessages: (channelId: string, generation?: number) => Promise<void>;
+  handleBackgroundSyncSuccess: (pendingId: string) => void;
+  handleBackgroundSyncFailure: (pendingId: string, status: number) => void;
+  handleServiceWorkerMessage: (event: {
+    data: { type?: string; pendingId?: string; status?: number };
+  }) => void;
+  handleServiceWorkerControllerChange: () => void;
+  closeActiveTransport: () => void;
+  joinChannelMembership: (channelId: string) => void;
+  registerPageHideLeave: () => void;
+  leaveChannelMembership: (channelId: string | null) => void;
+  handleBrowserOffline: () => void;
+  handleBrowserOnline: () => void;
+  requestBackgroundSync: () => Promise<void>;
+  triggerManualSync: () => void;
+  scheduleReconnect: () => void;
+  connectToChannel: (
+    channelId: string,
+    channelName?: string | null,
+    roomId?: string | null,
+    isReconnect?: boolean,
+  ) => Promise<void>;
+  disconnectFromChannel: (
+    intentional?: boolean,
+    preserveMessages?: boolean,
+    invalidateGeneration?: boolean,
+    expectedChannelId?: string | null,
+  ) => boolean | undefined;
+  handleWebSocketMessage: (event: { data: ExternalValue }) => Promise<void>;
+  handleParticipantChange: () => Promise<void>;
+  sendMessage: (
+    channelId: string,
+    content: string,
+    options?: ChatSendOptions,
+  ) => Promise<MediaCommandResult>;
+  updateMessageReadBy: (
+    messageId: string,
+    readBy: string[] | undefined,
+  ) => void;
+  updateMessage: (message: ChatMessage) => void;
+  chatResponseError: (response: Response) => Promise<ChatDeliveryError>;
+  editMessage: (messageId: string, content: string) => Promise<ChatMessage>;
+  deleteMessage: (messageId: string) => Promise<void>;
+  fetchMessageHistory: (messageId: string) => Promise<MediaCommandResult>;
+  removeMessage: (messageId: string, clientId?: string) => void;
+  updateTypingStatus: (userId: string, isTyping: boolean) => void;
+  markMessageAsRead: (messageId: string) => void;
+  hydratePendingReadIds: (userId: string) => Promise<void>;
+  persistPendingReadIds: (userId: string) => Promise<void>;
+  scheduleReadFlush: () => void;
+  flushPendingReads: () => Promise<void>;
+  sendTypingIndicator: (isTyping: boolean) => void;
+  clearChat: () => Promise<void>;
+  handleNewMessageNotification: (message: ChatMessage) => Promise<void>;
+  fetchBookmarks: () => Promise<MediaCommandResult>;
+  fetchPinned: (channelId: string) => Promise<MediaCommandResult>;
+  searchMessages: (
+    channelId: string,
+    query: string,
+    filters?: {
+      author?: string;
+      has?: string;
+      before?: string;
+      after?: string;
+    },
+  ) => Promise<MediaCommandResult>;
+  undoMessage: (messageId: string) => Promise<MediaCommandResult>;
+  legacyReadStorageKey: (userId: string) => string;
+}
+
+export interface ChatStoreContext extends ChatActionSet {
   messages: Ref<ChatMessage[]>;
   loading: Ref<boolean>;
   error: Ref<string | null>;
@@ -133,66 +205,4 @@ export interface ChatStoreContext {
   CHANNEL_MEMORY_LIMIT: number;
   runtime: ChatRuntime;
   dependencies: ChatDependencies;
-  boundedMessages: (items: ChatMessage[], limit: number) => ChatMessage[];
-  setChannelMessages: (
-    channelId: string | null,
-    items: ChatMessage[],
-    active?: boolean,
-  ) => ChatMessage[];
-  isChannelPrepared: (channelId: string) => boolean;
-  prepareChannel: (channelId: string) => Promise<boolean>;
-  prepareChannels: (
-    channelIds: string[],
-    concurrency?: number,
-  ) => Promise<unknown>;
-  legacyReadStorageKey: (userId: string) => string;
-  chatResponseError: (response: Response) => Promise<ChatDeliveryError>;
-  closeActiveTransport: () => void;
-  connectToChannel: (
-    channelId: string,
-    channelName?: string | null,
-    roomId?: string | null,
-    isReconnect?: boolean,
-  ) => Promise<unknown>;
-  disconnectFromChannel: (...args: unknown[]) => unknown;
-  fetchMessages: (channelId: string, generation?: number) => Promise<unknown>;
-  sendMessage: (
-    channelId: string,
-    content: string,
-    options?: ChatSendOptions,
-  ) => Promise<unknown>;
-  editMessage: (...args: unknown[]) => Promise<unknown>;
-  deleteMessage: (...args: unknown[]) => Promise<unknown>;
-  fetchMessageHistory: (...args: unknown[]) => Promise<unknown>;
-  markMessageAsRead: (...args: unknown[]) => Promise<unknown>;
-  sendTypingIndicator: (...args: unknown[]) => Promise<unknown>;
-  fetchBookmarks: (...args: unknown[]) => Promise<unknown>;
-  fetchPinned: (...args: unknown[]) => Promise<unknown>;
-  searchMessages: (...args: unknown[]) => Promise<unknown>;
-  undoMessage: (...args: unknown[]) => Promise<unknown>;
-  clearChat: (...args: unknown[]) => unknown;
-  handleBackgroundSyncSuccess: (...args: unknown[]) => unknown;
-  handleBackgroundSyncFailure: (...args: unknown[]) => unknown;
-  handleBrowserOffline: () => void;
-  handleBrowserOnline: () => void;
-  handleWebSocketMessage: (event: { data: unknown }) => Promise<void>;
-  handleServiceWorkerMessage: (event: {
-    data: { type?: string; pendingId?: string; status?: number };
-  }) => void;
-  handleServiceWorkerControllerChange: () => void;
-  handleParticipantChange: () => Promise<void>;
-  handleNewMessageNotification: (message: ChatMessage) => void;
-  updateMessage: (message: ChatMessage) => void;
-  removeMessage: (messageId: string, clientMessageId?: string) => void;
-  updateTypingStatus: (userId: string, isTyping: boolean) => void;
-  hydratePendingReadIds: (userId: string) => Promise<void>;
-  persistPendingReadIds: (userId: string) => Promise<void>;
-  flushPendingReads: () => Promise<unknown>;
-  scheduleReadFlush: () => void;
-  requestBackgroundSync: () => Promise<void>;
-  triggerManualSync: () => void;
-  joinChannelMembership: (channelId: string) => void;
-  leaveChannelMembership: (channelId: string | null) => void;
-  registerPageHideLeave: () => void;
-  scheduleReconnect: () => void;
 }

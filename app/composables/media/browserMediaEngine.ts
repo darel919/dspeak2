@@ -19,6 +19,8 @@ import type {
   MediaStats,
 } from "../../shared/media/types.ts";
 import { probeBrowserVideoCodecCapabilities } from "../../shared/browser-video-codec-capabilities.ts";
+import { isExternalRecord } from "../../shared/types/boundary.ts";
+import type { MediaCommandResult } from "../../shared/types/boundary.ts";
 import type { ParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
 
 const BROWSER_CAPABILITIES = Object.freeze({
@@ -77,7 +79,11 @@ export class BrowserMediaEngine extends MediaEngine {
 
   override async joinSession(input: BrowserJoinInput): Promise<void> {
     await this.initialize();
-    await this.session.connect(input.channelId || input);
+    const channelId = input.channelId || "";
+    await this.session.connect(
+      channelId,
+      input.roomId ? { roomId: input.roomId } : undefined,
+    );
   }
 
   override async leaveSession(): Promise<void> {
@@ -114,7 +120,7 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   override async handleSignal(message: BrowserSignalMessage): Promise<void> {
-    if (typeof this.session.handleSignal === "function") {
+    if (this.session.handleSignal instanceof Function) {
       return this.session.handleSignal(message);
     }
   }
@@ -131,15 +137,13 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   override async getStats(): Promise<MediaStats> {
-    const snapshot =
-      (await this.session.getWebRTCStatsSnapshot()) as MediaStats & {
-        timestamp?: number;
-      };
+    const snapshot = await this.session.getWebRTCStatsSnapshot();
+    const topologyState = unref(this.session.topologyState);
     const report = createMediaQoeReport({
       provider: unref(this.session.activeProvider) || "sfu",
-      epoch:
-        (unref(this.session.topologyState) as { epoch?: number } | undefined)
-          ?.epoch || 0,
+      epoch: isExternalRecord(topologyState)
+        ? Number(topologyState.epoch) || 0
+        : 0,
       paths: mediaQoePathsFromStats(snapshot),
       sampledAt: snapshot.timestamp,
     });
@@ -181,8 +185,13 @@ export class BrowserMediaEngine extends MediaEngine {
   }
 
   override getState(): MediaEngineState {
-    return (unref(this.session.mediaConnectionState) ||
-      "disconnected") as MediaEngineState;
+    const state = unref(this.session.mediaConnectionState);
+    return state === "connecting" ||
+      state === "connected" ||
+      state === "reconnecting" ||
+      state === "failed"
+      ? state
+      : "disconnected";
   }
 
   override isScreenSharing(): boolean {
@@ -331,9 +340,9 @@ export class BrowserMediaEngine extends MediaEngine {
 
   connect(
     channelId: string,
-    options?: BrowserJoinInput,
+    options?: { roomId?: string },
   ): ReturnType<BrowserMediaEngineSession["connect"]>;
-  connect(channelId: string, options?: BrowserJoinInput) {
+  connect(channelId: string, options?: { roomId?: string }) {
     return this.session.connect(channelId, options);
   }
 
@@ -349,29 +358,31 @@ export class BrowserMediaEngine extends MediaEngine {
     return this.session.restartAudioProduction();
   }
 
-  async startAudioProduction(): Promise<unknown> {
+  async startAudioProduction(): Promise<MediaCommandResult> {
     const result = await this.session.startAudioProduction();
     this.microphoneEnabled = true;
     return result;
   }
 
-  async stopAudioProduction(): Promise<unknown> {
+  async stopAudioProduction(): Promise<MediaCommandResult> {
     const result = await this.session.stopAudioProduction();
     this.microphoneEnabled = false;
     return result;
   }
 
   async startVideoProduction(
-    source: string,
+    source: "camera" | "screen",
     options: BrowserScreenShareOptions = {},
-  ): Promise<unknown> {
+  ): Promise<MediaCommandResult> {
     const result = await this.session.startVideoProduction(source, options);
     if (source === "camera") this.cameraEnabled = true;
     if (source === "screen") this.screenSharing = true;
     return result;
   }
 
-  async stopVideoProduction(source: string): Promise<unknown> {
+  async stopVideoProduction(
+    source: "camera" | "screen",
+  ): Promise<MediaCommandResult> {
     const result = await this.session.stopVideoProduction(source);
     if (source === "camera") this.cameraEnabled = false;
     if (source === "screen") this.screenSharing = false;

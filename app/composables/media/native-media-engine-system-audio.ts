@@ -10,18 +10,20 @@ import {
   nativeOnlyError,
 } from "./native-media-engine-common.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
-import type {
-  NativeCaptureRequest,
-  NativeErrorLike,
-} from "../../shared/types/native-media.ts";
+import type { MediaCaptureStartOptions } from "../../shared/types/media-capture.ts";
+import type { MediaCommandResult } from "../../shared/types/boundary.ts";
+import {
+  parseExternalNumber,
+  parseExternalValue,
+  parseThrownError,
+  type ParsedExternalError,
+} from "../../utils/external-values.ts";
 
 export function startSystemAudioProduction(
   engine: NativeMediaEngine,
-  args: unknown[] = [],
+  options: MediaCaptureStartOptions = {},
 ) {
-  const options = (args[0] as NativeCaptureRequest | undefined) || {};
-  const selection =
-    (options.captureSelection as NativeCaptureRequest | undefined) || null;
+  const selection = options.captureSelection || null;
   if (selection)
     assertDesktopCaptureMode(selection, ["audio", "both"], "system-audio");
   if (engine.activeScreenCapture?.mode === "both")
@@ -37,15 +39,14 @@ export function startSystemAudioProduction(
   if (options.explicitBrowserFallback && !selection) {
     if (engine.nativeOnly)
       throw nativeOnlyError("browser system audio fallback");
-    return engine.browserEngine.startSystemAudioProduction(...args);
+    return engine.browserEngine.startSystemAudioProduction(options);
   }
   const request = selection
     ? desktopCaptureRequest(selection, {
         operation: "system-audio",
         roomBitrateBps:
-          typeof options.roomBitrateBps === "number"
-            ? options.roomBitrateBps
-            : undefined,
+          parseExternalNumber(parseExternalValue(options.roomBitrateBps)) ??
+          undefined,
       })
     : options;
   const nativeCaptureAttemptable =
@@ -65,7 +66,7 @@ export function startSystemAudioProduction(
           },
         ),
       );
-    return engine.browserEngine.startSystemAudioProduction(...args);
+    return engine.browserEngine.startSystemAudioProduction(options);
   }
   const replaceActiveCapture = engine.activeSystemAudioCapture
     ? engine.stopSystemAudioProduction()
@@ -73,12 +74,10 @@ export function startSystemAudioProduction(
   let nativeCaptureStarted = false;
   return replaceActiveCapture
     .then(() => engine._invoke("media_start_system_audio", { request }))
-    .then(async (result: unknown) => {
+    .then(async (result: MediaCommandResult) => {
       nativeCaptureStarted = true;
       engine.activeSystemAudioCapture = selection || {};
-      const sourceCaptureSelection =
-        (request.captureSelection as NativeCaptureRequest | null | undefined) ||
-        selection;
+      const sourceCaptureSelection = request.captureSelection || selection;
       const entry = {
         source: "screen-audio",
         ownerSource: "system-audio",
@@ -95,7 +94,7 @@ export function startSystemAudioProduction(
       );
       return producer || result;
     })
-    .catch(async (error: unknown) => {
+    .catch(async (error) => {
       if (nativeCaptureStarted || engine.activeSystemAudioCapture !== null)
         await engine
           ._invoke("media_stop_system_audio", {
@@ -105,7 +104,7 @@ export function startSystemAudioProduction(
       await engine._removeNativeSource("screen-audio").catch(() => {});
       engine.activeSystemAudioCapture = null;
       engine.flags.nativeScreenAudio = false;
-      const failure = nativeCaptureFailure(error, {
+      const failure = nativeCaptureFailure(parseThrownError(error), {
         operation: "system-audio",
         selection,
       });
@@ -116,38 +115,35 @@ export function startSystemAudioProduction(
       });
       if (engine.nativeOnly) throw failure;
       if (selection && !options.explicitBrowserFallback) throw failure;
-      return engine.browserEngine.startSystemAudioProduction(...args);
+      return engine.browserEngine.startSystemAudioProduction(options);
     });
 }
 
-export function stopSystemAudioProduction(
-  engine: NativeMediaEngine,
-  args: unknown[] = [],
-) {
+export function stopSystemAudioProduction(engine: NativeMediaEngine) {
   const nativeCaptureActive =
     engine._usesNativeCapture("nativeScreenAudio") ||
     engine.activeSystemAudioCapture !== null;
   if (nativeCaptureActive) {
     return (async () => {
-      let failure = null;
+      let failure: ParsedExternalError | null = null;
       try {
         await engine._removeNativeSource("screen-audio");
       } catch (error) {
-        failure = error;
+        failure = parseThrownError(error);
       }
       try {
         await engine._invoke("media_stop_system_audio", {
           source: engine.activeSystemAudioCapture?.source || null,
         });
       } catch (error) {
-        failure ||= error;
+        failure ||= parseThrownError(error);
       } finally {
         engine.activeSystemAudioCapture = null;
       }
       if (!failure) return;
       if (engine.nativeOnly) throw failure;
       await Promise.resolve(
-        engine.browserEngine.stopSystemAudioProduction(...args),
+        engine.browserEngine.stopSystemAudioProduction(),
       ).finally(() =>
         engine._emit("error", {
           source: "native",
@@ -160,5 +156,5 @@ export function stopSystemAudioProduction(
     })();
   }
   if (engine.nativeOnly) throw nativeOnlyError("system audio production stop");
-  return engine.browserEngine.stopSystemAudioProduction(...args);
+  return engine.browserEngine.stopSystemAudioProduction();
 }

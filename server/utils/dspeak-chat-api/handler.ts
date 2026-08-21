@@ -25,6 +25,12 @@ import type {
   ChatRouteDependencies,
 } from "../../types/chat-api.ts";
 import type { DSpeakProfileInput } from "../../types/dspeak-api.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+  type ExternalRecord,
+} from "../../../shared/types/external.ts";
 
 function createChatApiHandler(dependencies: ChatApiDependencies) {
   const {
@@ -148,11 +154,9 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
       : { room: roomId, mode: "all", push: null, sound: null };
   }
 
-  function parseNotificationData(value: unknown): Record<string, unknown> {
-    if (!value) return {};
+  function parseNotificationData(value: ExternalField): ExternalRecord {
     try {
-      const parsed = JSON.parse(String(value));
-      return parsed && typeof parsed === "object" ? parsed : {};
+      return parseExternalRecord(JSON.parse(String(value))) ?? {};
     } catch {
       return {};
     }
@@ -178,7 +182,7 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
   }
 
   async function validateMessageAttachments(
-    submittedAttachments: unknown,
+    submittedAttachments: ExternalField,
     channelId: string,
     userId: string,
   ) {
@@ -191,14 +195,26 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
     const attachments: ChatAttachmentRecord[] = [];
     const seen = new Set<string>();
     for (const submitted of submittedAttachments) {
-      const id = String(submitted?.id || "");
+      const submittedRecord = parseExternalRecord(submitted);
+      const id = parseExternalString(submittedRecord?.id) || "";
       if (!id || seen.has(id))
         throw createError({
           statusCode: 400,
           statusMessage: "Invalid image attachment",
         });
       seen.add(id);
-      const cached = getCachedFile(id) as ChatAttachmentFile | null;
+      const cachedValue = getCachedFile(id);
+      const cached: ChatAttachmentFile | null = cachedValue
+        ? {
+            id: cachedValue.id,
+            uploaderId: cachedValue.uploader,
+            channelId: cachedValue.room_channel,
+            messageId: null,
+            fileName: cachedValue.name,
+            mimeType: cachedValue.mime_type,
+            size: cachedValue.size,
+          }
+        : null;
       const record = cached
         ? cached
         : await db
@@ -206,7 +222,7 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
             .from(chatFiles)
             .where(eq(chatFiles.id, id))
             .limit(1)
-            .then((rows) => rows[0] as ChatAttachmentFile | undefined);
+            .then((rows) => rows[0]);
       if (!record)
         throw createError({
           statusCode: 404,
@@ -427,7 +443,7 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
       if (event.method === "GET")
         return presentRoomNotificationPreferences(existing[0], roomId);
       if (event.method === "PUT") {
-        const requestedMode = typeof body.mode === "string" ? body.mode : "all";
+        const requestedMode = parseExternalString(body.mode) || "all";
         const mode = ["all", "mentions", "muted"].includes(requestedMode)
           ? requestedMode
           : "all";
@@ -472,7 +488,7 @@ function createChatApiHandler(dependencies: ChatApiDependencies) {
     presentMessages,
     validateReplyTarget,
     validateMessageAttachments,
-  } as unknown as ChatRouteDependencies;
+  };
   const handleMessageRoutes = createChatMessagesHandler(routeDependencies);
   const handleFileRoutes = createChatFilesHandler(routeDependencies);
   const handleInteractionRoutes =

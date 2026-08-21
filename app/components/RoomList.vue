@@ -346,7 +346,7 @@ async function handleCreateSubmit() {
       }
     }
   } catch (err) {
-    const msg = typeof err?.message === "string" ? err.message : "";
+    const msg = err instanceof Error ? err.message : "";
     if (msg.includes("409") && msg.includes("already exists")) {
       createError.value = "Pick another name, this name is already taken";
     } else {

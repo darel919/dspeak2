@@ -7,8 +7,6 @@ import {
   validateConnectionMode,
   normalizeMediaPolicy,
   validateMediaPolicy,
-  MEDIA_POLICY_LIMITS,
-  STANDARD_MICROPHONE_MAX_KBPS,
 } from "../shared/media-policy.ts";
 
 describe("media-policy connection mode", () => {

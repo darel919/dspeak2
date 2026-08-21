@@ -173,6 +173,7 @@ import { useRuntimeConfig } from "#app";
 import { stripMarkdown } from "../../shared/markdown-parser";
 import { profileAssetUrl } from "../../shared/profile-assets";
 import MessageActions from "./MessageActions.vue";
+import { isExternalString } from "../../shared/types/boundary.ts";
 
 const props = defineProps({
   visible: {
@@ -231,10 +232,9 @@ const threadReplies = computed(() => {
   if (!parentId) return [];
   const merged = new Map(replies.value.map((reply) => [reply.id, reply]));
   for (const message of chatStore.messages) {
-    const replyTo =
-      typeof message.reply_to === "string"
-        ? message.reply_to
-        : message.reply_to?.id;
+    const replyTo = isExternalString(message.reply_to)
+      ? message.reply_to
+      : message.reply_to?.id;
     if (String(replyTo) === String(parentId)) merged.set(message.id, message);
   }
   return [...merged.values()].sort(

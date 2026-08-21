@@ -1,13 +1,18 @@
 import {
   createMediaSignalingSocket,
   dispatchMediaSignalingMessage,
-  mediaSignalingUrl,
 } from "./media-signaling-socket.ts";
 import { MediasoupProviderSocket } from "./mediasoup-provider-socket.ts";
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../shared/media-signaling-protocol.ts";
 import { asError } from "./native-mediasoup-utils.ts";
 import type { NativeMediasoupSfuSession } from "./native-mediasoup-session.ts";
 import type { NativeTransportEntry } from "./types/native-mediasoup-session.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+  type ExternalValue,
+} from "./types/boundary.ts";
 
 export function connect(session: NativeMediasoupSfuSession, channelId: string) {
   if (!channelId) throw new Error("Channel ID is required");
@@ -56,18 +61,16 @@ export function configureControl(
   };
   session.controlTicket = String(config.ticket || "");
   session.mediaSessionId = String(config.mediaSessionId || "");
-  if (typeof config.refreshControl === "function")
-    session.refreshControl = config.refreshControl as () => Promise<unknown>;
+  const refreshControl = config.refreshControl;
+  if (refreshControl instanceof Function)
+    session.refreshControl = () => Promise.resolve(refreshControl());
 }
 
 export async function handleProviderTicket(
   session: NativeMediasoupSfuSession,
   data: Record<string, unknown>,
 ) {
-  const route =
-    data.route && typeof data.route === "object"
-      ? (data.route as Record<string, unknown>)
-      : {};
+  const route = isExternalRecord(data.route) ? data.route : {};
   const sourceRevision = Number(data?.sourceRevision ?? route.sourceRevision);
   const epoch = Number(data?.epoch ?? route.epoch);
   const currentEpoch = Number(session.topologyState?.epoch);
@@ -85,27 +88,28 @@ export async function handleProviderTicket(
   )
     return false;
   const providerId =
-    typeof data?.providerId === "string" && data.providerId.trim()
+    isExternalString(data.providerId) && data.providerId.trim()
       ? data.providerId.trim()
-      : typeof route.providerId === "string" && route.providerId.trim()
+      : isExternalString(route.providerId) && route.providerId.trim()
         ? route.providerId.trim()
         : null;
   const provider = String(data.provider || "mediasoup");
   session.selectedProvider = provider;
   session.selectedProviderId = providerId;
   let providerFailureNotified = false;
-  const notifyProviderFailure = (error: unknown) => {
+  const notifyProviderFailure = (error: Error | string | null | undefined) => {
     if (providerFailureNotified) return;
     providerFailureNotified = true;
+    const failure: ExternalObject = {
+      provider,
+      epoch,
+      sourceRevision: resolvedSourceRevision,
+      reason: asError(error, "Provider connection failed").message,
+    };
+    if (providerId) failure.providerId = providerId;
     session.signaling?.send?.({
       type: "provider-failure",
-      data: {
-        provider,
-        ...(providerId ? { providerId } : {}),
-        epoch,
-        sourceRevision: resolvedSourceRevision,
-        reason: asError(error, "Provider connection failed").message,
-      },
+      data: failure,
     });
   };
   if (provider === "cloudflare-realtime") {
@@ -116,7 +120,6 @@ export async function handleProviderTicket(
           type: "provider-ready",
           data: {
             provider,
-            ...(providerId ? { providerId } : {}),
             epoch,
             sourceRevision: resolvedSourceRevision,
           },
@@ -124,7 +127,9 @@ export async function handleProviderTicket(
       )
         throw new Error("Media control signaling unavailable");
     } catch (error) {
-      notifyProviderFailure(error);
+      notifyProviderFailure(
+        asError(error, "Cloudflare provider activation failed"),
+      );
       throw error;
     }
     return;
@@ -153,34 +158,46 @@ export async function handleProviderTicket(
     if (
       session.signaling?.send?.({
         type: "provider-ready",
-        data: {
-          provider,
-          ...(providerId ? { providerId } : {}),
-          epoch,
-          sourceRevision: resolvedSourceRevision,
-        },
+        data: (() => {
+          const ready: ExternalObject = {
+            provider,
+            epoch,
+            sourceRevision: resolvedSourceRevision,
+          };
+          if (providerId) ready.providerId = providerId;
+          return ready;
+        })(),
       }) === false
     )
       throw new Error("Media control signaling unavailable");
   } catch (error) {
-    notifyProviderFailure(error);
+    notifyProviderFailure(
+      asError(error, "Mediasoup provider activation failed"),
+    );
     throw error;
   }
 }
 
 export function createSignaling(session: NativeMediasoupSfuSession) {
   session.signaling?.stop?.();
+  const connectionEpoch = session.getControlConnectionEpoch?.() || 1;
   session.signaling = createMediaSignalingSocket({
     buildHeartbeatData: (sequence) => ({
       sequence,
+      connectionEpoch,
       topologyEpoch: Number(session.topologyState?.epoch) || 0,
       sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
+      publicationRevision: "0",
+      lastAppliedRoomRevision: "0",
+      localSourceDigest: {},
     }),
     buildUrl: () => session.buildUrl(session.channelId),
     buildClientHelloData: () => ({
       protocolVersion: MEDIA_SIGNALING_CLIENT_PROTOCOL.version,
       contractRevision: MEDIA_SIGNALING_CLIENT_PROTOCOL.contractRevision,
       mediaSessionId: session.mediaSessionId,
+      connectionEpoch,
+      lastAppliedRoomRevision: "0",
       providerCapabilities: ["cloudflare-realtime", "mediasoup"],
       mediaCapabilities: session.mediaCapabilities,
       capabilityProtocol: "video-codec-matrix-v1",
@@ -188,17 +205,21 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
     }),
     connectionTimeoutMs: session.requestTimeoutMs,
     defaultHeartbeatIntervalMs: 5000,
-    defaultHeartbeatTimeoutMs: 20000,
+    defaultHeartbeatTimeoutMs: 15000,
     handleMessage: (raw) =>
       dispatchMediaSignalingMessage(raw, {
-        getHandler: (type) => session.messageHandlers.get(type),
+        getHandler: (type) => {
+          const handler = session.messageHandlers.get(type);
+          if (!handler) return undefined;
+          return (data: ExternalValue) => {
+            if (!isExternalRecord(data)) return;
+            return handler(data);
+          };
+        },
         onFailure: (error) => session._fail(asError(error, "Signaling failed")),
       }),
     isIntentionalClose: () => session.intentionalClose,
-    onClose: (event) =>
-      session._handleSignalingClose(
-        event as unknown as Record<string, unknown>,
-      ),
+    onClose: (event) => session._handleSignalingClose(event),
     onError: (error) => session._fail(error),
     onOpen: () => {
       session.connectionPhase = "protocol-negotiating";
@@ -220,7 +241,7 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
     reconnectBaseDelayMs: 500,
     reconnectJitterMs: 250,
     reconnectMaxDelayMs: 10000,
-  }) as unknown as NonNullable<typeof session.signaling>;
+  });
 }
 
 export function resolveConnect(session: NativeMediasoupSfuSession) {
@@ -239,7 +260,7 @@ export async function startNegotiation(session: NativeMediasoupSfuSession) {
   });
   session.initializationTimer = setTimeout(() => {
     const error = new Error("SFU initialization timed out");
-    session.rejectReadiness(error);
+    session.rejectReadiness(asError(error, "SFU initialization failed"));
     session._fail(error);
   }, session.initializationTimeoutMs);
   session.initializationTimer.unref?.();
@@ -253,7 +274,9 @@ export async function startNegotiation(session: NativeMediasoupSfuSession) {
       "SFU initialization",
     );
   } catch (error) {
-    session.rejectReadiness(error);
+    session.rejectReadiness(
+      asError(error, "SFU capability negotiation failed"),
+    );
     throw error;
   }
   return session.readyPromise;
@@ -276,11 +299,14 @@ export async function handleRtpCapabilities(
     data.requestId !== session.initializationRequestId
   )
     return false;
-  if (!deviceResult?.handle || !deviceResult.rtpCapabilities)
+  const rtpCapabilities = isExternalRecord(deviceResult.rtpCapabilities)
+    ? deviceResult.rtpCapabilities
+    : null;
+  if (!deviceResult?.handle || !rtpCapabilities)
     throw new Error("Native device negotiation returned no capabilities");
   const device = {
     handle: String(deviceResult.handle),
-    rtpCapabilities: deviceResult.rtpCapabilities as Record<string, unknown>,
+    rtpCapabilities,
   };
   session.device = device;
   session.lastSentClientRtpCapabilities = device.rtpCapabilities;
@@ -309,7 +335,7 @@ export async function handleRtpCapabilities(
       );
     }
   } catch (error) {
-    session.rejectReadiness(error);
+    session.rejectReadiness(asError(error, "SFU transport creation failed"));
     throw error;
   }
   return true;

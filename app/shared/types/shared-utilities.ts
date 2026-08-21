@@ -1,15 +1,18 @@
+import type { ExternalField } from "../../../shared/types/external.ts";
+
 export type OwnedErrorValue = string | Error | null | undefined;
 
 export type ReaderValue = string | { id?: string | number | null } | null;
 
-export interface RealtimeChannelHandlers<TPayload = unknown> {
-  onMessage?: (payload: TPayload) => unknown;
-  onSubscribe?: (status: string) => unknown;
-  onError?: (error: unknown, status: string) => unknown;
+export interface RealtimeChannelHandlers<TPayload> {
+  decodePayload: (payload: ExternalField) => TPayload | null;
+  onMessage?: (payload: TPayload) => void;
+  onSubscribe?: (status: string) => void;
+  onError?: (error: OwnedErrorValue, status: string) => void;
 }
 
 export interface StartupReadinessOptions {
-  onPending?: (status: string) => unknown;
+  onPending?: (status: string) => void;
 }
 
 export interface StartupWaitOptions {
@@ -38,7 +41,7 @@ export interface VoiceTransportReadinessOptions {
   now?: () => number;
   pollIntervalMs?: number;
   timeoutMs?: number | (() => number);
-  wait?: (duration: number) => Promise<unknown>;
+  wait?: (duration: number) => Promise<void>;
 }
 
 export interface RtpSenderSettings {

@@ -6,7 +6,7 @@ import {
   pinnedMessages,
   bookmarks,
 } from "../schema/index.ts";
-import { eq, and, desc, asc, count, inArray, lt, gt } from "drizzle-orm";
+import { eq, and, desc, lt, gt } from "drizzle-orm";
 import type { MessageInsert, MessageRow } from "../../types/repositories.ts";
 
 type MessageId = string;

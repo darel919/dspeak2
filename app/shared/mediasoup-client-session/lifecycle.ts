@@ -5,8 +5,9 @@ import {
   mediasoupMediaReadiness,
 } from "../mediasoup-client-diagnostics.ts";
 import type { MediasoupClientSessionLike } from "../types/mediasoup-client.ts";
+import { asError } from "../native-mediasoup-utils.ts";
 
-export const methods: Record<string, unknown> = {
+export const methods = {
   async stats(this: MediasoupClientSessionLike) {
     return collectMediasoupStats(this);
   },
@@ -39,31 +40,31 @@ export const methods: Record<string, unknown> = {
       try {
         this.send({ type: "close-media" });
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(asError(error, "SFU media close failed"));
       }
     }
     for (const entry of this.producers.values()) {
       try {
         entry.producer.close();
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(asError(error, "SFU producer close failed"));
       }
       try {
         entry.track.stop();
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(asError(error, "SFU producer track cleanup failed"));
       }
     }
     for (const entry of this.consumers.values()) {
       try {
         entry.consumer.close();
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(asError(error, "SFU consumer close failed"));
       }
       try {
         entry.close();
       } catch (error) {
-        this.onError?.(error);
+        this.onError?.(asError(error, "SFU consumer cleanup failed"));
       }
     }
     this.producers.clear();
@@ -79,12 +80,12 @@ export const methods: Record<string, unknown> = {
     try {
       this.sendTransport?.close();
     } catch (error) {
-      this.onError?.(error);
+      this.onError?.(asError(error, "SFU send transport close failed"));
     }
     try {
       this.recvTransport?.close();
     } catch (error) {
-      this.onError?.(error);
+      this.onError?.(asError(error, "SFU receive transport close failed"));
     }
     this.sendTransport = null;
     this.recvTransport = null;
@@ -121,4 +122,4 @@ export const methods: Record<string, unknown> = {
     this.pendingConsumers.clear();
     this.requestedConsumers.clear();
   },
-};
+} satisfies Record<string, unknown>;

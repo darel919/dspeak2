@@ -3,6 +3,10 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import type { JWTPayload } from "jose";
 import { getCookie, setCookie } from "h3";
 import type { H3Event } from "h3";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../../shared/types/external.ts";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -35,10 +39,6 @@ export class SupabaseTokenIssuerMismatchError extends Error {
   }
 }
 
-/**
- * Extract the non-secret Supabase project reference from a Supabase URL.
- * Example: https://crmucqnebwlssqzthnek.supabase.co -> crmucqnebwlssqzthnek
- */
 export function supabaseProjectRef(url: string): string {
   try {
     return new URL(url).hostname.split(".")[0] || "";
@@ -104,11 +104,12 @@ function createOAuthStorage(event: H3Event) {
       let flowIds: string[] = [];
       try {
         const parsed = JSON.parse(indexValue || "null");
-        if (
-          Array.isArray(parsed) &&
-          parsed.every((id) => typeof id === "string")
-        )
-          flowIds = parsed;
+        flowIds = Array.isArray(parsed)
+          ? parsed.flatMap((id) => {
+              const value = parseExternalString(id);
+              return value === null ? [] : [value];
+            })
+          : [];
       } catch {}
 
       const keys = new Set([
@@ -131,6 +132,11 @@ function createOAuthStorage(event: H3Event) {
   };
 }
 
+export type OAuthSupabaseClient = {
+  client: SupabaseClient;
+  clearStorage: () => Promise<void>;
+};
+
 export const supabase = createClient(
   requiredSupabaseUrl,
   requiredSupabaseAnonKey,
@@ -144,10 +150,7 @@ export const supabase = createClient(
   },
 );
 
-export function createOAuthSupabaseClient(event: H3Event): {
-  client: SupabaseClient;
-  clearStorage: () => Promise<void>;
-} {
+export function createOAuthSupabaseClient(event: H3Event): OAuthSupabaseClient {
   const { storage, clear } = createOAuthStorage(event);
   const client = createClient(requiredSupabaseUrl, requiredSupabaseAnonKey, {
     auth: {
@@ -189,25 +192,33 @@ export async function verifySupabaseAccessToken(
   const { data, error } = await auth.getClaims(token);
   if (error) throw error;
 
-  const claims = data?.claims as
-    | (Record<string, unknown> & { aud?: string | string[]; sub?: unknown })
-    | undefined;
-  if (!claims || typeof claims.sub !== "string" || !claims.sub) {
+  const claims = parseExternalRecord(data?.claims);
+  const subject = parseExternalString(claims?.sub);
+  if (!claims || !subject) {
     throw new Error("Supabase access token has no subject");
   }
-  if (claims.iss !== requiredSupabaseIssuer) {
+  const issuer = parseExternalString(claims.iss);
+  if (issuer !== requiredSupabaseIssuer) {
     throw new SupabaseTokenIssuerMismatchError(
       requiredSupabaseIssuer,
-      typeof claims.iss === "string" ? claims.iss : undefined,
+      issuer ?? undefined,
     );
   }
-  const audience = claims.aud;
-  if (
-    audience !== "authenticated" &&
-    !(Array.isArray(audience) && audience.includes("authenticated"))
-  ) {
+  const audience = parseExternalString(claims.aud);
+  const audienceList = Array.isArray(claims.aud)
+    ? claims.aud.flatMap((item) => {
+        const value = parseExternalString(item);
+        return value === null ? [] : [value];
+      })
+    : [];
+  if (audience !== "authenticated" && !audienceList.includes("authenticated")) {
     throw new Error("Supabase access token audience is invalid");
   }
 
-  return claims as SupabaseAccessTokenClaims;
+  return {
+    ...claims,
+    sub: subject,
+    iss: issuer,
+    aud: audience ?? audienceList,
+  };
 }

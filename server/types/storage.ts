@@ -30,6 +30,8 @@ export interface R2ObjectRecord {
 
 export type R2Body = PutObjectCommandInput["Body"];
 
+export type R2UploadBody = R2Body | Blob;
+
 export interface UploadValidationResult {
   valid: boolean;
   error?: string;

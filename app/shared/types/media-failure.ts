@@ -1,3 +1,5 @@
+import { isExternalString } from "./boundary.ts";
+
 export interface MediaFailure {
   code: string;
   scope:
@@ -36,7 +38,6 @@ export function createMediaFailure(
 }
 
 export const MEDIA_FAILURE_CODES = {
-  // Operation scope
   MEDIA_OPERATION_ACK_TIMEOUT: {
     code: "MEDIA_OPERATION_ACK_TIMEOUT",
     scope: "source-operation" as const,
@@ -60,15 +61,13 @@ export const MEDIA_FAILURE_CODES = {
   STALE_SOURCE_GENERATION: {
     code: "STALE_SOURCE_GENERATION",
     scope: "source-operation" as const,
-    retryable: true,
+    retryable: false,
   },
   INVALID_OPERATION: {
     code: "INVALID_OPERATION",
     scope: "source-operation" as const,
     retryable: false,
   },
-
-  // Consumer scope
   CONSUMER_CREATION_FAILED: {
     code: "CONSUMER_CREATION_FAILED",
     scope: "remote-consumer" as const,
@@ -84,8 +83,6 @@ export const MEDIA_FAILURE_CODES = {
     scope: "remote-consumer" as const,
     retryable: true,
   },
-
-  // Peer connection scope
   ICE_DISCONNECTED: {
     code: "ICE_DISCONNECTED",
     scope: "peer-connection" as const,
@@ -96,13 +93,16 @@ export const MEDIA_FAILURE_CODES = {
     scope: "peer-connection" as const,
     retryable: true,
   },
+  MEDIA_SOURCE_TRANSPORT_FAILED: {
+    code: "MEDIA_SOURCE_TRANSPORT_FAILED",
+    scope: "source-operation" as const,
+    retryable: true,
+  },
   DTLS_FAILED: {
     code: "DTLS_FAILED",
     scope: "peer-connection" as const,
     retryable: true,
   },
-
-  // Provider transport scope
   SEND_TRANSPORT_FAILED: {
     code: "SEND_TRANSPORT_FAILED",
     scope: "provider-transport" as const,
@@ -118,8 +118,6 @@ export const MEDIA_FAILURE_CODES = {
     scope: "provider-transport" as const,
     retryable: true,
   },
-
-  // Provider session scope
   MEDIA_PROVIDER_UNAVAILABLE: {
     code: "MEDIA_PROVIDER_UNAVAILABLE",
     scope: "provider-session" as const,
@@ -145,8 +143,6 @@ export const MEDIA_FAILURE_CODES = {
     scope: "provider-session" as const,
     retryable: true,
   },
-
-  // Control session scope
   PROTOCOL_MISMATCH: {
     code: "PROTOCOL_MISMATCH",
     scope: "control-session" as const,
@@ -167,8 +163,6 @@ export const MEDIA_FAILURE_CODES = {
     scope: "control-session" as const,
     retryable: true,
   },
-
-  // Protocol fatal scope
   PROTOCOL_FATAL: {
     code: "PROTOCOL_FATAL",
     scope: "protocol-fatal" as const,
@@ -205,13 +199,12 @@ export interface OperationError extends Error {
 export function createOperationError(
   data: Record<string, unknown>,
 ): OperationError {
-  const error = new Error(
-    `${data.code}: ${
-      typeof data.error === "string" ? data.error : "operation rejected"
-    }`,
-  ) as OperationError;
-  error.code = String(data.code);
-  error.retryable = data.retryable === true;
-  error.canonicalState = data.canonicalState;
-  return error;
+  const message = isExternalString(data.error)
+    ? data.error
+    : "operation rejected";
+  return Object.assign(new Error(`${data.code}: ${message}`), {
+    code: String(data.code),
+    retryable: data.retryable === true,
+    canonicalState: data.canonicalState,
+  });
 }

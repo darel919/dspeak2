@@ -1,5 +1,13 @@
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type { Ref } from "vue";
 import type { AttenuationReportInput } from "../media-attenuation-reporter.ts";
+import type {
+  RemoteSourceIncarnation,
+  RemoteSourceConvergenceState,
+  RemoteSourcePhase,
+  RemoteReceiverStats,
+} from "../remote-source-convergence.ts";
 
 export interface RegistryEntry extends Record<string, unknown> {
   key: string;
@@ -18,27 +26,29 @@ export interface RemoteMediaEntry extends RegistryEntry {
   track?: MediaStreamTrack | null;
   stream?: MediaStream | null;
   receiving?: boolean;
-  // Full receiver FSM for each logical remote source generation
   connectionEpoch?: number;
   sourceGeneration?: number;
-  phase?:
-    | "not-announced"
-    | "announced"
-    | "publication-discovered"
-    | "subscription-requested"
-    | "consumer-created"
-    | "transport-connected"
-    | "rtp-flowing"
-    | "first-frame"
-    | "renderable"
-    | "stalled"
-    | "recovering"
-    | "retired"
-    | "failed";
+  receiverIncarnationId?: string;
+  publicationId?: string;
+  producerId?: string;
+  consumerId?: string;
+  mid?: string | null;
+  trackName?: string;
+  cloudflareSessionId?: string;
+  cloudflareTrackName?: string;
+  receiver?: { getStats?: () => Promise<MediaCommandResult> };
+  consumer?: { getStats?: () => Promise<MediaCommandResult> };
+  nativeTrackHandle?: unknown;
+  logicalStreamId?: string;
+  variantId?: string;
+  framesDecoded?: number;
+  phase?: RemoteSourcePhase;
   rtpActivityAt?: number;
   firstFrameAt?: number;
   stallDetectedAt?: number;
   recoveryAttempts?: number;
+  incarnation?: RemoteSourceIncarnation;
+  convergenceState?: RemoteSourceConvergenceState;
 }
 
 export interface AudioGraphTrack {
@@ -66,7 +76,7 @@ export interface VoiceDetector {
   analyser: AnalyserNode;
   key: string;
   source: MediaStreamAudioSourceNode;
-  samples: Uint8Array;
+  samples: Uint8Array<ArrayBuffer>;
   speaking: boolean;
   activeSamples: number;
   quietSamples: number;
@@ -99,4 +109,13 @@ export interface HybridMediaRegistryOptions {
     error: { name: string; message: string } | null;
   }) => void;
   onEffectiveGain: (state: AttenuationReportInput) => void;
+  getReceiverStats?: (
+    entry: RemoteMediaEntry,
+  ) => Promise<RemoteReceiverStats | null>;
+  onReceiverRecovery?: (
+    entry: RemoteMediaEntry,
+    attempt: number,
+    signal: AbortSignal,
+  ) => Promise<boolean> | boolean;
+  onReceiverFailed?: (entry: RemoteMediaEntry) => MediaCommandResult;
 }

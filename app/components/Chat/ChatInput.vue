@@ -130,7 +130,7 @@
                   ? 'Write a message to send when you’re back online…'
                   : 'Type a message…'
               "
-              class="metro-input min-h-[2.5rem] max-h-[6.5rem] w-full resize-none overflow-y-auto pr-8"
+              class="metro-input block min-h-[2.5rem] max-h-[6.5rem] w-full resize-none overflow-y-auto pr-8"
               @input="handleTextareaInput"
               @focus="handleFocus"
               @blur="handleBlur"

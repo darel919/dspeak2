@@ -36,7 +36,7 @@ test("account deletion preserves required message senders and uses Drizzle", () 
   assert.match(deleteRoute, /withTransaction/);
   assert.match(
     deleteRoute,
-    /async function deleteAccount\(tx(?::[^,]+)?, userId(?::[^)]+)?\)/,
+    /async function deleteAccount\(\s*tx(?::[^,]+)?,\s*userId(?::[^)]+)?\)/,
   );
   assert.match(deleteRoute, /delete\(avatars\)/);
   assert.match(deleteRoute, /delete\(librarySongs\)/);

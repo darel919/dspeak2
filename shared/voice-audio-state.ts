@@ -16,50 +16,51 @@ const DEFAULT_SHARED_AUDIO_DUCKING = Object.freeze({
   effectivePercent: 100,
 });
 
-import type {
-  SharedAudioAttenuationLike,
-  SharedAudioDuckingLike,
-  SharedAudioStatsLike,
-} from "./types/voice.ts";
-
-function finiteNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+function finiteNumber(value: ExternalField, fallback: number) {
+  const number = parseExternalNumber(value);
+  return number !== null ? number : fallback;
 }
 
-export function normalizeSharedAudioStats(stats: SharedAudioStatsLike) {
+export function normalizeSharedAudioStats(stats: ExternalField) {
+  const values = parseExternalRecord(stats) ?? {};
   return {
-    kbps: finiteNumber(stats?.kbps, DEFAULT_SHARED_AUDIO_STATS.kbps),
-    level: finiteNumber(stats?.level, DEFAULT_SHARED_AUDIO_STATS.level),
-    dbfs: finiteNumber(stats?.dbfs, DEFAULT_SHARED_AUDIO_STATS.dbfs),
+    kbps: finiteNumber(values.kbps, DEFAULT_SHARED_AUDIO_STATS.kbps),
+    level: finiteNumber(values.level, DEFAULT_SHARED_AUDIO_STATS.level),
+    dbfs: finiteNumber(values.dbfs, DEFAULT_SHARED_AUDIO_STATS.dbfs),
   };
 }
 
-export function normalizeSharedAudioAttenuation(
-  attenuation: SharedAudioAttenuationLike,
-) {
+export function normalizeSharedAudioAttenuation(attenuation: ExternalField) {
+  const values = parseExternalRecord(attenuation) ?? {};
   return {
-    active: attenuation?.active === true,
+    active: values.active === true,
     effectivePercent: finiteNumber(
-      attenuation?.effectivePercent,
+      values.effectivePercent,
       DEFAULT_SHARED_AUDIO_ATTENUATION.effectivePercent,
     ),
     expectedListeners: finiteNumber(
-      attenuation?.expectedListeners,
+      values.expectedListeners,
       DEFAULT_SHARED_AUDIO_ATTENUATION.expectedListeners,
     ),
     reportingListeners: finiteNumber(
-      attenuation?.reportingListeners,
+      values.reportingListeners,
       DEFAULT_SHARED_AUDIO_ATTENUATION.reportingListeners,
     ),
   };
 }
 
-export function normalizeSharedAudioDucking(ducking: SharedAudioDuckingLike) {
+export function normalizeSharedAudioDucking(ducking: ExternalField) {
+  const values = parseExternalRecord(ducking) ?? {};
   return {
-    active: ducking?.active === true,
+    active: values.active === true,
     effectivePercent: finiteNumber(
-      ducking?.effectivePercent,
+      values.effectivePercent,
       DEFAULT_SHARED_AUDIO_DUCKING.effectivePercent,
     ),
   };
 }
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  type ExternalField,
+} from "./types/external.ts";

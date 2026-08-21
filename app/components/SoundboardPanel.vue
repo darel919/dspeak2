@@ -320,15 +320,17 @@ async function saveEdit() {
     !editingIconImage.value
   )
     return;
-  await store.update({
+  const update = {
     id: editing.value.id,
     roomId: props.roomId,
     title: editing.value.title,
     category: editing.value.category,
     icon: editing.value.icon,
     enabled: editing.value.enabled,
-    ...(editingIconImage.value ? { iconImage: editingIconImage.value } : {}),
-  });
+  };
+  if (editingIconImage.value)
+    Object.assign(update, { iconImage: editingIconImage.value });
+  await store.update(update);
   editing.value = null;
   editingIconImage.value = null;
 }

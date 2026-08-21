@@ -40,9 +40,15 @@ describe("desktop initialization contract", () => {
     assert.match(frontendBuild, /NITRO_PRESET: "static"/);
     assert.match(frontendBuild, /DSPEAK_DESKTOP: "1"/);
     assert.match(frontendBuild, /rootEnvValue/);
-    assert.match(frontendBuild, /VITE_DSPEAK_API_PATH: desktopApiOrigin/);
-    assert.match(frontendBuild, /SUPABASE_URL: desktopSupabaseUrl/);
-    assert.match(frontendBuild, /SUPABASE_ANON_KEY: desktopSupabaseAnonKey/);
+    assert.match(
+      frontendBuild,
+      /buildEnv\.VITE_DSPEAK_API_PATH = desktopApiOrigin/,
+    );
+    assert.match(frontendBuild, /buildEnv\.SUPABASE_URL = desktopSupabaseUrl/);
+    assert.match(
+      frontendBuild,
+      /buildEnv\.SUPABASE_ANON_KEY = desktopSupabaseAnonKey/,
+    );
     assert.match(frontendBuild, /rmSync/);
     assert.match(frontendBuild, /cwd: desktopRoot/);
     assert.match(frontendBuild, /desktopEntry/);

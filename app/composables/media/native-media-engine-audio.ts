@@ -5,13 +5,17 @@ import {
 } from "../../shared/microphone-gate.ts";
 import { createEchoDetector } from "../../shared/echo-detector.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
+import {
+  parseExternalValue,
+  type ExternalValue,
+} from "../../utils/external-values.ts";
 
-function numberValue(value: unknown, fallback: number) {
+function numberValue(value: ExternalValue, fallback: number) {
   const normalized = Number(value);
   return Number.isFinite(normalized) ? normalized : fallback;
 }
 
-function clampDb(value: unknown) {
+function clampDb(value: ExternalValue) {
   return Math.max(-60, Math.min(0, numberValue(value, -60)));
 }
 
@@ -38,7 +42,13 @@ function updateNativeSpeaking(
       ? automaticGateThreshold(
           engine.nativeNoiseFloorEstimator?.noiseFloorDb ?? -60,
         )
-      : Math.max(-60, Math.min(-20, numberValue(gate?.thresholdDb, -48)));
+      : Math.max(
+          -60,
+          Math.min(
+            -20,
+            numberValue(parseExternalValue(gate?.thresholdDb), -48),
+          ),
+        );
   const active = levelDb >= threshold;
   const estimator = engine.nativeNoiseFloorEstimator;
   if (estimator) updateNoiseFloor(estimator, levelDb, active);
@@ -74,17 +84,29 @@ function updateNativeStats(
     level: Math.max(0, Math.min(1, sharedAudioLevel)),
     dbfs: sharedAudioDbfs,
     nativeOutputDevicePeriodMs: numberValue(
-      output.nativeOutputDevicePeriodMs,
+      parseExternalValue(output.nativeOutputDevicePeriodMs),
       0,
     ),
     nativeOutputRenderPeriodMs: numberValue(
-      output.nativeOutputRenderPeriodMs,
+      parseExternalValue(output.nativeOutputRenderPeriodMs),
       0,
     ),
-    nativeOutputQueueDepthMs: numberValue(output.nativeOutputQueueDepthMs, 0),
-    nativePlayoutTargetMs: numberValue(output.nativePlayoutTargetMs, 0),
-    nativeOutputDroppedFrames: numberValue(output.nativeOutputDroppedFrames, 0),
-    nativeOutputCount: numberValue(output.nativeOutputCount, 0),
+    nativeOutputQueueDepthMs: numberValue(
+      parseExternalValue(output.nativeOutputQueueDepthMs),
+      0,
+    ),
+    nativePlayoutTargetMs: numberValue(
+      parseExternalValue(output.nativePlayoutTargetMs),
+      0,
+    ),
+    nativeOutputDroppedFrames: numberValue(
+      parseExternalValue(output.nativeOutputDroppedFrames),
+      0,
+    ),
+    nativeOutputCount: numberValue(
+      parseExternalValue(output.nativeOutputCount),
+      0,
+    ),
   };
 }
 
@@ -92,11 +114,11 @@ export function handleNativeAudioTelemetry(
   engine: NativeMediaEngine,
   levels: Record<string, unknown>,
 ) {
-  const microphoneDbfs = clampDb(levels.microphoneDbfs);
-  const sharedAudioDbfs = clampDb(levels.sharedAudioDbfs);
+  const microphoneDbfs = clampDb(parseExternalValue(levels.microphoneDbfs));
+  const sharedAudioDbfs = clampDb(parseExternalValue(levels.sharedAudioDbfs));
   const sharedAudioLevel = Math.max(
     0,
-    Math.min(1, numberValue(levels.sharedAudioLevel, 0)),
+    Math.min(1, numberValue(parseExternalValue(levels.sharedAudioLevel), 0)),
   );
   const microphoneReady = levels.microphoneReady === true;
   const sharedAudioReady = levels.sharedAudioReady === true;

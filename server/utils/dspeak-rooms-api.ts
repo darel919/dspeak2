@@ -49,8 +49,15 @@ import type {
   RoomsApiBody,
   RoomsApiEvent,
 } from "../types/rooms-api.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
-function requireValue(value: unknown, message: string): string {
+type RoomImageFile = File;
+
+function requireValue(value: ExternalField, message: string): string {
   if (!value) throw createError({ statusCode: 400, statusMessage: message });
   return String(value);
 }
@@ -82,15 +89,15 @@ function inviteMatchesPayload(
 }
 
 function structuredValue(
-  value: unknown,
+  value: ExternalField,
   fallback: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  if (value && typeof value === "object")
-    return value as Record<string, unknown>;
-  if (typeof value !== "string") return fallback;
+  const record = parseExternalRecord(value);
+  if (record) return record;
+  const text = parseExternalString(value);
+  if (text === null) return fallback;
   try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" ? parsed : fallback;
+    return parseExternalRecord(JSON.parse(text)) ?? fallback;
   } catch {
     return fallback;
   }
@@ -105,16 +112,34 @@ type RoomUpdate = Omit<
 
 async function parseBody(event: RoomsApiEvent): Promise<RoomsApiBody> {
   const contentType = getHeader(event, "content-type") || "";
-  if (contentType.includes("multipart/form-data")) {
-    const form = await readFormData(event);
-    return Object.fromEntries(form.entries());
-  }
-  const body: unknown = await readBody(event);
-  return body && typeof body === "object" ? (body as RoomsApiBody) : {};
+  const raw = contentType.includes("multipart/form-data")
+    ? Object.fromEntries((await readFormData(event)).entries())
+    : parseExternalRecord(await readBody(event));
+  const record = parseExternalRecord(raw) ?? {};
+  return {
+    ...record,
+    roomId: parseExternalString(record.roomId) ?? undefined,
+    channelId: parseExternalString(record.channelId) ?? undefined,
+    membershipId: parseExternalString(record.membershipId) ?? undefined,
+    roleId: parseExternalString(record.roleId) ?? undefined,
+    targetUserId: parseExternalString(record.targetUserId) ?? undefined,
+    inviteToken: parseExternalString(record.inviteToken) ?? undefined,
+    name: parseExternalString(record.name) ?? undefined,
+    desc: parseExternalString(record.desc) ?? undefined,
+    accent: parseExternalString(record.accent) ?? undefined,
+  };
 }
 
-async function validateRoomImage(file: unknown, limit: number, label: string) {
-  if (!(file instanceof File) || !file.size) return;
+function parseRoomImage(value: ExternalField): RoomImageFile | null {
+  return value instanceof File ? value : null;
+}
+
+async function validateRoomImage(
+  file: RoomImageFile,
+  limit: number,
+  label: string,
+) {
+  if (!file.size) return;
   if (file.size > limit)
     throw createError({
       statusCode: 413,
@@ -141,9 +166,9 @@ async function validateRoomImage(file: unknown, limit: number, label: string) {
 async function replaceRoomImage(
   roomId: string,
   type: "header" | "profile",
-  file: unknown,
+  file: RoomImageFile | null,
 ) {
-  if (!(file instanceof File) || !file.size) return;
+  if (!file || !file.size) return;
   const limit = type === "header" ? 5 * 1024 * 1024 : 2 * 1024 * 1024;
   const label = type === "header" ? "Room header" : "Room picture";
   await validateRoomImage(file, limit, label);
@@ -199,9 +224,7 @@ function presentChannel(channel: ChannelRow, roomId: string) {
     name: channel.name,
     desc: channel.description || "",
     isMedia,
-    mediaPolicy: normalizeMediaPolicy(
-      channel.mediaPolicy as Parameters<typeof normalizeMediaPolicy>[0],
-    ),
+    mediaPolicy: normalizeMediaPolicy(channel.mediaPolicy),
     inRoom: [],
     created: channel.createdAt?.toISOString?.() || channel.createdAt,
     updated: channel.updatedAt?.toISOString?.() || channel.updatedAt,
@@ -348,7 +371,7 @@ async function roomDetails(room: RoomRow, userId: string | null = null) {
       : null,
     accent: normalizeRoomAccent(room.accent),
     attenuation: normalizeAttenuation(
-      room.attenuation as Parameters<typeof normalizeAttenuation>[0],
+      parseExternalRecord(room.attenuation) ?? {},
     ),
     owner: presentProfile(profileById.get(String(room.ownerId))),
     members: memberIds
@@ -368,7 +391,7 @@ async function roomDetails(room: RoomRow, userId: string | null = null) {
 
 async function handleRoomRoles(
   event: RoomsApiEvent,
-  roomId: unknown,
+  roomId: ExternalField,
   userId: string,
 ) {
   const method = event.method;
@@ -781,7 +804,7 @@ async function handleRooms(event: RoomsApiEvent, suffix: string) {
         .returning();
       const nextRoom = room[0];
       if (!nextRoom) throw new Error("Room creation failed");
-      await seedRoomRoles(nextRoom, userId, tx as unknown as typeof db);
+      await seedRoomRoles(nextRoom, userId, tx);
       await tx.insert(channels).values([
         {
           roomId: nextRoom.id,
@@ -810,9 +833,10 @@ async function handleRooms(event: RoomsApiEvent, suffix: string) {
     );
     if (!room)
       throw createError({ statusCode: 404, statusMessage: "Room not found" });
-    const hasPicture = body.picture instanceof File && body.picture.size;
-    const hasHeaderImage =
-      body.headerImage instanceof File && body.headerImage.size;
+    const picture = parseRoomImage(body.picture);
+    const headerImage = parseRoomImage(body.headerImage);
+    const hasPicture = Boolean(picture?.size);
+    const hasHeaderImage = Boolean(headerImage?.size);
     if (body.name || body.desc !== undefined || hasPicture || hasHeaderImage)
       await requireRoomPermission(room, userId, "room.update_identity");
     if (body.accent !== undefined || body.attenuation !== undefined)
@@ -830,15 +854,15 @@ async function handleRooms(event: RoomsApiEvent, suffix: string) {
       update.updatedAt = new Date();
       await db.update(rooms).set(update).where(eq(rooms.id, room.id));
     }
-    await replaceRoomImage(room.id, "profile", body.picture);
-    await replaceRoomImage(room.id, "header", body.headerImage);
-    const data: Record<string, unknown> = {
+    await replaceRoomImage(room.id, "profile", picture);
+    await replaceRoomImage(room.id, "header", headerImage);
+    const data = {
       id: room.id,
       accent: normalizeRoomAccent(update.accent ?? room.accent),
-    };
-    data.attenuation = normalizeAttenuation(
-      update.attenuation ?? structuredValue(room.attenuation),
-    );
+      attenuation: normalizeAttenuation(
+        update.attenuation ?? structuredValue(room.attenuation),
+      ),
+    } satisfies Record<string, unknown>;
     broadcastGlobally({ type: "room_updated", data });
     return roomDetails({ ...room, ...update }, userId);
   }
@@ -938,6 +962,6 @@ async function handleRooms(event: RoomsApiEvent, suffix: string) {
   });
 }
 
-export function createRoomsApiHandler(_dependencies: unknown) {
+export function createRoomsApiHandler(_dependencies: ExternalField) {
   return handleRooms;
 }

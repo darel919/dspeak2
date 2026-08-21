@@ -5,8 +5,6 @@ import {
   rooms,
   channels,
   roomMemberships,
-  membershipRoles,
-  roomRoles,
   messages,
   directConversations,
   directMessages,
@@ -31,7 +29,7 @@ import {
   soundboards,
   streamPlayLog,
 } from "../../../db/schema/index.ts";
-import { eq, and, or, desc, inArray, sql } from "drizzle-orm";
+import { eq, or, desc, inArray, sql } from "drizzle-orm";
 import { enforceRateLimit } from "../../../utils/rate-limit.ts";
 
 export default defineEventHandler(async (event) => {

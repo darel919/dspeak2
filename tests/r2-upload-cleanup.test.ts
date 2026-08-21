@@ -75,3 +75,20 @@ test("profile avatar PATCH persists the R2 key and avatar metadata", () => {
   assert.match(storage, /update\.avatarKey/);
   assert.match(storage, /insert\(avatars\)/);
 });
+
+test("R2 upload bodies convert File values before SDK checksum handling", async () => {
+  process.env.CF_R2_ACCOUNT_ID ||= "test-account";
+  process.env.CF_R2_ACCESS_KEY_ID ||= "test-access-key";
+  process.env.CF_R2_SECRET_ACCESS_KEY ||= "test-secret-key";
+  process.env.CF_R2_BUCKET_NAME ||= "test-bucket";
+
+  const { normalizeR2Body } = await import("../server/storage/r2.ts");
+  const file = new File([new Uint8Array([1, 2, 3])], "avatar.png", {
+    type: "image/png",
+  });
+  const body = await normalizeR2Body(file);
+
+  assert.ok(body instanceof Uint8Array);
+  assert.equal(body.byteLength, file.size);
+  assert.deepEqual(Array.from(body), [1, 2, 3]);
+});

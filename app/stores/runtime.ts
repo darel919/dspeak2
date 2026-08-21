@@ -16,7 +16,7 @@ export const useRuntimeStore = defineStore("runtime", () => {
       if (!detected) {
         try {
           const { isTauri: detectTauri } = await import("@tauri-apps/api/core");
-          detected = typeof detectTauri === "function" && detectTauri();
+          detected = detectTauri instanceof Function && detectTauri();
         } catch {
           detected = false;
         }

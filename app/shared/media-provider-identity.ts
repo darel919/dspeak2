@@ -6,25 +6,24 @@ type ProviderIdentityRecord = {
   route?: ProviderIdentityRecord | null;
   targetRoute?: ProviderIdentityRecord | null;
 };
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
 
 export type MediaProviderIdentity = {
   provider: string | null;
   providerId: string | null;
 };
 
-function stringValue(value: unknown) {
-  if (typeof value !== "string" || !value.trim()) return null;
+function stringValue<T>(value: T) {
+  if (!isExternalString(value) || !value.trim()) return null;
   return value.trim();
 }
 
-function recordValue(value: unknown): ProviderIdentityRecord {
-  return value && typeof value === "object"
-    ? (value as ProviderIdentityRecord)
-    : {};
+function recordValue<T>(value: T): ProviderIdentityRecord {
+  return isExternalRecord(value) ? value : {};
 }
 
-export function resolveMediaProviderIdentity(
-  value: unknown,
+export function resolveMediaProviderIdentity<T>(
+  value: T,
   preferTarget = false,
 ): MediaProviderIdentity {
   const data = recordValue(value);

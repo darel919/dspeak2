@@ -1,13 +1,15 @@
-export function waitFor(
+import { isExternalRecord } from "./types/boundary.ts";
+
+export function waitFor<T>(
   map: Map<
     string,
-    { resolve: (value?: unknown) => void; reject: (error: unknown) => void }
+    { resolve: (value: T) => void; reject: (error: Error) => void }
   >,
   key: string,
   timeoutMs: number,
   label: string,
-) {
-  return new Promise<unknown>((resolve, reject) => {
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       map.delete(key);
       reject(new Error(`${label} timed out`));
@@ -27,10 +29,10 @@ export function waitFor(
   });
 }
 
-export function asError(value: unknown, fallback: string) {
+export function asError<T>(value: T, fallback: string): Error {
   if (value instanceof Error) return value;
   const message =
-    value && typeof value === "object" && "message" in value
+    isExternalRecord(value) && "message" in value
       ? String(value.message)
       : String(value || fallback);
   return new Error(message);

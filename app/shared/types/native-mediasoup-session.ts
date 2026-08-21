@@ -1,4 +1,11 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
+import type { CloudflarePublication } from "../types/cloudflare-media.ts";
 import type { NativeConsumerEntry } from "./native-mediasoup.ts";
+import type { NativeTopology } from "./native-media.ts";
+import type { SignalingMessage } from "./media-signaling.ts";
 import type { VideoSettings } from "./video-settings.ts";
 import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
 import type {
@@ -63,20 +70,23 @@ export interface NativeDeviceEntry extends Record<string, unknown> {
 }
 
 export interface NativePendingRequest {
-  resolve: (value?: unknown) => void;
-  reject: (error: unknown) => void;
+  resolve: (value?: MediaCommandResult) => void;
+  reject: (error: OwnedErrorValue) => void;
   timer?: ReturnType<typeof setTimeout>;
 }
 
 export interface NativeSignalingSocket {
-  open: () => Promise<unknown>;
-  waitForReady?: () => Promise<unknown>;
-  stop?: () => unknown;
-  send: (message: unknown) => boolean | void;
-  acknowledgeHeartbeat?: (sequence: number, timestamp: number) => unknown;
+  open: () => Promise<MediaCommandResult>;
+  waitForReady?: () => Promise<MediaCommandResult>;
+  stop?: () => MediaCommandResult;
+  send: (message: SignalingMessage) => boolean | void;
+  acknowledgeHeartbeat?: (
+    sequence: number,
+    timestamp: number,
+  ) => MediaCommandResult;
   acceptServerHello: (data: Record<string, unknown>) => boolean;
   getProtocolState: () => Record<string, unknown> | null;
-  markReady: () => unknown;
+  markReady: () => MediaCommandResult;
 }
 
 export interface NativeProviderSignaling {
@@ -85,9 +95,9 @@ export interface NativeProviderSignaling {
     ticket: string;
     mediaCapabilities?: ParticipantMediaCapabilities | null;
     capabilityProtocol?: string;
-  }) => Promise<unknown>;
-  close: () => unknown;
-  send: (message: unknown) => boolean | void;
+  }) => Promise<MediaCommandResult>;
+  close: () => MediaCommandResult;
+  send: (message: SignalingMessage) => boolean | void;
 }
 
 export interface NativeCloudflareSessionLike {
@@ -97,61 +107,76 @@ export interface NativeCloudflareSessionLike {
   sessionId?: string | null;
   handle?: string | number | null;
   closed?: boolean;
-  initialize: () => Promise<unknown>;
-  closeMedia: () => unknown;
-  startSubscriptions: () => Promise<unknown>;
-  addSource: (entry: NativeSourceEntry) => Promise<unknown>;
-  removeSource: (source: string) => unknown;
-  removeVariant: (variantId: string, force?: boolean) => unknown;
+  initialize: () => Promise<MediaCommandResult>;
+  closeMedia: () => MediaCommandResult;
+  startSubscriptions: () => Promise<MediaCommandResult>;
+  addSource: (entry: NativeSourceEntry) => Promise<MediaCommandResult>;
+  removeSource: (source: string) => MediaCommandResult;
+  removeVariant: (variantId: string, force?: boolean) => MediaCommandResult;
   retireVariants?: (
     logicalStreamId: string,
     desiredVariantIds: string[],
-  ) => unknown;
+  ) => MediaCommandResult;
   hasVariant?: (variantId: string) => boolean;
   producers?: Map<string, Record<string, unknown>>;
   producerVariants?: Map<string, Record<string, unknown>>;
   updateVariantMetadata?: (
     entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
-  ) => Promise<unknown>;
-  setSourceTransmission: (source: string, enabled: boolean) => unknown;
-  updateAudioBitrate: (source: string, bitrate: number) => unknown;
-  updateVideoBitrate: (source: string, bitrate: number) => unknown;
+  ) => Promise<MediaCommandResult>;
+  setSourceTransmission: (
+    source: string,
+    enabled: boolean,
+  ) => MediaCommandResult;
+  updateAudioBitrate: (source: string, bitrate: number) => MediaCommandResult;
+  updateVideoBitrate: (source: string, bitrate: number) => MediaCommandResult;
   updateVideoParameters: (
     source: string,
     parameters: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   updateVariantVideoParameters?: (
     variantId: string,
     parameters: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   setRemoteReceiving: (
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,
     receivingValue?: boolean,
-  ) => unknown;
+  ) => MediaCommandResult;
   setConsumerVolume: (
     userId: string | number,
     source: string,
     volume: number,
-  ) => unknown;
+  ) => MediaCommandResult;
   sendParticipantVoiceState: (state: {
     muted?: boolean;
     deafened?: boolean;
-  }) => unknown;
-  applyJitterBufferConfig: (entry: NativeConsumerEntry) => unknown;
+  }) => MediaCommandResult;
+  reconcilePublications: (
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
+    getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
+  ) => Promise<MediaCommandResult>;
+  applyJitterBufferConfig: (entry: NativeConsumerEntry) => MediaCommandResult;
   setJitterBufferConfig: (config: {
     minDelayMs?: number;
     targetDelayMs?: number;
-  }) => unknown;
-  handleReceiveEvent: (event: Record<string, unknown>) => boolean;
-  handleMessage: (type: string, data: Record<string, unknown>) => unknown;
+  }) => MediaCommandResult;
+  handleReceiveEvent: (
+    event: import("./native-cloudflare.ts").NativeCloudflareEvent,
+  ) => boolean;
+  handleMessage: (
+    type: string,
+    data: Record<string, unknown>,
+  ) => MediaCommandResult;
   connectionState?: () => Record<string, unknown>;
-  stats?: () => unknown;
-  diagnosticStats?: () => unknown;
+  stats?: () => MediaCommandResult;
+  diagnosticStats?: () => MediaCommandResult;
   expectedInboundFlowCount?: () => number;
-  mediaReadiness?: (expectedInbound: number) => unknown;
-  getOutboundRtpStats?: () => unknown;
-  getInboundRtpStats?: () => unknown;
+  mediaReadiness?: (expectedInbound: number) => MediaCommandResult;
+  getOutboundRtpStats?: () => MediaCommandResult;
+  getInboundRtpStats?: () => MediaCommandResult;
   codecRuntimeTelemetry?: import("../video-codec-migration.ts").VideoCodecRuntimeTelemetry[];
 }
 
@@ -161,6 +186,7 @@ export interface NativeMediasoupConstructorOptions extends Partial<NativeMediaso
   buildUrl?: (channelId: string | null) => string;
   location?: Location;
   mediaCapabilities?: ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch?: () => number;
 }
 
 export interface NativeMediasoupSfuSessionSurface {
@@ -173,37 +199,56 @@ export interface NativeMediasoupSfuSessionSurface {
   errorMessage: string | Error | null;
   getState: () => string;
   connectionState: () => Record<string, unknown>;
-  stats: () => Promise<unknown>;
-  diagnosticStats: () => Promise<unknown[]>;
-  getOutboundRtpStats: () => Promise<unknown[]>;
-  getInboundRtpStats: () => Promise<unknown[]>;
+  stats: () => Promise<MediaCommandResult>;
+  diagnosticStats: () => Promise<MediaCommandResult>;
+  getOutboundRtpStats: () => Promise<MediaCommandResult>;
+  getInboundRtpStats: () => Promise<MediaCommandResult>;
   mediaReadiness: (
     expectedInbound?: number,
   ) => Promise<Record<string, unknown>>;
   expectedInboundFlowCount: () => number;
-  connect: (channelId: string) => Promise<unknown>;
-  handle: (type: string, data: Record<string, unknown>) => Promise<unknown>;
-  configureControl: (config: Record<string, unknown>) => unknown;
-  addSource: (entry: NativeSourceEntry) => Promise<unknown>;
-  removeSource: (source: string) => Promise<unknown>;
-  setSourceTransmission: (source: string, enabled: boolean) => Promise<unknown>;
-  updateAudioBitrate: (source: string, bitrate: number) => Promise<unknown>;
-  updateVideoBitrate: (source: string, bitrate: number) => Promise<unknown>;
+  connect: (channelId: string) => Promise<MediaCommandResult>;
+  handle: (
+    type: string,
+    data: Record<string, unknown>,
+  ) => Promise<MediaCommandResult>;
+  reconcilePublications: (
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
+    getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
+  ) => Promise<MediaCommandResult>;
+  configureControl: (config: Record<string, unknown>) => MediaCommandResult;
+  addSource: (entry: NativeSourceEntry) => Promise<MediaCommandResult>;
+  removeSource: (source: string) => Promise<MediaCommandResult>;
+  setSourceTransmission: (
+    source: string,
+    enabled: boolean,
+  ) => Promise<MediaCommandResult>;
+  updateAudioBitrate: (
+    source: string,
+    bitrate: number,
+  ) => Promise<MediaCommandResult>;
+  updateVideoBitrate: (
+    source: string,
+    bitrate: number,
+  ) => Promise<MediaCommandResult>;
   updateVideoParameters: (
     source: string,
     parameters: Record<string, unknown>,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   adaptVideoReceiver: (
     logicalStreamId: string,
     preferredLayers: {
       spatialLayer?: number;
       temporalLayer?: number;
     },
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   setJitterBufferConfig: (config?: {
     minDelayMs?: number;
     targetDelayMs?: number;
-  }) => unknown;
+  }) => MediaCommandResult;
   invoke: (
     operation: string,
     payload?: Record<string, unknown>,
@@ -212,7 +257,7 @@ export interface NativeMediasoupSfuSessionSurface {
   signalingPath?: string;
   signalingToken?: string;
   controlTicket: string;
-  refreshControl: (() => Promise<unknown>) | null;
+  refreshControl: (() => Promise<MediaCommandResult>) | null;
   mediaSessionId: string;
   requestTimeoutMs: number;
   consumerControlTimeoutMs: number;
@@ -221,7 +266,10 @@ export interface NativeMediasoupSfuSessionSurface {
   initializationTimeoutMs: number;
   signaling: NativeSignalingSocket | null;
   providerSignaling: NativeProviderSignaling | null;
-  messageHandlers: Map<string, (data: Record<string, unknown>) => unknown>;
+  messageHandlers: Map<
+    string,
+    (data: Record<string, unknown>) => MediaCommandResult
+  >;
   pending: Map<string, NativePendingRequest>;
   pendingProduce: Map<string, NativePendingRequest>;
   pendingConsumers: Set<string>;
@@ -235,10 +283,10 @@ export interface NativeMediasoupSfuSessionSurface {
   pendingLocalVideoFrames: Map<string, Record<string, unknown>>;
   remoteProducerMetadata: Map<string, Record<string, unknown>>;
   sourcePublications: Map<string, Promise<NativeProducerEntry | null>>;
-  sourceOperations: Map<string, Promise<unknown>>;
+  sourceOperations: Map<string, Promise<MediaCommandResult>>;
   pendingCloudflarePublications: Map<string, Record<string, unknown>>;
   sourceTransmission: Map<string, boolean>;
-  producerRemovals: Map<string, Promise<unknown>>;
+  producerRemovals: Map<string, Promise<MediaCommandResult>>;
   consumers: Map<string, NativeConsumerEntry>;
   transportStates: Map<NativeDirection, NativeTransportState>;
   lastSentClientRtpCapabilities: Record<string, unknown> | null;
@@ -255,7 +303,7 @@ export interface NativeMediasoupSfuSessionSurface {
   localVideoFeeds: Map<string, Record<string, unknown>>;
   remoteVideoFeeds: Map<string, Record<string, unknown>>;
   remoteAudioFeeds: Map<string, Record<string, unknown>>;
-  topologyState: Record<string, unknown> | null;
+  topologyState: NativeTopology | null;
   localPeerId: string;
   lastInRoom: Array<Record<string, unknown>>;
   device: NativeDeviceEntry | null;
@@ -265,13 +313,13 @@ export interface NativeMediasoupSfuSessionSurface {
   closed: boolean;
   intentionalClose: boolean;
   initialized: boolean;
-  connectPromise: Promise<unknown> | null;
-  connectResolve: ((value?: unknown) => void) | null;
-  connectReject: ((error: unknown) => void) | null;
-  nativeTeardownPromise: Promise<unknown> | null;
-  readyPromise: Promise<unknown> | null;
-  readyResolve: ((value?: unknown) => void) | null;
-  readyReject: ((error: unknown) => void) | null;
+  connectPromise: Promise<MediaCommandResult> | null;
+  connectResolve: ((value?: MediaCommandResult) => void) | null;
+  connectReject: ((error: OwnedErrorValue) => void) | null;
+  nativeTeardownPromise: Promise<MediaCommandResult> | null;
+  readyPromise: Promise<MediaCommandResult> | null;
+  readyResolve: ((value?: MediaCommandResult) => void) | null;
+  readyReject: ((error: OwnedErrorValue) => void) | null;
   initializationRequestId: string | null;
   nextRequestSequence: number;
   pendingNativeDirection: NativeDirection | null;
@@ -290,25 +338,29 @@ export interface NativeMediasoupSfuSessionSurface {
   jitterBufferTargetDelay: number;
   rtpSamples: Map<string, { timestamp: number | null; bytes: number | null }>;
   recoveryAttempts: Map<string, number>;
-  recoveryOperations: Map<string, Promise<unknown>>;
+  recoveryOperations: Map<string, Promise<MediaCommandResult>>;
   recoveryTimers: Map<string, ReturnType<typeof setTimeout>>;
   mediaRevision: number;
   initializationTimer: ReturnType<typeof setTimeout> | null;
   transportRequestIds: Map<NativeDirection, string>;
   cloudflareSession: NativeCloudflareSessionLike | null;
-  providerActivationPromise: Promise<unknown> | null;
+  providerActivationPromise: Promise<MediaCommandResult> | null;
   lastProviderFailureKey: string | null;
-  onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
-  onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
-  onP2pSignal?: (data: Record<string, unknown>) => unknown;
-  onCurrentlyInChannel?: (data: Record<string, unknown>) => unknown;
-  onBeforeNativeTeardown?: () => unknown;
-  onNativeMediaClose?: () => unknown;
-  onStateChange?: (session: Record<string, unknown>) => unknown;
-  onError?: (error: Error) => unknown;
+  onRemoteTrack?: (entry: Record<string, unknown>) => MediaCommandResult;
+  onRemoteTrackEnded?: (entry: Record<string, unknown>) => MediaCommandResult;
+  onP2pSignal?: (data: Record<string, unknown>) => MediaCommandResult;
+  onCurrentlyInChannel?: (data: Record<string, unknown>) => MediaCommandResult;
+  onBeforeNativeTeardown?: () => MediaCommandResult;
+  onNativeMediaClose?: () => MediaCommandResult;
+  onStateChange?: (
+    session: NativeMediasoupSfuSessionSurface,
+  ) => MediaCommandResult;
+  onError?: (error: Error) => MediaCommandResult;
   getAudioBitrate?: (source: string) => number | null;
   getAudioStereo?: (source: string) => boolean | null;
   getVideoSettings?: (source: string) => VideoSettings;
+  getControlConnectionEpoch?: () => number;
+  controlConnectionEpoch?: number;
   mediaCapabilities: ParticipantMediaCapabilities | null;
   remoteParticipantCapabilities: Map<string, ParticipantMediaCapabilities>;
   logicalVideoStreams: Map<string, LogicalVideoStreamState>;

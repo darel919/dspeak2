@@ -1069,7 +1069,7 @@ function getChannelParticipants(channel) {
     .filter((userId) => String(userId) !== currentUserId)
     .map((userId) => ({
       id: String(userId),
-      ...(channel.participantStates?.[String(userId)] || {}),
+      ...channel.participantStates?.[String(userId)],
     }));
 }
 function getConnectedChannelParticipants(channel) {
@@ -1079,8 +1079,8 @@ function getConnectedChannelParticipants(channel) {
   return (channel.inRoom || []).map((userId) => {
     const normalizedUserId = String(userId);
     return {
-      ...(connectedUsers.get(normalizedUserId) || {}),
-      ...(channel.participantStates?.[normalizedUserId] || {}),
+      ...connectedUsers.get(normalizedUserId),
+      ...channel.participantStates?.[normalizedUserId],
       id: normalizedUserId,
     };
   });
@@ -1391,25 +1391,32 @@ const CHANNEL_POLICY_OPTIONS = computed(() =>
 let createReturnFocus = null;
 let editReturnFocus = null;
 const channelPolicyFields = computed(() =>
-  Object.entries(MEDIA_POLICY_LIMITS).map(([key, limits]) => ({
-    key,
-    label:
-      {
-        microphoneKbps: "Microphone",
-        cameraKbps: "Camera video",
-        screenKbps: "Screen share",
-        sharedAudioKbps: "Shared audio",
-      }[key] || key,
-    ...limits,
-    ...(key === "microphoneKbps"
-      ? editingChannelPolicy.value.hdAudio
-        ? { min: HD_MICROPHONE_MIN_KBPS, max: limits.max }
-        : { min: limits.min, max: STANDARD_MICROPHONE_MAX_KBPS }
-      : {}),
-    control: VIDEO_POLICY_QUALITY_STEPS[key] ? "steps" : "slider",
-    options: VIDEO_POLICY_QUALITY_STEPS[key] || [],
-    step: 1,
-  })),
+  Object.entries(MEDIA_POLICY_LIMITS).map(([key, limits]) => {
+    const field = {
+      key,
+      label:
+        {
+          microphoneKbps: "Microphone",
+          cameraKbps: "Camera video",
+          screenKbps: "Screen share",
+          sharedAudioKbps: "Shared audio",
+        }[key] || key,
+      ...limits,
+      control: VIDEO_POLICY_QUALITY_STEPS[key] ? "steps" : "slider",
+      options: VIDEO_POLICY_QUALITY_STEPS[key] || [],
+      step: 1,
+    };
+    if (key === "microphoneKbps") {
+      if (editingChannelPolicy.value.hdAudio) {
+        field.min = HD_MICROPHONE_MIN_KBPS;
+        field.max = limits.max;
+      } else {
+        field.min = limits.min;
+        field.max = STANDARD_MICROPHONE_MAX_KBPS;
+      }
+    }
+    return field;
+  }),
 );
 
 function applyHdAudioRange() {
@@ -1565,7 +1572,7 @@ async function handleCreateChannel() {
 async function editChannel(channel) {
   editReturnFocus = document.activeElement;
   editingChannel.value = { ...channel };
-  editingChannelPolicy.value = { ...(channel.mediaPolicy || {}) };
+  editingChannelPolicy.value = { ...channel.mediaPolicy };
   originalEditingChannelPolicy.value = { ...editingChannelPolicy.value };
   editingMessagePolicy.value = normalizeChannelPolicy(channel.policy);
   editingSlowMode.value = normalizeSlowMode(channel.slow_mode);

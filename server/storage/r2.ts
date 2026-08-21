@@ -14,8 +14,10 @@ import type {
   R2ObjectRecord,
   R2ObjectTypeName,
   R2UploadResult,
+  R2UploadBody,
   UploadValidationResult,
 } from "../types/storage.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 function requiredEnvironment(name: string): string {
   const value = process.env[name];
@@ -64,6 +66,7 @@ export async function createUploadUrl(
   contentType: string,
   maxSizeBytes = 50 * 1024 * 1024,
 ): Promise<R2UploadResult> {
+  void maxSizeBytes;
   const key = generateObjectKey(type, identifiers);
   const command = new PutObjectCommand({
     Bucket: BUCKET,
@@ -76,18 +79,24 @@ export async function createUploadUrl(
 
 export async function putObject(
   key: string,
-  body: R2Body,
+  body: R2UploadBody,
   contentType: string,
   contentLength: number | null | undefined,
 ): Promise<void> {
+  const uploadBody = await normalizeR2Body(body);
   const command = new PutObjectCommand({
     Bucket: BUCKET,
     Key: key,
-    Body: body,
+    Body: uploadBody,
     ContentType: contentType,
-    ...(contentLength == null ? {} : { ContentLength: contentLength }),
+    ContentLength: contentLength ?? undefined,
   });
   await r2Client.send(command);
+}
+
+export async function normalizeR2Body(body: R2UploadBody): Promise<R2Body> {
+  if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
+  return body;
 }
 
 export async function createDownloadUrl(
@@ -177,7 +186,7 @@ export const ALLOWED_MIME_TYPES = {
 export function validateUpload(
   type: R2ObjectTypeName,
   mimeType: string,
-  size: unknown,
+  size: ExternalField,
   maxSizeBytes = 50 * 1024 * 1024,
 ): UploadValidationResult {
   const allowed = ALLOWED_MIME_TYPES[type];

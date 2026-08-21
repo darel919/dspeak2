@@ -1,18 +1,46 @@
 const DEVICE_ID_KEY = "dspeak:media:deviceId";
 
-export function getOrCreateDeviceId(storage = globalThis.localStorage) {
-  const make = () =>
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+let memoryMediaDeviceId: string | null = null;
+
+const make = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+export function getOrCreateDeviceId(explicitStorage?: Storage | null) {
+  if (memoryMediaDeviceId) {
+    return memoryMediaDeviceId;
+  }
+
+  let storage = explicitStorage;
+
+  if (storage === undefined) {
+    try {
+      storage = globalThis.localStorage;
+    } catch {
+      storage = null;
+    }
+  }
+
   try {
     const existing = storage?.getItem(DEVICE_ID_KEY);
-    if (existing) return existing;
-    const next = make();
-    storage?.setItem(DEVICE_ID_KEY, next);
-    return next;
+
+    if (existing) {
+      memoryMediaDeviceId = existing;
+      return existing;
+    }
+
+    const created = make();
+    storage?.setItem(DEVICE_ID_KEY, created);
+    memoryMediaDeviceId = created;
+    return created;
   } catch {
-    return make();
+    memoryMediaDeviceId = make();
+    return memoryMediaDeviceId;
   }
+}
+
+export function __resetDeviceIdCacheForTesting() {
+  memoryMediaDeviceId = null;
 }
 
 export async function getMediaControlBootstrap({
@@ -28,9 +56,10 @@ export async function getMediaControlBootstrap({
   channelId: string;
   connectionMode: string;
   deviceId: string;
-  roomId: string;
+  roomId: string | null;
 }) {
-  const headers: Record<string, string> = {
+  type BootstrapHeaders = { "Content-Type": string; Authorization?: string };
+  const headers: BootstrapHeaders = {
     "Content-Type": "application/json",
   };
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
@@ -48,7 +77,7 @@ export async function getMediaControlBootstrap({
 export function buildMediaControlSocketUrl({
   mediaControlUrl,
   channelId,
-  ticket,
+  ticket: _ticket,
 }: {
   mediaControlUrl: string;
   channelId: string;

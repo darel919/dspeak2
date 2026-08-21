@@ -1,6 +1,5 @@
-import { shallowRef } from "vue";
+import { computed, shallowRef } from "vue";
 import { MediaEngine } from "../../shared/media/contracts.ts";
-import { mediaSignalingUrl } from "../../shared/media-signaling-socket.ts";
 import { getAudioBitrateBps } from "../../shared/voice-transport.ts";
 import {
   applyLowSpecNativeVideoProfile,
@@ -66,9 +65,7 @@ import {
 import type {
   NativeCaptureRequest,
   NativeCapabilities,
-  NativeErrorLike,
   NativeMediaEngineOptions,
-  NativeMediaFlags,
   NativeTopology,
 } from "../../shared/types/native-media.ts";
 import type {
@@ -80,61 +77,212 @@ import type {
   MediaStats,
 } from "../../shared/media/types.ts";
 import type { NativeMediaEngineState } from "../../shared/types/native-media-engine.ts";
-import type { VideoSettings } from "../../shared/types/video-settings.ts";
+import type { BrowserMediaEngineSession } from "../../shared/types/media-engine-adapters.ts";
+import type { MediaVideoFeed } from "../../shared/types/media-source-controller.ts";
+import type { RemoteMediaEntry } from "../../shared/types/hybrid-media-registry.ts";
+import type { RtcStatsSnapshot } from "../../shared/types/rtc-stats.ts";
+import type { MediaCaptureStartOptions } from "../../shared/types/media-capture.ts";
 import { buildNativeTopologyGraph } from "../../shared/native-mediasoup-diagnostics.ts";
+import { normalizeRtcTransport } from "../../shared/hybrid-media-diagnostics.ts";
 import { getSharedStatsSnapshot } from "../../shared/rtc-stats-sampler.ts";
+import { createHybridMediaSessionApi } from "../../shared/hybrid-media-session-api.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
+import {
+  parseExternalNumber,
+  parseExternalValue,
+} from "../../utils/external-values.ts";
+import type { MediaCommandResult } from "../../shared/types/boundary.ts";
+import { parseThrownError } from "../../utils/external-values.ts";
 
-export interface NativeMediaEngine extends NativeMediaEngineState {}
-
-export function createNativeSessionBoundary() {
+export function createNativeSessionBoundary(): BrowserMediaEngineSession {
   const unavailable = (operation: string): never => {
     throw nativeOnlyError(`native session ${operation}`);
   };
+  const unavailableAsync = async (operation: string): Promise<never> =>
+    unavailable(operation);
+  const connected = shallowRef(false);
+  const error = shallowRef<string | null>(null);
+  const transportReady = shallowRef(false);
+  const iceConnectedBoth = shallowRef(false);
+  const mediaConnectionState = shallowRef("disconnected");
+  const mediaCapabilities =
+    shallowRef<NativeMediaEngineState["mediaCapabilities"]>(null);
+  const connectionPhase = shallowRef("idle");
+  const lifecycle = shallowRef<unknown>(null);
+  const protocolState = shallowRef<Record<string, unknown> | null>(null);
+  const protocolUpdateRequired = shallowRef(false);
+  const playbackState = shallowRef("idle");
+  const microphoneDeviceState = shallowRef("preferred");
+  const producers = shallowRef(new Map<string, unknown>());
+  const consumers = shallowRef(new Map<string, unknown>());
+  const localVideoFeeds = shallowRef<Map<string, MediaVideoFeed>>(new Map());
+  const remoteVideoFeeds = shallowRef<Map<string, RemoteMediaEntry>>(new Map());
+  const remoteAudioFeeds = shallowRef<Map<string, RemoteMediaEntry>>(new Map());
+  const sharedAudioStats = shallowRef({ kbps: 0, level: 0, dbfs: -60 });
+  const echoDetected = shallowRef(false);
+  const sharedAudioAttenuation = shallowRef<unknown>(null);
+  const sharedAudioDucking = shallowRef<unknown>(null);
+  const peerRoundTripTimes = shallowRef<Record<string, unknown>>({});
+  const peerConnectionMetrics = shallowRef<Record<string, unknown>>({});
+  const mediaPathMetrics = shallowRef<unknown[]>([]);
+  const sfuRoundTripTime = shallowRef<number | null>(null);
+  const participantSfuRoundTripTimes = shallowRef<Record<string, unknown>>({});
+  const activeProviderState = shallowRef<string | null>(null);
+  const remoteProducersCount = shallowRef(0);
+  const lastInRoom = shallowRef<string[]>([]);
+  const topologyState = shallowRef<unknown>(null);
+  const topologyGraph = shallowRef<unknown>(null);
+  const isProducing = computed(() => false);
+  const joinReady = computed(() => false);
+  const api = createHybridMediaSessionApi({
+    activeProviderState,
+    areTransportsIceConnected: () => Promise.resolve(false),
+    connect: () => unavailableAsync("connect"),
+    connected,
+    connectionPhase,
+    disconnect: () => unavailableAsync("disconnect"),
+    echoDetected,
+    error,
+    getInboundRtpStats: () => unavailableAsync("inbound RTP stats"),
+    getOutboundRtpStats: () => unavailableAsync("outbound RTP stats"),
+    getVoiceTransportTimeout: () => 0,
+    getWebRTCDiagnosticStats: () => unavailableAsync("WebRTC diagnostic stats"),
+    getWebRTCStatsSnapshot: () => unavailableAsync("WebRTC stats"),
+    iceConnectedBoth,
+    isProducing,
+    joinReady,
+    lastInRoom,
+    lastReceivedConsumerParams: () => null,
+    lastSentClientRtpCapabilities: () => null,
+    lifecycle,
+    localVideoFeeds,
+    markRemoteFirstFrame: () => unavailable("remote first frame"),
+    markRemoteFramePresented: () => unavailable("remote frame presented"),
+    mediaConnectionState,
+    mediaCapabilities,
+    mediaPathMetrics,
+    microphoneDeviceState,
+    participantSfuRoundTripTimes,
+    peerConnectionMetrics,
+    peerRoundTripTimes,
+    playbackState,
+    prepareAudioPlayback: () => unavailableAsync("audio playback"),
+    producers,
+    consumers,
+    protocolState,
+    protocolUpdateRequired,
+    remoteAudioFeeds,
+    remoteProducersCount,
+    remoteVideoFeeds,
+    restartAudioProduction: () => unavailableAsync("audio restart"),
+    sharedAudioAttenuation,
+    sharedAudioDucking,
+    sharedAudioStats,
+    sfuRoundTripTime,
+    sendParticipantVoiceState: () => unavailableAsync("voice state"),
+    setMediaCapabilities: () => unavailable("media capabilities"),
+    setRemoteScreenReceiving: () => unavailable("remote screen receiving"),
+    setRemoteSystemAudioReceiving: () =>
+      unavailable("remote system audio receiving"),
+    setSharedAudioAttenuation: () => unavailable("shared audio attenuation"),
+    setSharedAudioVolume: () => unavailable("shared audio volume"),
+    setSystemAudioBitrate: () => unavailable("system audio bitrate"),
+    startAudioProduction: () => unavailableAsync("audio production"),
+    startSystemAudioProduction: () =>
+      unavailableAsync("system audio production"),
+    startVideoProduction: () => unavailableAsync("video production"),
+    stopAudioProduction: () => unavailableAsync("audio production stop"),
+    stopSystemAudioProduction: () =>
+      unavailableAsync("system audio production stop"),
+    stopVideoProduction: () => unavailableAsync("video production stop"),
+    topologyGraph,
+    topologyState,
+    transportReady,
+    applyOutputDeviceToAll: () => unavailable("output device application"),
+    applyVolumeForTrack: () => unavailable("track volume"),
+    applyVolumeForUser: () => unavailable("user volume"),
+    ensureAudioElements: () => unavailable("audio elements"),
+  });
   return {
-    connected: false,
-    joinReady: false,
-    error: null,
-    transportReady: false,
-    iceConnectedBoth: false,
-    mediaConnectionState: "disconnected",
-    connectionPhase: "idle",
-    lifecycle: null,
-    protocolState: null,
-    protocolUpdateRequired: false,
-    playbackState: "idle",
-    microphoneDeviceState: "preferred",
-    isProducing: false,
-    producers: new Map(),
-    consumers: new Map(),
-    localVideoFeeds: new Map(),
-    remoteVideoFeeds: new Map(),
-    remoteAudioFeeds: new Map(),
-    sharedAudioStats: { kbps: 0, level: 0, dbfs: -60 },
-    echoDetected: false,
-    sharedAudioAttenuation: null,
-    sharedAudioDucking: null,
-    peerRoundTripTimes: {},
-    peerConnectionMetrics: {},
-    sfuRoundTripTime: null,
-    participantSfuRoundTripTimes: {},
-    remoteProducersCount: 0,
-    lastInRoom: [],
-    topologyState: null,
-    topologyGraph: null,
-    activeProvider: null,
-    lastSentClientRtpCapabilities: null,
-    lastReceivedConsumerParams: null,
+    ...api,
     on: () => () => {},
-    getState: () => "disconnected",
+    initialize: () => unavailableAsync("initialize"),
+    joinSession: () => unavailableAsync("join"),
+    leaveSession: () => unavailableAsync("leave"),
+    setMicrophoneEnabled: () => unavailableAsync("microphone"),
+    setCameraEnabled: () => unavailableAsync("camera"),
+    startScreenShare: () => unavailableAsync("screen share"),
+    stopScreenShare: () => unavailableAsync("screen share stop"),
+    handleSignal: () => unavailableAsync("signaling"),
+    getDevices: () => unavailableAsync("device enumeration"),
+    getStats: () => unavailableAsync("stats"),
+    setMicrophoneDevice: () => unavailableAsync("microphone device"),
+    setOutputDevice: () => unavailableAsync("output device"),
+    setLocalVideoPreview: () => unavailable("local video preview"),
+    setJitterBufferConfig: () => unavailable("jitter buffer"),
+    shutdown: () => unavailableAsync("shutdown"),
     isScreenSharing: () => false,
     isMicrophoneEnabled: () => false,
     isCameraEnabled: () => false,
-    connect: () => unavailable("connect"),
-    disconnect: () => unavailable("disconnect"),
-    setSharedAudioAttenuation: () => unavailable("shared audio attenuation"),
   };
 }
-export class NativeMediaEngine extends MediaEngine {
+export class NativeMediaEngine
+  extends MediaEngine
+  implements NativeMediaEngineState
+{
+  declare browserEngine: NativeMediaEngineState["browserEngine"];
+  declare flags: NativeMediaEngineState["flags"];
+  declare tauri: NativeMediaEngineState["tauri"];
+  declare nativeConfig: NativeMediaEngineState["nativeConfig"];
+  declare nativeOnly: NativeMediaEngineState["nativeOnly"];
+  declare voiceStore: NativeMediaEngineState["voiceStore"];
+  declare settingsStore: NativeMediaEngineState["settingsStore"];
+  declare channelsStore: NativeMediaEngineState["channelsStore"];
+  declare getAudioBitrate: NativeMediaEngineState["getAudioBitrate"];
+  declare getAudioStereo: NativeMediaEngineState["getAudioStereo"];
+  declare getVideoSettings: NativeMediaEngineState["getVideoSettings"];
+  declare listeners: NativeMediaEngineState["listeners"];
+  declare unlisten: NativeMediaEngineState["unlisten"];
+  declare initialized: NativeMediaEngineState["initialized"];
+  declare activeScreenCapture: NativeMediaEngineState["activeScreenCapture"];
+  declare activeSystemAudioCapture: NativeMediaEngineState["activeSystemAudioCapture"];
+  declare microphoneOperation: NativeMediaEngineState["microphoneOperation"];
+  declare cameraOperation: NativeMediaEngineState["cameraOperation"];
+  declare screenOperation: NativeMediaEngineState["screenOperation"];
+  declare nativeEventOperation: NativeMediaEngineState["nativeEventOperation"];
+  declare nativeActionHandler: NativeMediaEngineState["nativeActionHandler"];
+  declare nativeReceiveEventHandler: NativeMediaEngineState["nativeReceiveEventHandler"];
+  declare nativeSession: NativeMediaEngineState["nativeSession"];
+  declare nativeP2pSession: NativeMediaEngineState["nativeP2pSession"];
+  declare remoteVideoFeedsRef: NativeMediaEngineState["remoteVideoFeedsRef"];
+  declare remoteAudioFeedsRef: NativeMediaEngineState["remoteAudioFeedsRef"];
+  declare localVideoFeedsRef: NativeMediaEngineState["localVideoFeedsRef"];
+  declare sharedAudioAttenuationRef: NativeMediaEngineState["sharedAudioAttenuationRef"];
+  declare sharedAudioDuckingRef: NativeMediaEngineState["sharedAudioDuckingRef"];
+  declare nativeProvider: NativeMediaEngineState["nativeProvider"];
+  declare nativeP2pFailureEpoch: NativeMediaEngineState["nativeP2pFailureEpoch"];
+  declare nativeTopologyKey: NativeMediaEngineState["nativeTopologyKey"];
+  declare nativeTopologyGeneration: NativeMediaEngineState["nativeTopologyGeneration"];
+  declare nativeTopologyOperation: NativeMediaEngineState["nativeTopologyOperation"];
+  declare onQoe: NativeMediaEngineState["onQoe"];
+  declare qoeTimer: NativeMediaEngineState["qoeTimer"];
+  declare nativeVideoAdaptationTimer: NativeMediaEngineState["nativeVideoAdaptationTimer"];
+  declare nativeVideoAdaptationOperation: NativeMediaEngineState["nativeVideoAdaptationOperation"];
+  declare nativeVideoAdaptationStates: NativeMediaEngineState["nativeVideoAdaptationStates"];
+  declare nativeVideoAdaptationCounters: NativeMediaEngineState["nativeVideoAdaptationCounters"];
+  declare nativeVideoDecodeAdaptationStates: NativeMediaEngineState["nativeVideoDecodeAdaptationStates"];
+  declare nativeVideoDecodeAdaptationCounters: NativeMediaEngineState["nativeVideoDecodeAdaptationCounters"];
+  declare nativeNoiseFloorEstimator: NativeMediaEngineState["nativeNoiseFloorEstimator"];
+  declare nativeSpeaking: NativeMediaEngineState["nativeSpeaking"];
+  declare nativeActiveSamples: NativeMediaEngineState["nativeActiveSamples"];
+  declare nativeQuietSamples: NativeMediaEngineState["nativeQuietSamples"];
+  declare nativeEchoDetector: NativeMediaEngineState["nativeEchoDetector"];
+  declare nativeAuthToken: NativeMediaEngineState["nativeAuthToken"];
+  declare mediaCapabilities: NativeMediaEngineState["mediaCapabilities"];
+
   constructor({
     browserEngine,
     flags = {},
@@ -155,9 +303,7 @@ export class NativeMediaEngine extends MediaEngine {
         "NativeMediaEngine requires a browser engine fallback",
       );
     }
-    this.browserEngine =
-      browserEngine ||
-      (createNativeSessionBoundary() as unknown as NativeMediaEngineState["browserEngine"]);
+    this.browserEngine = browserEngine || createNativeSessionBoundary();
     this.flags = { ...DEFAULT_FLAGS, ...flags };
     this.tauri = tauri || null;
     this.nativeConfig = nativeConfig;
@@ -174,8 +320,12 @@ export class NativeMediaEngine extends MediaEngine {
         return getAudioBitrateBps(
           source,
           source === "screen-audio"
-            ? channel?.mediaPolicy?.sharedAudioKbps
-            : channel?.mediaPolicy?.microphoneKbps,
+            ? parseExternalNumber(
+                parseExternalValue(channel?.mediaPolicy?.sharedAudioKbps),
+              )
+            : parseExternalNumber(
+                parseExternalValue(channel?.mediaPolicy?.microphoneKbps),
+              ),
           this.settingsStore?.systemAudioBitrate,
         );
       });
@@ -312,9 +462,9 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   override async startScreenShare(
-    options: NativeCaptureRequest = {},
+    options: MediaCaptureStartOptions = {},
   ): Promise<void> {
-    await startScreenShare(this, options);
+    await startScreenShare(this, { ...options });
   }
 
   override async stopScreenShare(): Promise<void> {
@@ -341,10 +491,6 @@ export class NativeMediaEngine extends MediaEngine {
     return emitQoe(this, stats);
   }
 
-  /**
-   * Returns capabilities reported by the native runtime, without enabling a
-   * native media path. This is useful for diagnostics and feature gating.
-   */
   async getNativeCapabilities() {
     return getNativeCapabilities(this);
   }
@@ -363,7 +509,7 @@ export class NativeMediaEngine extends MediaEngine {
     };
   }
 
-  _emit(event: string, payload: unknown) {
+  _emit(event: string, payload: MediaCommandResult) {
     for (const callback of this.listeners.get(event) || []) {
       try {
         callback(payload);
@@ -383,8 +529,8 @@ export class NativeMediaEngine extends MediaEngine {
     return handleNativeCaptureError(this, payload);
   }
 
-  _reportNativeP2pFailure(error: unknown) {
-    return reportNativeP2pFailure(this, error);
+  _reportNativeP2pFailure<T>(error: T) {
+    return reportNativeP2pFailure(this, parseThrownError(error));
   }
 
   async setTopology(topology: NativeTopology) {
@@ -408,10 +554,13 @@ export class NativeMediaEngine extends MediaEngine {
   }
 
   get error() {
-    if (this.nativeSession)
-      return (
-        this.nativeSession.errorMessage ?? this.nativeSession.error ?? null
-      );
+    if (this.nativeSession) {
+      const sessionError =
+        this.nativeSession.errorMessage ?? this.nativeSession.error ?? null;
+      return sessionError instanceof Error
+        ? sessionError.message
+        : sessionError;
+    }
     return String(this.browserEngine.error?.value || "") || null;
   }
 
@@ -550,16 +699,13 @@ export class NativeMediaEngine extends MediaEngine {
       .lastReceivedConsumerParams;
   }
 
-  async connect(...args: unknown[]) {
+  async connect(channelId: string, options?: { roomId?: string }) {
     let phase = "initialize";
     try {
       await this.initialize();
       const input = {
-        channelId: String(args[0] || ""),
-        roomId:
-          args[1] && typeof args[1] === "object"
-            ? String((args[1] as Record<string, unknown>).roomId || "")
-            : "",
+        channelId,
+        roomId: options?.roomId || "",
       };
       if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
         await this._configureNativeIceServers();
@@ -568,18 +714,19 @@ export class NativeMediaEngine extends MediaEngine {
         await this.nativeSession?.connect(input.channelId);
         await this._invoke("media_join", { channelId: input.channelId });
         const outputDeviceId = this.settingsStore?.outputDeviceId;
-        if (typeof outputDeviceId === "string" && outputDeviceId.length > 0)
+        if (isExternalString(outputDeviceId) && outputDeviceId.length > 0)
           await this.setOutputDevice(outputDeviceId);
       } else if (this.nativeOnly) {
         throw nativeOnlyError("connect");
       }
       phase = "browser-fallback";
-      if (!this.nativeOnly) return this.browserEngine.connect(...args);
+      if (!this.nativeOnly)
+        return this.browserEngine.connect(channelId, options);
     } catch (error) {
       try {
         this.flags.nativeBackendReady = false;
-      } catch (_) {}
-      const errorLike = error as NativeErrorLike;
+      } catch {}
+      const errorLike = parseThrownError(error);
       const message = errorLike.message || String(error);
       const wrapped = new Error(
         `Native voice connect failed during ${phase}: ${message}`,
@@ -604,36 +751,38 @@ export class NativeMediaEngine extends MediaEngine {
     return this.browserEngine.prepareAudioPlayback();
   }
 
-  restartAudioProduction(...args: unknown[]) {
-    if (this.nativeOnly) return this.startAudioProduction(...args);
-    return this.browserEngine.restartAudioProduction(...args);
+  restartAudioProduction() {
+    if (this.nativeOnly) return this.startAudioProduction();
+    return this.browserEngine.restartAudioProduction();
   }
 
-  startAudioProduction(...args: unknown[]) {
+  async startAudioProduction(): Promise<MediaCommandResult> {
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return this.setMicrophoneEnabled(true);
     }
     if (this.nativeOnly) throw nativeOnlyError("microphone production");
-    return this.browserEngine.startAudioProduction(...args);
+    return this.browserEngine.startAudioProduction();
   }
 
-  stopAudioProduction(...args: unknown[]) {
+  async stopAudioProduction(): Promise<MediaCommandResult> {
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return this.setMicrophoneEnabled(false);
     }
     if (this.nativeOnly) throw nativeOnlyError("microphone production stop");
-    return this.browserEngine.stopAudioProduction(...args);
+    return this.browserEngine.stopAudioProduction();
   }
 
-  startVideoProduction(...args: unknown[]) {
-    const [source] = args;
-    const options = (args[1] as NativeCaptureRequest | undefined) || {};
+  async startVideoProduction(
+    source: "camera" | "screen",
+    options: MediaCaptureStartOptions = {},
+  ): Promise<MediaCommandResult> {
+    const nativeOptions: NativeCaptureRequest = { ...options };
     const nativeCaptureReady = hasNativeCapability(this.flags);
     if (
       source === "screen" &&
       (this._usesNativeCapture("nativeScreenShare") ||
         (nativeCaptureReady &&
-          (this.nativeOnly || isSourceAwareCaptureRequest(options))))
+          (this.nativeOnly || isSourceAwareCaptureRequest(nativeOptions))))
     ) {
       return this.startScreenShare(options);
     }
@@ -645,11 +794,12 @@ export class NativeMediaEngine extends MediaEngine {
       return this.setCameraEnabled(true);
     }
     if (this.nativeOnly) throw nativeOnlyError(`${source} video production`);
-    return this.browserEngine.startVideoProduction(...args);
+    return this.browserEngine.startVideoProduction(source, options);
   }
 
-  stopVideoProduction(...args: unknown[]) {
-    const [source] = args;
+  async stopVideoProduction(
+    source: "camera" | "screen",
+  ): Promise<MediaCommandResult> {
     if (
       source === "screen" &&
       (this._usesNativeCapture("nativeScreenShare") ||
@@ -666,61 +816,37 @@ export class NativeMediaEngine extends MediaEngine {
     }
     if (this.nativeOnly)
       throw nativeOnlyError(`${source} video production stop`);
-    return this.browserEngine.stopVideoProduction(...args);
+    return this.browserEngine.stopVideoProduction(source);
   }
 
-  startSystemAudioProduction(...args: unknown[]) {
-    return startSystemAudioProduction(this, args);
+  async startSystemAudioProduction(
+    options: import("../../shared/types/media-capture.ts").MediaCaptureStartOptions = {},
+  ): Promise<MediaCommandResult> {
+    return startSystemAudioProduction(this, options);
   }
 
-  async stopSystemAudioProduction(...args: unknown[]): Promise<void> {
-    await stopSystemAudioProduction(this, args);
+  async stopSystemAudioProduction(): Promise<void> {
+    await stopSystemAudioProduction(this);
   }
 
-  setRemoteScreenReceiving(...args: unknown[]) {
-    const [userIdOrKey, sourceOrReceiving, receivingValue] = args;
+  setRemoteScreenReceiving(feedKey: string, receiving: boolean) {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setRemoteReceiving(
-            String(userIdOrKey || ""),
-            typeof sourceOrReceiving === "boolean"
-              ? sourceOrReceiving
-              : String(sourceOrReceiving || ""),
-            typeof receivingValue === "boolean" ? receivingValue : undefined,
-          )
-        : this.nativeSession?.setRemoteReceiving(
-            String(userIdOrKey || ""),
-            typeof sourceOrReceiving === "boolean"
-              ? sourceOrReceiving
-              : String(sourceOrReceiving || ""),
-            typeof receivingValue === "boolean" ? receivingValue : undefined,
-          );
-    return this.browserEngine.setRemoteScreenReceiving(...args);
+        ? this.nativeP2pSession?.setRemoteReceiving(feedKey, receiving)
+        : this.nativeSession?.setRemoteReceiving(feedKey, receiving);
+    return this.browserEngine.setRemoteScreenReceiving(feedKey, receiving);
   }
 
-  setRemoteSystemAudioReceiving(...args: unknown[]) {
-    const [userIdOrKey, sourceOrReceiving, receivingValue] = args;
+  setRemoteSystemAudioReceiving(feedKey: string, receiving: boolean) {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setRemoteReceiving(
-            String(userIdOrKey || ""),
-            typeof sourceOrReceiving === "boolean"
-              ? sourceOrReceiving
-              : String(sourceOrReceiving || ""),
-            typeof receivingValue === "boolean" ? receivingValue : undefined,
-          )
-        : this.nativeSession?.setRemoteReceiving(
-            String(userIdOrKey || ""),
-            typeof sourceOrReceiving === "boolean"
-              ? sourceOrReceiving
-              : String(sourceOrReceiving || ""),
-            typeof receivingValue === "boolean" ? receivingValue : undefined,
-          );
-    return this.browserEngine.setRemoteSystemAudioReceiving(...args);
+        ? this.nativeP2pSession?.setRemoteReceiving(feedKey, receiving)
+        : this.nativeSession?.setRemoteReceiving(feedKey, receiving);
+    return this.browserEngine.setRemoteSystemAudioReceiving(feedKey, receiving);
   }
 
-  setSharedAudioVolume(...args: unknown[]) {
-    const volume = Math.max(0, Math.min(100, Number(args[0]))) / 100;
+  setSharedAudioVolume(value: number) {
+    const volume = Math.max(0, Math.min(100, Number(value))) / 100;
     const enabled = volume > 0;
     if (this.nativeOnly) {
       return Promise.allSettled([
@@ -729,7 +855,7 @@ export class NativeMediaEngine extends MediaEngine {
         this.nativeP2pSession?.setSourceTransmission?.("screen-audio", enabled),
       ]);
     }
-    return this.browserEngine.setSharedAudioVolume(...args);
+    return this.browserEngine.setSharedAudioVolume(value);
   }
 
   setLocalVideoPreview(source: string, enabled: boolean) {
@@ -745,17 +871,18 @@ export class NativeMediaEngine extends MediaEngine {
       reductionPercent?: number;
       attackMs?: number;
       releaseMs?: number;
-    } = {},
+    } | null = {},
   ) {
+    const normalizedAttenuation = attenuation || {};
     if (!this.nativeOnly)
       return this.browserEngine.setSharedAudioAttenuation?.(
         speaking,
-        attenuation,
+        normalizedAttenuation,
       );
-    const enabled = speaking && attenuation.enabled === true;
+    const enabled = speaking && normalizedAttenuation.enabled === true;
     const reductionPercent = Math.max(
       0,
-      Math.min(100, Number(attenuation.reductionPercent) || 0),
+      Math.min(100, Number(normalizedAttenuation.reductionPercent) || 0),
     );
     this.sharedAudioDuckingRef.value = {
       active: enabled,
@@ -764,165 +891,149 @@ export class NativeMediaEngine extends MediaEngine {
     return this._invoke("media_set_shared_audio_attenuation", {
       enabled,
       reductionPercent,
-      attackMs: Math.max(0, Number(attenuation.attackMs) || 120),
-      releaseMs: Math.max(0, Number(attenuation.releaseMs) || 650),
+      attackMs: Math.max(0, Number(normalizedAttenuation.attackMs) || 120),
+      releaseMs: Math.max(0, Number(normalizedAttenuation.releaseMs) || 650),
     });
   }
 
-  setSystemAudioBitrate(...args: unknown[]) {
+  setSystemAudioBitrate(value: number) {
     if (this.nativeOnly) {
-      const bitrate = Number(args[0]);
+      const bitrate = Number(value);
       return Promise.allSettled([
         this.nativeSession?.updateAudioBitrate("screen-audio", bitrate),
         this.nativeP2pSession?.updateAudioBitrate("screen-audio", bitrate),
       ]);
     }
-    return this.browserEngine.setSystemAudioBitrate(...args);
+    return this.browserEngine.setSystemAudioBitrate(value);
   }
 
-  sendParticipantVoiceState(...args: unknown[]) {
+  sendParticipantVoiceState(state?: { muted?: boolean; deafened?: boolean }) {
     if (
       this.flags.nativeRtc &&
       hasNativeCapability(this.flags) &&
       this.nativeSession?.sendParticipantVoiceState
     ) {
-      const state = args[0];
       return this.nativeSession.sendParticipantVoiceState(
-        state && typeof state === "object"
-          ? {
-              muted: Boolean((state as Record<string, unknown>).muted),
-              deafened: Boolean((state as Record<string, unknown>).deafened),
-            }
+        state
+          ? { muted: Boolean(state.muted), deafened: Boolean(state.deafened) }
           : undefined,
       );
     }
     if (this.nativeOnly) throw nativeOnlyError("participant voice state");
-    return this.browserEngine.sendParticipantVoiceState(...args);
+    return this.browserEngine.sendParticipantVoiceState(state);
   }
 
-  applyOutputDeviceToAll(...args: unknown[]) {
+  applyOutputDeviceToAll() {
     if (this.nativeOnly) {
-      const requested = args.length
-        ? args[0]
-        : this.settingsStore?.outputDeviceId;
-      const deviceId = typeof requested === "string" ? requested : "";
+      const requested = this.settingsStore?.outputDeviceId;
+      const deviceId = isExternalString(requested) ? requested : "";
       return this.setOutputDevice(deviceId);
     }
-    return this.browserEngine.applyOutputDeviceToAll(...args);
+    return this.browserEngine.applyOutputDeviceToAll();
   }
 
-  applyVolumeForUser(...args: unknown[]) {
+  applyVolumeForUser(userId: string, volume: number) {
     if (this.nativeOnly) {
-      const [userId, volume] = args;
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setConsumerVolume(
-            String(userId || ""),
-            null,
-            Number(volume),
-          )
-        : this.nativeSession?.setConsumerVolume(
-            String(userId || ""),
-            "",
-            Number(volume),
-          );
+        ? this.nativeP2pSession?.setConsumerVolume(userId, null, volume)
+        : this.nativeSession?.setConsumerVolume(userId, "", Number(volume));
     }
-    return this.browserEngine.applyVolumeForUser(...args);
+    return this.browserEngine.applyVolumeForUser(userId, volume);
   }
 
-  applyVolumeForTrack(...args: unknown[]) {
+  applyVolumeForTrack(userId: string, source: string, volume: number) {
     if (this.nativeOnly) {
-      const [userId, source, volume] = args;
       return this.nativeProvider === "p2p"
-        ? this.nativeP2pSession?.setConsumerVolume(
-            String(userId || ""),
-            String(source || ""),
-            Number(volume),
-          )
-        : this.nativeSession?.setConsumerVolume(
-            String(userId || ""),
-            String(source || ""),
-            Number(volume),
-          );
+        ? this.nativeP2pSession?.setConsumerVolume(userId, source, volume)
+        : this.nativeSession?.setConsumerVolume(userId, source, volume);
     }
-    return this.browserEngine.applyVolumeForTrack(...args);
+    return this.browserEngine.applyVolumeForTrack(userId, source, volume);
   }
 
-  ensureAudioElements(...args: unknown[]) {
+  ensureAudioElements() {
     if (this.flags.nativeRtc && hasNativeCapability(this.flags)) {
       return Promise.resolve();
     }
     if (this.nativeOnly) throw nativeOnlyError("audio elements");
-    return this.browserEngine.ensureAudioElements(...args);
+    return this.browserEngine.ensureAudioElements();
   }
 
-  getWebRTCStatsSnapshot(...args: unknown[]) {
+  async getWebRTCStatsSnapshot(): Promise<RtcStatsSnapshot> {
     if (this.nativeOnly)
       return getSharedStatsSnapshot(this, () =>
-        (
-          (this.nativeProvider === "p2p"
+        (async () => {
+          const rawTransports = await ((this.nativeProvider === "p2p"
             ? this.nativeP2pSession?.stats?.()
-            : this.nativeSession?.stats?.()) || Promise.resolve([])
-        ).then((transports: unknown) => ({
-          timestamp: Date.now(),
-          engine: "native",
-          ...buildNativeTopologyGraph({
-            topology:
-              this.nativeSession?.topologyState ||
-              (this.nativeP2pSession
-                ? {
-                    mode: this.nativeP2pSession.mode,
-                    epoch: this.nativeP2pSession.epoch,
-                    localPeerId: this.nativeP2pSession.localPeerId,
-                    peers: [...this.nativeP2pSession.peers.values()].map(
-                      (peer) => ({ peerId: peer.peerId }),
-                    ),
-                  }
-                : null),
-            provider: this.nativeProvider,
-            localPeerId:
-              this.nativeP2pSession?.localPeerId ||
-              this.nativeSession?.localPeerId ||
-              null,
+            : this.nativeSession?.stats?.()) || Promise.resolve([]));
+          const transports = Array.isArray(rawTransports)
+            ? rawTransports
+                .filter((value): value is Record<string, unknown> =>
+                  isExternalRecord(value),
+                )
+                .map(normalizeRtcTransport)
+            : [];
+          return {
+            timestamp: Date.now(),
+            engine: "native",
+            ...buildNativeTopologyGraph({
+              topology:
+                this.nativeSession?.topologyState ||
+                (this.nativeP2pSession
+                  ? {
+                      mode: this.nativeP2pSession.mode,
+                      epoch: this.nativeP2pSession.epoch,
+                      localPeerId: this.nativeP2pSession.localPeerId,
+                      peers: [...this.nativeP2pSession.peers.values()].map(
+                        (peer) => ({ peerId: peer.peerId }),
+                      ),
+                    }
+                  : null),
+              provider: this.nativeProvider,
+              localPeerId:
+                this.nativeP2pSession?.localPeerId ||
+                this.nativeSession?.localPeerId ||
+                null,
+              transports,
+            }),
             transports,
-          }),
-          transports,
-        })),
+          };
+        })(),
       );
-    return this.browserEngine.getWebRTCStatsSnapshot(...args);
+    return this.browserEngine.getWebRTCStatsSnapshot();
   }
 
-  getOutboundRtpStats(...args: unknown[]) {
+  async getOutboundRtpStats(): Promise<MediaCommandResult> {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
         ? this.nativeP2pSession?.getOutboundRtpStats?.() || []
         : this.nativeSession?.getOutboundRtpStats?.() || [];
-    return this.browserEngine.getOutboundRtpStats(...args);
+    return this.browserEngine.getOutboundRtpStats();
   }
 
-  getInboundRtpStats(...args: unknown[]) {
+  async getInboundRtpStats(): Promise<MediaCommandResult> {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
         ? this.nativeP2pSession?.getInboundRtpStats?.() || []
         : this.nativeSession?.getInboundRtpStats?.() || [];
-    return this.browserEngine.getInboundRtpStats(...args);
+    return this.browserEngine.getInboundRtpStats();
   }
 
-  getWebRTCDiagnosticStats(...args: unknown[]) {
+  async getWebRTCDiagnosticStats(): Promise<MediaCommandResult> {
     if (this.nativeOnly)
       return this.nativeProvider === "p2p"
         ? this.nativeP2pSession?.diagnosticStats?.() || []
         : this.nativeSession?.diagnosticStats?.() || [];
-    return this.browserEngine.getWebRTCDiagnosticStats(...args);
+    return this.browserEngine.getWebRTCDiagnosticStats();
   }
 
-  areTransportsIceConnected(...args: unknown[]) {
+  areTransportsIceConnected(): Promise<boolean> {
     if (this.nativeOnly)
       return Promise.resolve(
         this.nativeProvider === "p2p"
           ? this.nativeP2pSession?.iceConnectedBoth === true
           : this.nativeSession?.iceConnectedBoth === true,
       );
-    return this.browserEngine.areTransportsIceConnected(...args);
+    return this.browserEngine.areTransportsIceConnected();
   }
 
   setJitterBufferConfig(...args: unknown[]) {
@@ -934,15 +1045,17 @@ export class NativeMediaEngine extends MediaEngine {
       ]);
     }
     return this.browserEngine.setJitterBufferConfig?.(
-      args[0] && typeof args[0] === "object"
-        ? (args[0] as Record<string, unknown>)
-        : undefined,
+      isExternalRecord(args[0]) ? args[0] : undefined,
     );
   }
 
   override getState(): MediaEngineState {
-    return this.nativeSession
-      ? (this.nativeSession.getState() as MediaEngineState)
+    const state = this.nativeSession?.getState();
+    return state === "connecting" ||
+      state === "connected" ||
+      state === "reconnecting" ||
+      state === "failed"
+      ? state
       : "disconnected";
   }
 
@@ -993,7 +1106,7 @@ export class NativeMediaEngine extends MediaEngine {
   async _invoke(
     command: string,
     payload: NativeCaptureRequest = {},
-  ): Promise<NativeCaptureRequest> {
+  ): Promise<MediaCommandResult> {
     return invoke(this, command, payload);
   }
 

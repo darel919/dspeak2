@@ -1,10 +1,291 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CloudflareRealtimeSession } from "../app/shared/cloudflare-realtime-session.ts";
+import type { CloudflarePublication } from "../app/shared/types/cloudflare-media.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../shared/types/external.ts";
 
 function session() {
   return new CloudflareRealtimeSession({ send() {}, iceServers: [] });
 }
+
+test("stale mid-subscribe reconciliation converges to the newest canonical snapshot", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+  const registry = new Map<string, CloudflarePublication>();
+
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  const newY = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Y",
+    generation: 9,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  let releaseSubscribeX: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  const subscribeCalls: string[] = [];
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    subscribeCalls.push(trackName);
+    client.subscribedTrackNames.add(trackName);
+    if (trackName === "screen-X") await gateX;
+    return true;
+  };
+
+  await client.handle("cloudflare-publication-available", {
+    ...newY,
+  });
+  assert.equal(client.publications.has("screen-Y"), true);
+
+  let stale = false;
+  let registrySnapshotAtStale: unknown[] | null = null;
+  const reconcilePromise = client.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    () => {
+      registrySnapshotAtStale = [...registry.values()];
+      return [...registry.values()];
+    },
+  );
+
+  registry.set(newY.trackName, newY);
+  stale = true;
+  releaseSubscribeX?.();
+
+  await reconcilePromise;
+
+  assert.equal(client.publications.has("screen-Y"), true);
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Y"), true);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
+  assert.ok(subscribeCalls.includes("screen-X"));
+  assert.ok(subscribeCalls.includes("screen-Y"));
+  assert.deepEqual(registrySnapshotAtStale, [newY]);
+  client.closeMedia();
+});
+
+test("stale mid-subscribe convergence treats an empty canonical state as authoritative", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+  const registry = new Map<string, CloudflarePublication>();
+
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  let releaseSubscribeX: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    if (trackName === "screen-X") await gateX;
+    return true;
+  };
+
+  let stale = false;
+  const reconcilePromise = client.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    () => [...registry.values()],
+  );
+
+  stale = true;
+  releaseSubscribeX?.();
+
+  await reconcilePromise;
+
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
+  client.closeMedia();
+});
+
+test("stale mid-subscribe convergence survives an overtaking revision R40→R41→R42", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+  const registry = new Map<string, CloudflarePublication>();
+
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  const newY = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Y",
+    generation: 9,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  const newZ = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Z",
+    generation: 10,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  let releaseSubscribeX: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  const subscribeCalls: string[] = [];
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    subscribeCalls.push(trackName);
+    client.subscribedTrackNames.add(trackName);
+    if (trackName === "screen-X") await gateX;
+    return true;
+  };
+
+  let stale = false;
+  const reconcilePromise = client.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    () => [...registry.values()],
+  );
+
+  registry.set(newY.trackName, newY);
+
+  registry.clear();
+  registry.set(newZ.trackName, newZ);
+
+  stale = true;
+  releaseSubscribeX?.();
+
+  await reconcilePromise;
+
+  assert.equal(client.publications.has("screen-Z"), true);
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.publications.has("screen-Y"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Z"), true);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Y"), false);
+  assert.ok(subscribeCalls.includes("screen-X"));
+  assert.ok(subscribeCalls.includes("screen-Z"));
+  client.closeMedia();
+});
+
+test("stale mid-subscribe convergence survives genuine R40→R41-blocked→R42 overtaking", async () => {
+  const client = session();
+  client.sessionId = "cloudflare-session";
+  client.subscriptionsStarted = true;
+  const registry = new Map<string, CloudflarePublication>();
+
+  const oldX = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-X",
+    generation: 8,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  const newY = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Y",
+    generation: 9,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+  const newZ = {
+    peerId: "peer-1",
+    source: "screen",
+    trackName: "screen-Z",
+    generation: 10,
+    connectionEpoch: 1,
+    userId: "user-1",
+    closed: false,
+  };
+
+  let releaseSubscribeX: (() => void) | undefined;
+  let releaseSubscribeY: (() => void) | undefined;
+  const gateX = new Promise<void>((resolve) => {
+    releaseSubscribeX = resolve;
+  });
+  const gateY = new Promise<void>((resolve) => {
+    releaseSubscribeY = resolve;
+  });
+  const subscribeCalls: string[] = [];
+  client.subscribe = async (publication) => {
+    const trackName = String(publication.trackName);
+    subscribeCalls.push(trackName);
+    client.subscribedTrackNames.add(trackName);
+    if (trackName === "screen-X") await gateX;
+    if (trackName === "screen-Y") await gateY;
+    return true;
+  };
+
+  let stale = false;
+  const reconcilePromise = client.reconcilePublications(
+    [oldX],
+    [],
+    () => stale,
+    () => [...registry.values()],
+  );
+
+  registry.set(newY.trackName, newY);
+
+  stale = true;
+  releaseSubscribeX?.();
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  registry.clear();
+  registry.set(newZ.trackName, newZ);
+
+  releaseSubscribeY?.();
+
+  await reconcilePromise;
+
+  assert.equal(client.publications.has("screen-Z"), true);
+  assert.equal(client.publications.has("screen-X"), false);
+  assert.equal(client.publications.has("screen-Y"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Z"), true);
+  assert.equal(client.subscribedTrackNames.has("screen-X"), false);
+  assert.equal(client.subscribedTrackNames.has("screen-Y"), false);
+  assert.ok(subscribeCalls.includes("screen-X"));
+  assert.ok(subscribeCalls.includes("screen-Z"));
+  client.closeMedia();
+});
 
 function report(type, bytesField, bytes, timestamp) {
   return new Map([["rtp", { type, [bytesField]: bytes, timestamp }]]);
@@ -194,13 +475,23 @@ test("Cloudflare applies high-quality video sender settings before negotiation",
   assert.equal(applied.degradationPreference, "maintain-resolution");
 });
 
+interface RetiredTrackEvent {
+  track: { id: string; kind: "video" };
+  transceiver: { mid: string };
+}
+
+type PeerConnectionListener = (event?: RetiredTrackEvent) => void;
+
 class FakePeerConnection {
+  connectionState: RTCPeerConnectionState;
+  readonly listeners: Map<string, PeerConnectionListener>;
+
   constructor() {
     this.connectionState = "new";
     this.listeners = new Map();
   }
 
-  addEventListener(type, listener) {
+  addEventListener(type: string, listener: PeerConnectionListener) {
     this.listeners.set(type, listener);
   }
 
@@ -208,6 +499,59 @@ class FakePeerConnection {
     this.connectionState = "closed";
   }
 }
+
+class EmittingPeerConnection extends FakePeerConnection {
+  close() {
+    this.connectionState = "closed";
+    this.listeners.get("connectionstatechange")?.();
+  }
+}
+
+test("retired Cloudflare peer cannot report a closed state to the session", async () => {
+  const previousPeerConnection = globalThis.RTCPeerConnection;
+  globalThis.RTCPeerConnection = EmittingPeerConnection;
+  const states: string[] = [];
+  let remoteTracks = 0;
+  let client: CloudflareRealtimeSession;
+  client = new CloudflareRealtimeSession({
+    send(message) {
+      const request = parseExternalRecord(message.data);
+      const requestId = parseExternalString(request?.requestId);
+      if (!requestId) return false;
+      queueMicrotask(() =>
+        client.handle("cloudflare-response", {
+          requestId,
+          result: { sessionId: "cloudflare-session" },
+        }),
+      );
+      return true;
+    },
+    iceServers: [],
+    onRemoteTrack: () => {
+      remoteTracks += 1;
+    },
+    onStateChange: (_direction, state) => {
+      states.push(state);
+    },
+  });
+
+  try {
+    await client.initialize();
+    const peerConnection = client.peerConnection;
+    assert.ok(peerConnection);
+    assert.ok(peerConnection instanceof EmittingPeerConnection);
+    client.closeMedia();
+    peerConnection.listeners.get("track")?.({
+      track: { id: "retired-track", kind: "video" },
+      transceiver: { mid: "0" },
+    });
+    assert.deepEqual(states, []);
+    assert.equal(remoteTracks, 0);
+  } finally {
+    client.closeMedia();
+    globalThis.RTCPeerConnection = previousPeerConnection;
+  }
+});
 
 test("Cloudflare batches queued publications after local bootstrap", async () => {
   const previousPeerConnection = globalThis.RTCPeerConnection;
@@ -264,8 +608,14 @@ test("Cloudflare batches queued publications after local bootstrap", async () =>
     );
     assert.equal(subscriptionRequests.length, 1);
     assert.equal(subscriptionRequests[0].data.body.tracks.length, 2);
-    assert.equal(client.remoteByMid.get("remote-mid-0"), publication);
-    assert.equal(client.remoteByMid.get("remote-mid-1"), audioPublication);
+    assert.equal(
+      client.remoteByMid.get("remote-mid-0"),
+      client.publications.get(publication.trackName),
+    );
+    assert.equal(
+      client.remoteByMid.get("remote-mid-1"),
+      client.publications.get(audioPublication.trackName),
+    );
     await client.startSubscriptions();
     assert.equal(
       requests.filter((entry) => entry.data.operation === "tracks-new").length,

@@ -13,13 +13,17 @@ export function buildDocumentTitle({
   if (channel?.name)
     context = `${channel.isMedia ? "" : "#"}${channel.name} · ${room?.name || "Room"}`;
   else if (room?.name) context = room.name;
-  else
-    context =
-      {
-        settings: "Settings",
-        account: "Account",
-        "rtc-debug": "Connection Details",
-      }[routeName as "settings" | "account" | "rtc-debug"] || "";
+  else {
+    const routeTitle =
+      routeName === "settings"
+        ? "Settings"
+        : routeName === "account"
+          ? "Account"
+          : routeName === "rtc-debug"
+            ? "Connection Details"
+            : "";
+    context = routeTitle;
+  }
   const prefix = Number(unreadCount) > 0 ? `(${Number(unreadCount)}) ` : "";
   return `${prefix}${context ? `${context} · ` : ""}dSpeak`;
 }

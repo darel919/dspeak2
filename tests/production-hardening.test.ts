@@ -90,10 +90,6 @@ test("production CSP enforcement and cached health reads are explicit", () => {
   assert.match(health, /readTurnHealth/);
   assert.doesNotMatch(health, /probeSelfHostedTurn/);
   assert.match(health, /getPushMetrics/);
-
-  const cachedMetricsReader = pushDelivery.slice(
-    pushDelivery.indexOf("export function getPushMetrics"),
-  );
 });
 
 test("web icons are bundled locally without a runtime Iconify dependency", () => {

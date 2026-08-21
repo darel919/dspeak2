@@ -40,6 +40,17 @@ export interface CodecVariantPlan {
   variantId?: string;
 }
 
+interface CodecVariantMetadata {
+  logicalStreamId: string;
+  generation: number;
+  codec: VideoCodecName;
+  variantId: string;
+  receivers: string[];
+  estimatedBitrateBps?: number;
+  target?: CodecRoutingTarget;
+  targetAdjusted?: boolean;
+}
+
 export interface CodecRoutingPlan {
   publisher: string;
   logicalStreamId: string;
@@ -69,21 +80,21 @@ export interface CodecRoutingTarget {
   bitrate?: number;
 }
 
-const CODEC_BASE_COST: Record<VideoCodecName, number> = {
+const CODEC_BASE_COST = {
   H264: 1.1,
   H265: 1.35,
   VP8: 1.6,
   VP9: 1.85,
   AV1: 2.2,
-};
+} satisfies Record<VideoCodecName, number>;
 
-const CODEC_QUALITY_BENEFIT: Record<VideoCodecName, number> = {
+const CODEC_QUALITY_BENEFIT = {
   H264: 0.45,
   H265: 0.7,
   VP8: 0.15,
   VP9: 0.55,
   AV1: 0.85,
-};
+} satisfies Record<VideoCodecName, number>;
 
 function directionCost(
   codec: VideoCodecName,
@@ -234,14 +245,14 @@ function constrainedTarget(
 ) {
   if (!target) return undefined;
   const result: CodecRoutingTarget = { ...target };
-  const capabilityKey: Record<
-    "width" | "height" | "fps",
-    keyof CodecDirectionCapability
-  > = {
+  const capabilityKey = {
     width: "maxWidth",
     height: "maxHeight",
     fps: "maxFps",
-  };
+  } satisfies Record<
+    "width" | "height" | "fps",
+    keyof CodecDirectionCapability
+  >;
   for (const key of ["width", "height", "fps"] as const) {
     const requested = Number(target[key]);
     if (!Number.isFinite(requested) || requested <= 0) continue;
@@ -323,13 +334,13 @@ function supportsCodecTarget(
   );
 }
 
-const CODEC_BITRATE_FACTOR: Record<VideoCodecName, number> = {
+const CODEC_BITRATE_FACTOR = {
   H264: 1,
   H265: 0.85,
   VP8: 1.15,
   VP9: 0.9,
   AV1: 0.75,
-};
+} satisfies Record<VideoCodecName, number>;
 
 function estimatedVariantBitrate(
   codec: VideoCodecName,
@@ -414,7 +425,7 @@ export function createCodecRoutingPlan(
     ),
   }));
   if (!receivers.length) {
-    return {
+    const plan: CodecRoutingPlan = {
       publisher: publisher.participantId,
       logicalStreamId: publisher.logicalStreamId,
       source: publisher.source,
@@ -423,8 +434,9 @@ export function createCodecRoutingPlan(
       emergencyReceivers: [],
       variantCount: 0,
       createdAt: Date.now(),
-      ...(options.target ? { target: { ...options.target } } : {}),
     };
+    if (options.target) plan.target = { ...options.target };
+    return plan;
   }
   const sfu = supportedSet(options.sfuSupportedCodecs || VIDEO_CODEC_NAMES);
   const efficientPublisher = new Set(
@@ -488,15 +500,10 @@ export function createCodecRoutingPlan(
         const score =
           codecVariantCost(codec, publisher, covered) +
           (estimatedBitrateBps || 0) / 1_000_000;
-        return {
+        const variant: CodecVariantPlan = {
           codec,
           receivers: covered.map((receiver) => receiver.participantId),
           score,
-          ...(estimatedBitrateBps ? { estimatedBitrateBps } : {}),
-          ...(target ? { target } : {}),
-          ...(targetWasConstrained(options.target, target)
-            ? { targetAdjusted: true }
-            : {}),
           hardwareEncode:
             publisher.mediaCapabilities.videoCodecs[codec].encode
               .acceleration === "hardware",
@@ -504,6 +511,12 @@ export function createCodecRoutingPlan(
             emergencyReceivers.has(receiver.participantId),
           ),
         };
+        if (estimatedBitrateBps)
+          variant.estimatedBitrateBps = estimatedBitrateBps;
+        if (target) variant.target = target;
+        if (targetWasConstrained(options.target, target))
+          variant.targetAdjusted = true;
+        return variant;
       })
       .filter((variant) => variant.receivers.length > 0);
     const estimatedUploadBitrateBps = variants.reduce(
@@ -549,7 +562,7 @@ export function createCodecRoutingPlan(
         ),
     )
     .map((receiver) => receiver.participantId);
-  return {
+  const plan: CodecRoutingPlan = {
     publisher: publisher.participantId,
     logicalStreamId: publisher.logicalStreamId,
     source: publisher.source,
@@ -566,16 +579,14 @@ export function createCodecRoutingPlan(
     ),
     variantCount: best.length,
     createdAt: Date.now(),
-    ...(best.some((variant) => variant.estimatedBitrateBps !== undefined)
-      ? {
-          estimatedUploadBitrateBps: best.reduce(
-            (total, variant) => total + (variant.estimatedBitrateBps || 0),
-            0,
-          ),
-        }
-      : {}),
-    ...(options.target ? { target: { ...options.target } } : {}),
   };
+  if (best.some((variant) => variant.estimatedBitrateBps !== undefined))
+    plan.estimatedUploadBitrateBps = best.reduce(
+      (total, variant) => total + (variant.estimatedBitrateBps || 0),
+      0,
+    );
+  if (options.target) plan.target = { ...options.target };
+  return plan;
 }
 
 export function validateCodecRoutingPlan(
@@ -584,8 +595,7 @@ export function validateCodecRoutingPlan(
   receiverInputs: CodecRoutingParticipant[],
   options: CodecRoutingOptions = {},
 ) {
-  if (!plan || typeof plan !== "object")
-    return { valid: false, errors: ["invalid-plan"] };
+  if (!plan) return { valid: false, errors: ["invalid-plan"] };
   const publisher = {
     ...publisherInput,
     mediaCapabilities: normalizeParticipantMediaCapabilities(
@@ -769,17 +779,17 @@ export function codecVariantMetadata(
   const variant = plan.desiredVariants.find(
     (candidate) => candidate.codec === codec,
   );
-  return {
+  const metadata: CodecVariantMetadata = {
     logicalStreamId: plan.logicalStreamId,
     generation,
     codec,
     variantId:
       variant?.variantId || `${plan.logicalStreamId}:${codec.toLowerCase()}`,
-    ...(variant?.estimatedBitrateBps
-      ? { estimatedBitrateBps: variant.estimatedBitrateBps }
-      : {}),
-    ...(variant?.target ? { target: { ...variant.target } } : {}),
-    ...(variant?.targetAdjusted ? { targetAdjusted: true } : {}),
     receivers: variant?.receivers || [],
   };
+  if (variant?.estimatedBitrateBps)
+    metadata.estimatedBitrateBps = variant.estimatedBitrateBps;
+  if (variant?.target) metadata.target = { ...variant.target };
+  if (variant?.targetAdjusted) metadata.targetAdjusted = true;
+  return metadata;
 }

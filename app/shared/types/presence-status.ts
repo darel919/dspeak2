@@ -1,3 +1,4 @@
+import { isExternalRecord, isExternalString } from "./boundary.ts";
 import type { PresenceRecord } from "./presence.ts";
 import type { PresenceStatus } from "../../../shared/types/presence.ts";
 import type { RealtimeChannelLike } from "../realtime-channel.ts";
@@ -31,6 +32,21 @@ export interface PresenceChannelMessage {
 
 export type PresenceChannel = RealtimeChannelLike;
 
-export function isPresenceRecord(value: unknown): value is PresenceRecord {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+export function isPresenceRecord<T>(value: T): value is T & PresenceRecord {
+  return isExternalRecord(value);
+}
+
+export function parsePresenceChannelMessage<T>(
+  value: T,
+): PresenceChannelMessage | null {
+  if (!isExternalRecord(value)) return null;
+  const data = Array.isArray(value.data)
+    ? value.data.filter(isPresenceRecord)
+    : isPresenceRecord(value.data)
+      ? value.data
+      : undefined;
+  return {
+    type: isExternalString(value.type) ? value.type : undefined,
+    data,
+  };
 }

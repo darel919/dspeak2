@@ -3,6 +3,18 @@ import type {
   MediaSessionCleanupOptions,
   MediaTelemetryResetOptions,
 } from "./types/media-session-cleanup.ts";
+import { isExternalRecord } from "./types/boundary.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
+
+type ProviderOwner = Record<string, unknown>;
+
+function callProviderMethod(
+  owner: ProviderOwner,
+  method: Function,
+): MediaCommandResult {
+  const boundMethod = method.bind(owner);
+  return boundMethod();
+}
 
 export function closeMediaSessionTransports({
   capture,
@@ -34,22 +46,18 @@ export function closeMediaProviders({
   }
 }
 
-export function closeMediaProvider(provider: unknown) {
-  if (!provider || typeof provider !== "object") return;
-  const candidate = provider as {
-    closeMedia?: () => unknown;
-    closeAll?: () => unknown;
-    close?: () => unknown;
-  };
-  if (typeof candidate.closeMedia === "function") {
-    return candidate.closeMedia();
-  }
-  if (typeof candidate.closeAll === "function") return candidate.closeAll();
-  return candidate.close?.();
+export function closeMediaProvider<T>(provider: T): MediaCommandResult {
+  if (!isExternalRecord(provider)) return;
+  if (provider.closeMedia instanceof Function)
+    return callProviderMethod(provider, provider.closeMedia);
+  if (provider.closeAll instanceof Function)
+    return callProviderMethod(provider, provider.closeAll);
+  if (provider.close instanceof Function)
+    return callProviderMethod(provider, provider.close);
 }
 
-export async function closeMediaProviderSafely(
-  provider: unknown,
+export async function closeMediaProviderSafely<T>(
+  provider: T,
   label = "media",
 ) {
   if (!provider) return true;
@@ -62,11 +70,6 @@ export async function closeMediaProviderSafely(
   }
 }
 
-/**
- * Handles a signaling (control-plane) close without killing live media.
- * Media providers (P2P mesh, SFU) must survive transient control-socket
- * loss; only protocol rejection tears media down.
- */
 export function resetMediaTelemetryState({
   iceConnectedBoth,
   mediaPathMetrics,

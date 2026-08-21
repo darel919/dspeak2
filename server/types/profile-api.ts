@@ -3,9 +3,10 @@ import type { db } from "../db/client.ts";
 import type { DSpeakProfileInput, DSpeakProfileRow } from "./dspeak-api.ts";
 import type { ProfileUpdateInput } from "./profile-repository.ts";
 import type { AuthorizationRoom } from "./room-authorization.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 export interface ProfileApiDependencies {
-  broadcastGlobally: (message: unknown) => Promise<void>;
+  broadcastGlobally: (message: ExternalField) => Promise<void>;
   createError: (options: {
     statusCode: number;
     statusMessage: string;
@@ -21,15 +22,15 @@ export interface ProfileApiDependencies {
   parseBody: (event: H3Event) => Promise<Record<string, unknown>>;
   presentPublicProfile: (
     user: DSpeakProfileInput | null | undefined,
-  ) => unknown;
-  presentUser: (user: DSpeakProfileInput | null | undefined) => unknown;
+  ) => ExternalField;
+  presentUser: (user: DSpeakProfileInput | null | undefined) => ExternalField;
   requireAuthenticatedUser: (event: H3Event) => Promise<string>;
   requireRoomMember: (
     room: AuthorizationRoom,
     userId: string,
-  ) => Promise<unknown>;
-  requireValue: (value: unknown, message: string) => string;
-  updateActiveUserProfile: (profile: unknown) => Promise<unknown>;
+  ) => Promise<ExternalField>;
+  requireValue: (value: ExternalField, message: string) => string;
+  updateActiveUserProfile: (profile: ExternalField) => Promise<ExternalField>;
   updateProfileAvatar: (input: {
     db: typeof db;
     userId: string;

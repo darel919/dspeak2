@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { requireAuth } from "../../../auth/middleware.ts";
+import { parseExternalRecord } from "../../../../shared/types/external.ts";
 import { db } from "../../../db/client.ts";
 import {
   avatars,
@@ -60,7 +61,7 @@ async function committedUploadExists(key: string): Promise<boolean> {
 
 export default defineEventHandler(async (event) => {
   await requireAuth(event);
-  const body = (await readBody(event)) as { cleanupToken?: unknown };
+  const body = parseExternalRecord(await readBody(event));
   const claims = verifyUploadCleanupToken(
     body?.cleanupToken,
     event.context.user.id,

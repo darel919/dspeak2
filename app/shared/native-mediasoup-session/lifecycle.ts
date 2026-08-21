@@ -2,6 +2,20 @@ import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../../shared/media-signaling
 import { asError } from "../native-mediasoup-utils.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
 import type { NativeMediasoupSfuSessionSurface } from "../types/native-mediasoup-session.ts";
+import type { SignalingMessage } from "../types/media-signaling.ts";
+import type { OwnedErrorValue } from "../types/shared-utilities.ts";
+import {
+  isExternalString,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
+
+type ProviderFailureData = {
+  provider: string;
+  providerId?: string;
+  epoch: number;
+  sourceRevision: number;
+  reason: string;
+};
 export class NativeMediasoupLifecycleMethods {
   async disconnect(this: NativeMediasoupSfuSession) {
     this.intentionalClose = true;
@@ -28,7 +42,7 @@ export class NativeMediasoupLifecycleMethods {
     this.activeSfuProvider = null;
     this.activeSfuProviderId = null;
     this.lastProviderFailureKey = null;
-    const cleanup: Array<Promise<unknown>> = [];
+    const cleanup: Array<Promise<MediaCommandResult>> = [];
     if (this.cloudflareSession) {
       const cloudflareSession = this.cloudflareSession;
       this.cloudflareSession = null;
@@ -100,10 +114,7 @@ export class NativeMediasoupLifecycleMethods {
     await Promise.all(cleanup);
   }
 
-  _handleSignalingClose(
-    this: NativeMediasoupSfuSession,
-    event: Record<string, unknown>,
-  ) {
+  _handleSignalingClose(this: NativeMediasoupSfuSession, event: CloseEvent) {
     this.connected = false;
     this.protocolState = null;
     if (this.intentionalClose) return;
@@ -138,7 +149,10 @@ export class NativeMediasoupLifecycleMethods {
     return true;
   }
 
-  _beginNativeTeardown(this: NativeMediasoupSfuSession, preTeardown: unknown) {
+  _beginNativeTeardown(
+    this: NativeMediasoupSfuSession,
+    preTeardown: Promise<MediaCommandResult>,
+  ) {
     if (this.nativeTeardownPromise) return this.nativeTeardownPromise;
     const teardown = Promise.resolve(preTeardown)
       .then(() => this.onBeforeNativeTeardown?.())
@@ -205,7 +219,7 @@ export class NativeMediasoupLifecycleMethods {
     return handled;
   }
 
-  _fail(this: NativeMediasoupSfuSession, error: unknown) {
+  _fail(this: NativeMediasoupSfuSession, error: OwnedErrorValue) {
     this.error = asError(error, "Native SFU session failed");
     this.onError?.(this.error);
     this._emitState();
@@ -216,7 +230,7 @@ export class NativeMediasoupLifecycleMethods {
 
   sendOrThrow(
     this: NativeMediasoupSfuSession,
-    message: unknown,
+    message: SignalingMessage,
     label: string,
   ) {
     const sent =
@@ -230,7 +244,7 @@ export class NativeMediasoupLifecycleMethods {
     reason: string,
     provider = this.activeSfuProvider,
     providerId = this.activeSfuProviderId ||
-      (typeof this.topologyState?.providerId === "string"
+      (isExternalString(this.topologyState?.providerId)
         ? this.topologyState.providerId
         : null),
   ) {
@@ -239,16 +253,17 @@ export class NativeMediasoupLifecycleMethods {
     const sourceRevision = Number(this.topologyState?.sourceRevision) || 0;
     const key = `${provider}:${providerId || "family"}:${epoch}:${sourceRevision}`;
     if (this.lastProviderFailureKey === key) return false;
-    if (typeof this.signaling?.send !== "function") return false;
+    if (!(this.signaling?.send instanceof Function)) return false;
+    const failure: ProviderFailureData = {
+      provider,
+      epoch,
+      sourceRevision,
+      reason,
+    };
+    if (providerId) failure.providerId = providerId;
     const sent = this.signaling.send({
       type: "provider-failure",
-      data: {
-        provider,
-        ...(providerId ? { providerId } : {}),
-        epoch,
-        sourceRevision,
-        reason,
-      },
+      data: failure,
     });
     if (sent === false) return false;
     this.lastProviderFailureKey = key;
@@ -269,7 +284,7 @@ export class NativeMediasoupLifecycleMethods {
     this.readyReject = null;
   }
 
-  rejectReadiness(this: NativeMediasoupSfuSession, error: unknown) {
+  rejectReadiness(this: NativeMediasoupSfuSession, error: OwnedErrorValue) {
     const reject = this.readyReject;
     this.initializationRequestId = null;
     this.transportRequestIds.clear();
@@ -278,8 +293,9 @@ export class NativeMediasoupLifecycleMethods {
   }
 
   _emitState(this: NativeMediasoupSfuSession) {
-    this.onStateChange?.(this as unknown as Record<string, unknown>);
+    this.onStateChange?.(this);
   }
 }
 
-export interface NativeMediasoupLifecycleMethods extends NativeMediasoupSfuSessionSurface {}
+export type NativeMediasoupLifecycleContract =
+  NativeMediasoupSfuSessionSurface & NativeMediasoupLifecycleMethods;

@@ -1088,6 +1088,10 @@ import {
   ROOM_ACCENT_LIGHT_COLORS,
 } from "~~/shared/room-policy.ts";
 import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import {
   availableSystemSoundThemes,
   playSystemSound,
 } from "../shared/system-sounds.ts";
@@ -1599,12 +1603,11 @@ async function startMicrophonePreview() {
         "media:native-receive-event",
         (event) => {
           if (generation !== microphonePreviewGeneration) return;
-          const nativeEvent = event && typeof event === "object" ? event : {};
+          const nativeEvent = isExternalRecord(event) ? event : {};
           if (Number(nativeEvent.kind) !== 7) return;
-          const levels =
-            nativeEvent.payload && typeof nativeEvent.payload === "object"
-              ? nativeEvent.payload
-              : {};
+          const levels = isExternalRecord(nativeEvent.payload)
+            ? nativeEvent.payload
+            : {};
           const levelDb = Math.max(-60, Number(levels.microphoneDbfs) || -60);
           const thresholdDb = microphoneGate.value.automatic
             ? automaticGateThreshold(noiseFloorEstimator.noiseFloorDb)
@@ -1857,7 +1860,7 @@ function startMicCheck() {
     micCheckError.value = "Wait for the microphone to become ready.";
     return;
   }
-  if (typeof MediaRecorder === "undefined") {
+  if (!("MediaRecorder" in globalThis)) {
     micCheckError.value =
       "This browser does not support microphone recording checks.";
     return;
@@ -1963,9 +1966,11 @@ async function refreshDevices() {
       const list = Array.isArray(nativeList)
         ? nativeList.map((device) => {
             const sourceType =
-              typeof device?.sourceType === "string" ? device.sourceType : "";
+              isExternalRecord(device) && isExternalString(device.sourceType)
+                ? device.sourceType
+                : "";
             const kind =
-              typeof device?.kind === "string"
+              isExternalRecord(device) && isExternalString(device.kind)
                 ? device.kind
                 : sourceType === "microphone"
                   ? "audioinput"
@@ -2061,8 +2066,8 @@ onBeforeUnmount(() => {
 const canSetSinkId = computed(
   () =>
     runtimeStore.isTauri ||
-    (typeof document !== "undefined" &&
-      typeof document.createElement("audio").setSinkId === "function"),
+    (import.meta.client &&
+      document.createElement("audio").setSinkId instanceof Function),
 );
 const selectedOutputId = ref("");
 const selectedCameraId = ref("");

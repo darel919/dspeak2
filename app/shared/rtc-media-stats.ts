@@ -1,4 +1,6 @@
 type StatsRecord = Record<string, unknown>;
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+import type { ExternalValue } from "./types/boundary.ts";
 import type {
   AudioStatsSample,
   RtpStatsSample,
@@ -8,37 +10,48 @@ export type {
   RtpStatsSample,
 } from "./types/rtc-media-stats.ts";
 
-function finite(value: unknown) {
-  return Number.isFinite(Number(value)) ? Number(value) : null;
+function finite<T>(value: T): number | null {
+  try {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  } catch {
+    return null;
+  }
 }
 
-function reportValues(report: unknown): StatsRecord[] {
-  if (!report) return [];
-  if (
-    report &&
-    typeof report === "object" &&
-    "values" in report &&
-    typeof report.values === "function"
-  )
-    return [...(report.values as () => Iterable<StatsRecord>)()];
+interface StatsCollection {
+  values: () => Iterable<ExternalValue>;
+}
+
+export interface RtpStatSelector {
+  trackId?: string;
+  mid?: string | null;
+  kind?: string;
+}
+
+function isStatsCollection<T>(value: T): value is T & StatsCollection {
+  return isExternalRecord(value) && value.values instanceof Function;
+}
+
+function reportValues<T>(report: T): StatsRecord[] {
+  if (report == null) return [];
+  if (isStatsCollection(report))
+    return [...report.values()].filter(isStatsRecord);
   if (Array.isArray(report)) return report.filter(isStatsRecord);
-  if (typeof report === "object")
+  if (report instanceof Map) return [...report.values()].filter(isStatsRecord);
+  if (isExternalRecord(report))
     return Object.values(report).filter(isStatsRecord);
   return [];
 }
 
-function isStatsRecord(value: unknown): value is StatsRecord {
-  return value !== null && typeof value === "object";
+function isStatsRecord<T>(value: T): value is T & StatsRecord {
+  return isExternalRecord(value);
 }
 
-export function findRtpStat(
-  report: unknown,
+export function findRtpStat<T>(
+  report: T,
   type: string,
-  {
-    trackId,
-    mid,
-    kind,
-  }: { trackId?: string; mid?: string | null; kind?: string } = {},
+  { trackId, mid, kind }: RtpStatSelector = {},
 ) {
   const values = reportValues(report);
   const candidates = values.filter((stat) => {
@@ -88,10 +101,10 @@ function deltaRate(
   return ((current - previous) * multiplier * 1000) / elapsedMs;
 }
 
-export function calculateTransportBitrateBps(
-  bytes: unknown,
-  timestamp: unknown,
-  previous: { bytes?: unknown; timestamp?: unknown } | null = null,
+export function calculateTransportBitrateBps<T>(
+  bytes: T,
+  timestamp: T,
+  previous: { bytes?: T; timestamp?: T } | null = null,
 ) {
   const currentBytes = finite(bytes);
   const currentTimestamp = finite(timestamp);
@@ -106,16 +119,20 @@ export function calculateTransportBitrateBps(
   );
 }
 
-export function collectRtpStats(
-  report: unknown,
+export function collectRtpStats<T>(
+  report: T,
   direction: string,
   trackSettings: MediaTrackSettings | Record<string, unknown> = {},
   previous: RtpStatsSample | null = null,
   expectedKind: string | null = null,
+  selector: Omit<RtpStatSelector, "kind"> = {},
 ) {
   const type = direction === "outbound" ? "outbound-rtp" : "inbound-rtp";
   const values = reportValues(report);
-  const rtp = findRtpStat(report, type, { kind: expectedKind ?? undefined });
+  const rtp = findRtpStat(report, type, {
+    ...selector,
+    kind: expectedKind ?? undefined,
+  });
   if (!rtp) return { stats: null, sample: previous };
 
   const codec = values.find((stat) => stat.id === rtp.codecId);
@@ -143,6 +160,9 @@ export function collectRtpStats(
   const totalCodecTime = finite(
     direction === "outbound" ? rtp.totalEncodeTime : rtp.totalDecodeTime,
   );
+  const jitterBufferDelay = finite(rtp.jitterBufferDelay);
+  const jitterBufferTargetDelay = finite(rtp.jitterBufferTargetDelay);
+  const jitterBufferMinimumDelay = finite(rtp.jitterBufferMinimumDelay);
   const codecFrames =
     frameCounter == null || previous?.frameCounter == null
       ? null
@@ -213,13 +233,18 @@ export function collectRtpStats(
           powerEfficientDecoder: rtp.powerEfficientDecoder ?? null,
           framesReceived: finite(rtp.framesReceived),
           framesDecoded: frameCounter,
+          framesRendered: finite(rtp.framesRendered),
           framesDropped: finite(rtp.framesDropped),
+          framesPerSecond: finite(rtp.framesPerSecond),
           packetsReceived: finite(rtp.packetsReceived),
           packetsLost: finite(rtp.packetsLost),
           bytesReceived: bytes,
           jitter: finite(rtp.jitter),
           freezeCount: finite(rtp.freezeCount),
           totalFreezesDuration: finite(rtp.totalFreezesDuration),
+          pauseCount: finite(rtp.pauseCount),
+          totalPausesDuration: finite(rtp.totalPausesDuration),
+          lastPacketReceivedTimestamp: finite(rtp.lastPacketReceivedTimestamp),
           pliCount: finite(rtp.pliCount),
           firCount: finite(rtp.firCount),
           nackCount: finite(rtp.nackCount),
@@ -227,20 +252,18 @@ export function collectRtpStats(
           keyFramesDecoded: finite(rtp.keyFramesDecoded),
           totalDecodeTime: totalCodecTime,
           totalInterFrameDelay: finite(rtp.totalInterFrameDelay),
-          jitterBufferDelay: finite(rtp.jitterBufferDelay),
+          jitterBufferDelay,
           jitterBufferEmittedCount: finite(rtp.jitterBufferEmittedCount),
           jitterBufferDelayMs:
-            finite(rtp.jitterBufferDelay) == null
-              ? null
-              : finite(rtp.jitterBufferDelay)! * 1000,
+            jitterBufferDelay == null ? null : jitterBufferDelay * 1000,
           jitterBufferTargetDelayMs:
-            finite(rtp.jitterBufferTargetDelay) == null
+            jitterBufferTargetDelay == null
               ? null
-              : finite(rtp.jitterBufferTargetDelay)! * 1000,
+              : jitterBufferTargetDelay * 1000,
           jitterBufferMinimumDelayMs:
-            finite(rtp.jitterBufferMinimumDelay) == null
+            jitterBufferMinimumDelay == null
               ? null
-              : finite(rtp.jitterBufferMinimumDelay)! * 1000,
+              : jitterBufferMinimumDelay * 1000,
           audioLevel: finite(rtp.audioLevel),
           totalAudioEnergy: finite(rtp.totalAudioEnergy),
           totalSamplesDuration: finite(rtp.totalSamplesDuration),
@@ -252,8 +275,8 @@ export function collectRtpStats(
   return { stats, sample: { timestamp, frameCounter, bytes, totalCodecTime } };
 }
 
-export function collectVideoRtpStats(
-  report: unknown,
+export function collectVideoRtpStats<T>(
+  report: T,
   direction: string,
   trackSettings: MediaTrackSettings | Record<string, unknown> = {},
   previous: RtpStatsSample | null = null,
@@ -261,8 +284,8 @@ export function collectVideoRtpStats(
   return collectRtpStats(report, direction, trackSettings, previous, "video");
 }
 
-export function collectOutboundAudioStats(
-  report: unknown,
+export function collectOutboundAudioStats<T>(
+  report: T,
   previous: AudioStatsSample | null = null,
 ) {
   const values = reportValues(report);
@@ -291,16 +314,23 @@ export function collectOutboundAudioStats(
   };
 }
 
-export async function collectPeerConnectionStats(
-  pc: RTCPeerConnection,
+export interface RtcStatsSource<TReport extends ExternalValue = ExternalValue> {
+  getStats: () => Promise<TReport>;
+  connectionState?: string;
+  iceConnectionState?: string;
+  iceGatheringState?: string;
+  signalingState?: string;
+}
+
+export async function collectPeerConnectionStats<TReport extends ExternalValue>(
+  pc: RtcStatsSource<TReport>,
   kind: string,
 ) {
   const report = await pc.getStats();
   const byId = new Map<string, StatsRecord>();
-  report.forEach((rawStat) => {
-    const stat = rawStat as StatsRecord;
-    if (typeof stat.id === "string") byId.set(stat.id, stat);
-  });
+  for (const stat of reportValues(report)) {
+    if (isExternalString(stat.id)) byId.set(stat.id, stat);
+  }
   const transport = [...byId.values()].find(
     (stat) => stat.type === "transport" && stat.selectedCandidatePairId,
   );
@@ -385,9 +415,9 @@ export async function collectPeerConnectionStats(
   return {
     kind,
     pcStates: {
-      connectionState: pc.connectionState,
-      iceConnectionState: pc.iceConnectionState,
-      signalingState: pc.signalingState,
+      connectionState: pc.connectionState || "unknown",
+      iceConnectionState: pc.iceConnectionState || "unknown",
+      signalingState: pc.signalingState || "unknown",
     },
     candidatePair: pair
       ? {
@@ -420,24 +450,23 @@ export async function collectPeerConnectionStats(
   };
 }
 
-export async function collectPeerConnectionDiagnosticStats(
-  pc: RTCPeerConnection,
-  kind: string,
-) {
+export async function collectPeerConnectionDiagnosticStats<
+  TReport extends ExternalValue,
+>(pc: RtcStatsSource<TReport>, kind: string) {
   const report = await pc.getStats();
   return {
     kind,
     pcStates: {
-      connectionState: pc.connectionState,
-      iceConnectionState: pc.iceConnectionState,
-      iceGatheringState: pc.iceGatheringState,
-      signalingState: pc.signalingState,
+      connectionState: pc.connectionState || "unknown",
+      iceConnectionState: pc.iceConnectionState || "unknown",
+      iceGatheringState: pc.iceGatheringState || "unknown",
+      signalingState: pc.signalingState || "unknown",
     },
-    stats: [...report.values()].map((stat) => ({ ...stat })),
+    stats: reportValues(report).map((stat) => ({ ...stat })),
   };
 }
 
-function averageJitterDelay(value: unknown, emitted: number) {
+function averageJitterDelay<T>(value: T, emitted: number) {
   return emitted > 0 && Number.isFinite(Number(value))
     ? (Number(value) * 1000) / emitted
     : null;

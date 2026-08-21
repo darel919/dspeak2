@@ -1,3 +1,5 @@
+import { isExternalString } from "./types/boundary.ts";
+
 export const EMOJI_CATEGORIES = [
   {
     id: "recent",
@@ -161,13 +163,16 @@ export function searchEmojis(query: string): EmojiSearchResult[] {
 export function getRecentEmojis(): string[] {
   if (!import.meta.client) return [];
   try {
-    const parsed: unknown = JSON.parse(
+    const parsed = JSON.parse(
       localStorage.getItem("dspeak_recent_emojis") || "[]",
     );
-    return Array.isArray(parsed) &&
-      parsed.every((item) => typeof item === "string")
-      ? parsed
-      : [];
+    if (!Array.isArray(parsed)) return [];
+    const recent: string[] = [];
+    for (const item of parsed) {
+      if (isExternalString(item)) recent.push(item);
+      else return [];
+    }
+    return recent;
   } catch {
     return [];
   }

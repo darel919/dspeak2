@@ -1,8 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { effectScope, nextTick, ref, shallowRef } from "vue";
 import {
   calculateAdaptiveVideoGrid,
   type AdaptiveVideoGridLayout,
+  useAdaptiveVideoGrid,
 } from "../app/composables/useAdaptiveVideoGrid.ts";
 
 function checkLayout(
@@ -82,6 +84,30 @@ describe("calculateAdaptiveVideoGrid", () => {
     checkLayout(layout, 5, 1280, 720);
   });
 
+  it("keeps three tiles balanced in a normal desktop media region", () => {
+    const layout = calculateAdaptiveVideoGrid(3, 1280, 720);
+
+    checkLayout(layout, 3, 1280, 720);
+    assert.equal(layout.columns, 2);
+    assert.equal(layout.rows, 2);
+  });
+
+  it("uses the available single row when three tiles have a shallow stage", () => {
+    const layout = calculateAdaptiveVideoGrid(3, 1200, 300);
+
+    checkLayout(layout, 3, 1200, 300);
+    assert.equal(layout.columns, 3);
+    assert.equal(layout.rows, 1);
+  });
+
+  it("keeps five tiles in a balanced three plus two overview", () => {
+    const layout = calculateAdaptiveVideoGrid(5, 1280, 720);
+
+    checkLayout(layout, 5, 1280, 720);
+    assert.equal(layout.columns, 3);
+    assert.equal(layout.rows, 2);
+  });
+
   it("handles count = 6", () => {
     const layout = calculateAdaptiveVideoGrid(6, 1280, 720);
     checkLayout(layout, 6, 1280, 720);
@@ -159,15 +185,15 @@ describe("calculateAdaptiveVideoGrid", () => {
     assert.equal(layout.tileHeight, 0);
   });
 
-  it("produces valid layout for 1 tile in various container shapes", () => {
-    const shapes = [
+  it("produces valid layout for 1 tile in various container dimensions", () => {
+    const dimensions = [
       { w: 1200, h: 400 },
       { w: 1280, h: 720 },
       { w: 700, h: 1000 },
       { w: 480, h: 320 },
       { w: 1600, h: 900 },
     ];
-    for (const { w, h } of shapes) {
+    for (const { w, h } of dimensions) {
       const layout = calculateAdaptiveVideoGrid(1, w, h);
       checkLayout(layout, 1, w, h);
     }
@@ -191,5 +217,97 @@ describe("calculateAdaptiveVideoGrid", () => {
     const layout = calculateAdaptiveVideoGrid(1, 400, 200);
     assert.ok(layout.tileWidth <= 400);
     assert.ok(layout.tileHeight <= 200);
+  });
+
+  it("keeps a single tile valid in a very small viewport", () => {
+    const layout = calculateAdaptiveVideoGrid(1, 240, 160);
+
+    checkLayout(layout, 1, 240, 160);
+    assert.equal(layout.columns, 1);
+    assert.equal(layout.rows, 1);
+  });
+});
+
+describe("useAdaptiveVideoGrid", () => {
+  it("observes a stage element mounted after the composable", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const observers: TestResizeObserver[] = [];
+
+    type TestResizeObserverEntry = {
+      borderBoxSize: ReadonlyArray<ResizeObserverSize>;
+      contentRect: Pick<DOMRectReadOnly, "width" | "height">;
+    };
+    type TestResizeObserverCallback = (
+      entries: TestResizeObserverEntry[],
+    ) => void;
+    type TestResizeObserverTarget = Record<string, never>;
+
+    const stageElementTarget: TestResizeObserverTarget = {};
+
+    function assertTestStageElement(
+      element: TestResizeObserverTarget | HTMLElement,
+    ): asserts element is HTMLElement {
+      assert.equal(element, stageElementTarget);
+    }
+
+    class TestResizeObserver {
+      private readonly callback: TestResizeObserverCallback;
+
+      constructor(callback: TestResizeObserverCallback) {
+        this.callback = callback;
+        observers.push(this);
+      }
+
+      observe(element: TestResizeObserverTarget) {
+        assert.equal(element, stageElementTarget);
+      }
+
+      disconnect() {}
+
+      trigger(width: number, height: number) {
+        this.callback([
+          {
+            borderBoxSize: [{ inlineSize: width, blockSize: height }],
+            contentRect: { width, height },
+          },
+        ]);
+      }
+    }
+
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      value: TestResizeObserver,
+      writable: true,
+    });
+
+    const stageElement = shallowRef<HTMLElement | null>(null);
+    const scope = effectScope();
+
+    try {
+      const grid = scope.run(() => useAdaptiveVideoGrid(stageElement, ref(1)));
+      assert.ok(grid);
+
+      assertTestStageElement(stageElementTarget);
+      stageElement.value = stageElementTarget;
+      await nextTick();
+
+      const observer = observers[0];
+      assert.ok(observer);
+      observer.trigger(640, 360);
+
+      assert.deepEqual(grid.stageSize.value, { width: 640, height: 360 });
+      assert.ok(grid.layout.value.tileWidth > 0);
+    } finally {
+      scope.stop();
+      if (originalResizeObserver) {
+        Object.defineProperty(globalThis, "ResizeObserver", {
+          configurable: true,
+          value: originalResizeObserver,
+          writable: true,
+        });
+      } else {
+        Reflect.deleteProperty(globalThis, "ResizeObserver");
+      }
+    }
   });
 });

@@ -1,7 +1,10 @@
 import { useRoomsStore } from "../stores/rooms";
 import { useSettingsStore } from "../stores/settings";
 import { resolveSurfaceMode } from "../shared/appearance";
-import type { RoomAppearanceRecord } from "../shared/types/composables.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 
 export function useAppearance() {
   const route = useRoute();
@@ -13,11 +16,12 @@ export function useAppearance() {
   const currentRoom = computed(() =>
     roomsStore.getRoomById(String(route.params.roomId || "")),
   );
-  const activeAccent = computed(
-    () =>
-      (currentRoom.value as RoomAppearanceRecord | undefined)?.accent ||
-      settingsStore.appearance.accent,
-  );
+  const activeAccent = computed(() => {
+    const room = currentRoom.value;
+    return isExternalRecord(room) && isExternalString(room.accent)
+      ? room.accent
+      : settingsStore.appearance.accent;
+  });
   const activeSurface = computed(() =>
     resolveSurfaceMode(settingsStore.appearance.surfaceMode, systemDark.value),
   );

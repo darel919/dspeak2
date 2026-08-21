@@ -1,6 +1,5 @@
 import { buildVideoConstraints } from "./video-settings.ts";
 import {
-  getAudioCodecPolicy,
   getCaptureConstraints,
   AudioCodecPolicy,
 } from "#shared/audio-codec-policy.ts";
@@ -15,37 +14,45 @@ import type {
   MediaCaptureSettings,
   MediaCaptureStartOptions,
 } from "./types/media-capture.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+} from "./types/boundary.ts";
+import type { TopologySourceEntry } from "./types/topology-controller.ts";
+
+type ExtendedDisplayMediaStreamOptions = DisplayMediaStreamOptions & {
+  selfBrowserSurface?: "include" | "exclude";
+  systemAudio?: "include" | "exclude";
+};
 
 export function audioConstraints(
   settings: MediaCaptureSettings,
   stereo = false,
 ): MediaTrackConstraints {
-  const policy = getAudioCodecPolicy("microphone", stereo);
   const captureConstraints = getCaptureConstraints(
     "microphone",
     AudioCodecPolicy.CaptureProcessingMode.DEFAULT,
   );
-  const processing = {
+  const processing: MediaTrackConstraints = {
     ...captureConstraints.audio,
     channelCount: { ideal: stereo ? 2 : 1 },
     sampleRate: { ideal: 48000 },
-    latency: { ideal: 0.01 },
-    ...(settings.audio || {}),
   };
+  Object.assign(processing, { latency: { ideal: 0.01 } });
+  Object.assign(processing, settings.audio || {});
   return settings.micDeviceId
     ? { ...processing, deviceId: { exact: settings.micDeviceId } }
     : processing;
 }
 
-export function canFallbackToDefaultMicrophone(
-  error: unknown,
+export function canFallbackToDefaultMicrophone<T>(
+  error: T,
   selectedDeviceId: string | null | undefined,
 ) {
   if (!selectedDeviceId) return false;
-  const name =
-    error && typeof error === "object" && "name" in error
-      ? String(error.name)
-      : "";
+  const errorRecord = isExternalRecord(error) ? error : null;
+  const name = isExternalString(errorRecord?.name) ? errorRecord.name : "";
   return ![
     "NotAllowedError",
     "PermissionDeniedError",
@@ -62,14 +69,14 @@ export async function captureMicrophone({
   mediaDevices?: MediaDevices;
   settings: MediaCaptureSettings;
   stereo?: boolean;
-  onFallback?: (details: unknown) => unknown;
+  onFallback?: (details: ExternalObject) => void;
 }): Promise<{ stream: MediaStream; fallback: boolean }> {
   try {
     const stream = await mediaDevices.getUserMedia({
       audio: audioConstraints(settings, stereo),
     });
     return { stream, fallback: false };
-  } catch (error: unknown) {
+  } catch (error) {
     if (!canFallbackToDefaultMicrophone(error, settings.micDeviceId))
       throw error;
     const stream = await mediaDevices.getUserMedia({
@@ -105,13 +112,15 @@ export class MediaCaptureManager {
   private readonly getSettings: () => MediaCaptureSettings;
   private readonly getAudioStereo: (source: string) => boolean;
   private readonly mediaDevices: MediaDevices;
-  private readonly onMicrophoneFallback?: (details: unknown) => unknown;
-  private readonly onMicrophoneRestored?: (details: unknown) => unknown;
-  private readonly onSource?: (entry: MediaCaptureEntry) => unknown;
+  private readonly onMicrophoneFallback?: (details: ExternalObject) => void;
+  private readonly onMicrophoneRestored?: (details: ExternalObject) => void;
+  private readonly onSource?: (
+    entry: MediaCaptureEntry,
+  ) => TopologySourceEntry | Promise<TopologySourceEntry | null> | void;
   private readonly onSourceEnded?: (
     entry: MediaCaptureEntry,
     details?: Record<string, unknown>,
-  ) => unknown;
+  ) => void;
   private readonly sources = new Map<string, MediaCaptureEntry>();
   private readonly sourceGenerations = new Map<string, number>();
   private microphoneFallback = false;
@@ -159,7 +168,7 @@ export class MediaCaptureManager {
       this.microphoneFallback = result.fallback;
       if (wasFallback && !result.fallback)
         await this.onMicrophoneRestored?.({ deviceId: settings.micDeviceId });
-    } catch (error: unknown) {
+    } catch (error) {
       this.microphoneFallback = previousFallback;
       stream.getTracks().forEach((streamTrack) => streamTrack.stop());
       throw error;
@@ -186,7 +195,7 @@ export class MediaCaptureManager {
       mediaDevices: this.mediaDevices,
       settings,
       stereo: this.getAudioStereo?.("audio"),
-      onFallback: (details: unknown) => {
+      onFallback: (details: ExternalObject) => {
         fallbackDetails = details;
       },
     });
@@ -349,7 +358,7 @@ export class MediaCaptureManager {
     const replacement = this.register("audio", stream, track);
     try {
       await replacement.publication;
-    } catch (error: unknown) {
+    } catch (error) {
       if (
         current.track.readyState === "live" &&
         this.sources.get("audio") !== current
@@ -406,17 +415,21 @@ export class MediaCaptureManager {
       display: screen,
       deviceId: screen ? null : settings.cameraDeviceId,
     });
-    const stream = screen
-      ? await this.mediaDevices.getDisplayMedia({
-          video: constraints,
-          audio: sharedAudioConstraints(),
-          selfBrowserSurface: "exclude",
-          systemAudio: "include",
-        } as DisplayMediaStreamOptions)
-      : await this.mediaDevices.getUserMedia({
-          video: constraints,
-          audio: false,
-        });
+    let stream: MediaStream;
+    if (screen) {
+      const displayMediaOptions: ExtendedDisplayMediaStreamOptions = {
+        video: constraints,
+        audio: sharedAudioConstraints(),
+        selfBrowserSurface: "exclude",
+        systemAudio: "include",
+      };
+      stream = await this.mediaDevices.getDisplayMedia(displayMediaOptions);
+    } else {
+      stream = await this.mediaDevices.getUserMedia({
+        video: constraints,
+        audio: false,
+      });
+    }
     if (this.sourceGenerations.get(source) !== generation) {
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw this.cancelledStartError(source);
@@ -431,7 +444,7 @@ export class MediaCaptureManager {
       : constraints;
     try {
       await track.applyConstraints(trackConstraints);
-    } catch (error: unknown) {
+    } catch (error) {
       stream.getTracks().forEach((candidate) => candidate.stop());
       throw error;
     }
@@ -508,12 +521,13 @@ export class MediaCaptureManager {
           },
         );
     }
-    const stream = await this.mediaDevices.getDisplayMedia({
+    const displayMediaOptions: ExtendedDisplayMediaStreamOptions = {
       video: true,
       audio: sharedAudioConstraints(),
       systemAudio: "include",
       selfBrowserSurface: "exclude",
-    } as DisplayMediaStreamOptions);
+    };
+    const stream = await this.mediaDevices.getDisplayMedia(displayMediaOptions);
     stream.getVideoTracks().forEach((track) => track.stop());
     const track = stream.getAudioTracks()[0];
     if (!track) {
@@ -572,18 +586,15 @@ export class MediaCaptureManager {
     );
     try {
       entry.publication = Promise.resolve(this.onSource?.(entry)).then(
-        (publication) =>
-          publication && typeof publication === "object"
-            ? (publication as MediaCaptureEntry)
-            : null,
+        (publication) => publication || null,
       );
-    } catch (error: unknown) {
+    } catch (error) {
       entry.publication = Promise.reject(error);
     }
     return entry;
   }
 
-  stop(source: string): Promise<unknown> {
+  stop(source: string): Promise<void | boolean | Array<void | boolean>> {
     this.sourceGenerations.set(
       source,
       (this.sourceGenerations.get(source) || 0) + 1,
@@ -602,7 +613,9 @@ export class MediaCaptureManager {
     if (source === "screen") {
       const audio = this.sources.get("screen-audio");
       if (audio?.ownerSource === "screen")
-        return Promise.all([removal, this.stop("screen-audio")]);
+        return Promise.all([removal, this.stop("screen-audio")]).then(
+          () => undefined,
+        );
     }
     return removal;
   }

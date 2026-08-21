@@ -219,12 +219,28 @@
     >
       <div
         v-if="roomTiles.length"
-        class="screen-feed-area min-h-0 flex-1 overflow-hidden p-4 md:p-6"
+        class="screen-feed-area relative min-h-0 flex-1 overflow-hidden p-4 md:p-6"
       >
+        <button
+          v-if="viewMode === 'focused'"
+          type="button"
+          class="voice-back-to-grid metro-transition absolute right-4 top-4 z-20 inline-flex items-center gap-2 border border-white/15 bg-black/80 px-3 py-2 text-xs font-semibold text-white shadow-lg hover:bg-black md:right-6 md:top-6"
+          aria-label="Back to video grid"
+          @click="showOverview"
+        >
+          <Icon name="lucide:layout-grid" class="size-4" />
+          <span>Back to grid</span>
+        </button>
         <div
           ref="videoStage"
           class="voice-room-grid h-full min-h-0 w-full"
-          :class="{ 'voice-room-grid-focused': viewMode === 'focused' }"
+          :class="{
+            'voice-room-grid-overview': viewMode === 'overview',
+            'voice-room-grid-focused': viewMode === 'focused',
+            'voice-room-grid-focused-no-support':
+              viewMode === 'focused' && focusedSupportTiles.length === 0,
+            'voice-room-grid-solo-audio': isSoloAudioOverview,
+          }"
           :style="
             viewMode === 'overview'
               ? {
@@ -244,29 +260,21 @@
                 viewMode === 'focused' && tile.key === focusedTileKey,
               'participant-tile-speaking': tile.user?.speaking,
             }"
-            :role="tile.type !== 'participant' ? 'button' : undefined"
-            :tabindex="tile.type !== 'participant' ? 0 : undefined"
-            :aria-label="
-              tile.type === 'feed'
-                ? `Maximize ${tile.feed.label} ${tile.feed.source}`
-                : tile.type === 'broadcast'
-                  ? `Maximize DJ broadcast from ${tile.broadcast.label}`
-                  : undefined
-            "
-            @click="tile.type !== 'participant' && scheduleTileFocus(tile.key)"
-            @dblclick.stop="cancelTileFocus"
-            @keydown.enter.prevent="
-              tile.type !== 'participant' && focusTile(tile.key)
-            "
-            @keydown.space.prevent="
-              tile.type !== 'participant' && focusTile(tile.key)
-            "
+            :style="focusedTileStyle(tile)"
+            role="button"
+            tabindex="0"
+            :aria-label="getTileAriaLabel(tile)"
+            @click="focusTile(tile.key)"
+            @keydown.enter.self.prevent="focusTile(tile.key)"
+            @keydown.space.self.prevent="focusTile(tile.key)"
             @contextmenu.prevent="openTileVolumeMenu(tile)"
           >
             <VideoFeed
               v-if="tile.type === 'feed'"
               :feed-key="tile.feed.logicalStreamId || tile.feed.key"
               :stream="tile.feed.stream"
+              :track="tile.feed.track || null"
+              :receiver-incarnation-id="tile.feed.receiverIncarnationId || null"
               :native="tile.feed.native === true"
               :native-frame="tile.feed.frame || null"
               :can-pop-out="
@@ -290,6 +298,8 @@
               @pop-out="openMediaPopout(tile.feed)"
               @focus-popup="focusMediaPopout(tile.feed)"
               @pop-in="closeMediaPopout(tile.feed)"
+              @first-frame="onRemoteFirstFrame"
+              @frame-presented="onRemoteFramePresented"
             />
             <div
               v-else-if="tile.type === 'broadcast'"
@@ -364,7 +374,7 @@
               v-else
               class="participant-tile participant-audio-tile metro-transition group relative flex h-full min-w-0 flex-col items-center justify-center overflow-hidden border"
               :class="
-                viewMode === 'focused'
+                isFocusedSupportTile(tile)
                   ? 'participant-audio-tile-compact p-2'
                   : 'p-6'
               "
@@ -380,14 +390,14 @@
               </button>
               <div
                 class="avatar"
-                :class="viewMode === 'focused' ? 'mb-0' : 'mb-4'"
+                :class="isFocusedSupportTile(tile) ? 'mb-0' : 'mb-4'"
               >
                 <ProfileAvatar
                   :src="userAvatarSource(tile.user)"
                   :name="getUserDisplayName(tile.user)"
                   class="metro-transition rounded-full bg-primary text-primary-content font-bold ring-2"
                   :class="[
-                    viewMode === 'focused'
+                    isFocusedSupportTile(tile)
                       ? 'h-12 w-12 text-sm'
                       : 'h-24 w-24 text-2xl md:h-28 md:w-28',
                     tile.user.speaking
@@ -399,7 +409,7 @@
               <h4
                 class="max-w-full truncate text-center font-semibold"
                 :class="
-                  viewMode === 'focused' ? 'mt-1 text-sm' : 'mt-4 text-lg'
+                  isFocusedSupportTile(tile) ? 'mt-1 text-sm' : 'mt-4 text-lg'
                 "
               >
                 {{ getUserDisplayName(tile.user) }}
@@ -447,379 +457,393 @@
           </p>
         </div>
       </div>
-    </div>
-
-    <Teleport to="body">
-      <div
-        v-if="volumeMenuUser"
-        class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
-        role="presentation"
-        @pointerdown.self="closeVolumeMenu"
-      >
-        <section
-          ref="volumeDialog"
-          class="w-full max-w-md border border-base-content/20 bg-base-200 text-base-content shadow-2xl"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="participant-volume-title"
-          tabindex="-1"
+      <Teleport to="body">
+        <div
+          v-if="volumeMenuUser"
+          class="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          role="presentation"
+          @pointerdown.self="closeVolumeMenu"
         >
-          <header
-            class="flex items-center justify-between gap-4 border-b border-base-content/15 px-5 py-4"
+          <section
+            ref="volumeDialog"
+            class="w-full max-w-md border border-base-content/20 bg-base-200 text-base-content shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="participant-volume-title"
+            tabindex="-1"
           >
-            <div class="min-w-0">
-              <p
-                class="text-xs font-semibold uppercase tracking-wider text-base-content/55"
-              >
-                Playback volume
-              </p>
-              <h4
-                id="participant-volume-title"
-                class="truncate text-lg font-bold"
-              >
-                {{ getUserDisplayName(volumeMenuUser) }}
-              </h4>
-            </div>
-            <button
-              class="metro-icon-btn metro-icon-btn--ghost btn-sm shrink-0"
-              type="button"
-              aria-label="Close volume settings"
-              @click="closeVolumeMenu"
+            <header
+              class="flex items-center justify-between gap-4 border-b border-base-content/15 px-5 py-4"
             >
-              <Icon name="lucide:x" class="size-5" />
-            </button>
-          </header>
-
-          <div class="space-y-6 p-5">
-            <div>
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <label
-                  class="flex items-center gap-2 font-semibold"
-                  for="participant-voice-volume"
+              <div class="min-w-0">
+                <p
+                  class="text-xs font-semibold uppercase tracking-wider text-base-content/55"
                 >
-                  <Icon name="lucide:mic" class="size-4 text-primary" />
-                  Voice
-                </label>
-                <output class="text-sm font-semibold tabular-nums">
-                  {{ trackVolumePercent(volumeMenuUser.id, "audio") }}%
-                </output>
+                  Playback volume
+                </p>
+                <h4
+                  id="participant-volume-title"
+                  class="truncate text-lg font-bold"
+                >
+                  {{ getUserDisplayName(volumeMenuUser) }}
+                </h4>
               </div>
-              <input
-                id="participant-voice-volume"
-                class="metro-range w-full"
-                type="range"
-                min="0"
-                max="2"
-                step="0.01"
-                :value="voiceStore.getTrackVolume(volumeMenuUser.id, 'audio')"
-                @input="onTrackVolumeChange(volumeMenuUser.id, 'audio', $event)"
-              />
-              <div
-                class="mt-2 flex justify-between text-xs text-base-content/55"
+              <button
+                class="metro-icon-btn metro-icon-btn--ghost btn-sm shrink-0"
+                type="button"
+                aria-label="Close volume settings"
+                @click="closeVolumeMenu"
               >
-                <span>Muted</span>
-                <span>200%</span>
+                <Icon name="lucide:x" class="size-5" />
+              </button>
+            </header>
+
+            <div class="space-y-6 p-5">
+              <div>
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <label
+                    class="flex items-center gap-2 font-semibold"
+                    for="participant-voice-volume"
+                  >
+                    <Icon name="lucide:mic" class="size-4 text-primary" />
+                    Voice
+                  </label>
+                  <output class="text-sm font-semibold tabular-nums">
+                    {{ trackVolumePercent(volumeMenuUser.id, "audio") }}%
+                  </output>
+                </div>
+                <input
+                  id="participant-voice-volume"
+                  class="metro-range w-full"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.01"
+                  :value="voiceStore.getTrackVolume(volumeMenuUser.id, 'audio')"
+                  @input="
+                    onTrackVolumeChange(volumeMenuUser.id, 'audio', $event)
+                  "
+                />
+                <div
+                  class="mt-2 flex justify-between text-xs text-base-content/55"
+                >
+                  <span>Muted</span>
+                  <span>200%</span>
+                </div>
+              </div>
+
+              <div v-if="hasAudioSource(volumeMenuUser.id, 'screen-audio')">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <label
+                    class="flex items-center gap-2 font-semibold"
+                    for="participant-screen-volume"
+                  >
+                    <Icon
+                      name="lucide:monitor-up"
+                      class="size-4 text-secondary"
+                    />
+                    Screen share
+                  </label>
+                  <output class="text-sm font-semibold tabular-nums">
+                    {{ trackVolumePercent(volumeMenuUser.id, "screen-audio") }}%
+                  </output>
+                </div>
+                <input
+                  id="participant-screen-volume"
+                  class="metro-range w-full"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.01"
+                  :value="
+                    voiceStore.getTrackVolume(volumeMenuUser.id, 'screen-audio')
+                  "
+                  @input="
+                    onTrackVolumeChange(
+                      volumeMenuUser.id,
+                      'screen-audio',
+                      $event,
+                    )
+                  "
+                />
+                <div
+                  class="mt-2 flex justify-between text-xs text-base-content/55"
+                >
+                  <span>Muted</span>
+                  <span>200%</span>
+                </div>
+              </div>
+
+              <div v-if="hasAudioSource(volumeMenuUser.id, 'broadcast-audio')">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <label
+                    class="flex items-center gap-2 font-semibold"
+                    for="participant-broadcast-volume"
+                  >
+                    <Icon name="lucide:disc-3" class="size-4 text-primary" />
+                    DJ broadcast
+                  </label>
+                  <output class="text-sm font-semibold tabular-nums">
+                    {{
+                      trackVolumePercent(volumeMenuUser.id, "broadcast-audio")
+                    }}%
+                  </output>
+                </div>
+                <input
+                  id="participant-broadcast-volume"
+                  class="metro-range w-full"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.01"
+                  :value="
+                    voiceStore.getTrackVolume(
+                      volumeMenuUser.id,
+                      'broadcast-audio',
+                    )
+                  "
+                  @input="
+                    onTrackVolumeChange(
+                      volumeMenuUser.id,
+                      'broadcast-audio',
+                      $event,
+                    )
+                  "
+                />
+                <div
+                  class="mt-2 flex justify-between text-xs text-base-content/55"
+                >
+                  <span>Muted</span>
+                  <span>200%</span>
+                </div>
               </div>
             </div>
+          </section>
+        </div>
+      </Teleport>
 
-            <div v-if="hasAudioSource(volumeMenuUser.id, 'screen-audio')">
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <label
-                  class="flex items-center gap-2 font-semibold"
-                  for="participant-screen-volume"
-                >
-                  <Icon
-                    name="lucide:monitor-up"
-                    class="size-4 text-secondary"
-                  />
-                  Screen share
-                </label>
-                <output class="text-sm font-semibold tabular-nums">
-                  {{ trackVolumePercent(volumeMenuUser.id, "screen-audio") }}%
-                </output>
-              </div>
-              <input
-                id="participant-screen-volume"
-                class="metro-range w-full"
-                type="range"
-                min="0"
-                max="2"
-                step="0.01"
-                :value="
-                  voiceStore.getTrackVolume(volumeMenuUser.id, 'screen-audio')
+      <footer
+        v-if="
+          voiceStore.connected &&
+          voiceStore.currentChannelId === props.channel.id
+        "
+        class="voice-command-bar absolute inset-x-0 bottom-0 z-20 border-t border-white/10 bg-black/90 px-3 py-3 text-white shadow-2xl"
+      >
+        <div class="voice-command-dock mx-auto">
+          <div class="voice-command-group">
+            <MediaSettingsContextMenu kind="microphone">
+              <button
+                @click="voiceStore.toggleMic"
+                :disabled="
+                  !voiceStore.connected ||
+                  (voiceStore.sfuComposable &&
+                    !voiceStore.sfuComposable.transportReady)
                 "
-                @input="
-                  onTrackVolumeChange(volumeMenuUser.id, 'screen-audio', $event)
-                "
-              />
-              <div
-                class="mt-2 flex justify-between text-xs text-base-content/55"
+                :class="[
+                  'voice-dock-button metro-transition',
+                  voiceStore.micMuted ? 'voice-dock-button-danger' : '',
+                ]"
+                :aria-label="getButtonTitle()"
+                :data-label="voiceStore.micMuted ? 'Unmute' : 'Mute'"
               >
-                <span>Muted</span>
-                <span>200%</span>
-              </div>
-            </div>
+                <Icon
+                  :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
+                  class="size-5"
+                />
+              </button>
+            </MediaSettingsContextMenu>
 
-            <div v-if="hasAudioSource(volumeMenuUser.id, 'broadcast-audio')">
-              <div class="mb-3 flex items-center justify-between gap-3">
-                <label
-                  class="flex items-center gap-2 font-semibold"
-                  for="participant-broadcast-volume"
-                >
-                  <Icon name="lucide:disc-3" class="size-4 text-primary" />
-                  DJ broadcast
-                </label>
-                <output class="text-sm font-semibold tabular-nums">
-                  {{
-                    trackVolumePercent(volumeMenuUser.id, "broadcast-audio")
-                  }}%
-                </output>
-              </div>
-              <input
-                id="participant-broadcast-volume"
-                class="metro-range w-full"
-                type="range"
-                min="0"
-                max="2"
-                step="0.01"
-                :value="
-                  voiceStore.getTrackVolume(
-                    volumeMenuUser.id,
-                    'broadcast-audio',
-                  )
-                "
-                @input="
-                  onTrackVolumeChange(
-                    volumeMenuUser.id,
-                    'broadcast-audio',
-                    $event,
-                  )
-                "
-              />
-              <div
-                class="mt-2 flex justify-between text-xs text-base-content/55"
-              >
-                <span>Muted</span>
-                <span>200%</span>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </Teleport>
-
-    <footer
-      v-if="
-        voiceStore.connected && voiceStore.currentChannelId === props.channel.id
-      "
-      class="voice-command-bar shrink-0 border-t border-white/10 bg-black px-3 py-3 text-white"
-    >
-      <div class="voice-command-dock mx-auto">
-        <div class="voice-command-group">
-          <MediaSettingsContextMenu kind="microphone">
             <button
-              @click="voiceStore.toggleMic"
-              :disabled="
-                !voiceStore.connected ||
-                (voiceStore.sfuComposable &&
-                  !voiceStore.sfuComposable.transportReady)
-              "
+              @click="voiceStore.toggleDeafen"
               :class="[
                 'voice-dock-button metro-transition',
-                voiceStore.micMuted ? 'voice-dock-button-danger' : '',
+                voiceStore.deafened ? 'voice-dock-button-danger' : '',
               ]"
-              :aria-label="getButtonTitle()"
-              :data-label="voiceStore.micMuted ? 'Unmute' : 'Mute'"
+              :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
+              :data-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
             >
               <Icon
-                :name="voiceStore.micMuted ? 'lucide:mic-off' : 'lucide:mic'"
+                :name="
+                  voiceStore.deafened ? 'lucide:volume-x' : 'lucide:headphones'
+                "
                 class="size-5"
               />
             </button>
-          </MediaSettingsContextMenu>
 
-          <button
-            @click="voiceStore.toggleDeafen"
-            :class="[
-              'voice-dock-button metro-transition',
-              voiceStore.deafened ? 'voice-dock-button-danger' : '',
-            ]"
-            :aria-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
-            :data-label="voiceStore.deafened ? 'Undeafen' : 'Deafen'"
-          >
-            <Icon
-              :name="
-                voiceStore.deafened ? 'lucide:volume-x' : 'lucide:headphones'
-              "
-              class="size-5"
-            />
-          </button>
+            <MediaSettingsContextMenu kind="camera">
+              <button
+                class="voice-dock-button metro-transition"
+                :class="
+                  voiceStore.cameraEnabled ? 'voice-dock-button-active' : ''
+                "
+                :aria-label="
+                  voiceStore.cameraEnabled
+                    ? 'Turn camera off'
+                    : 'Turn camera on'
+                "
+                :data-label="
+                  voiceStore.cameraEnabled
+                    ? 'Turn camera off'
+                    : 'Turn camera on'
+                "
+                @click="toggleCamera"
+              >
+                <Icon name="lucide:camera" class="size-5" />
+              </button>
+            </MediaSettingsContextMenu>
 
-          <MediaSettingsContextMenu kind="camera">
             <button
               class="voice-dock-button metro-transition"
               :class="
-                voiceStore.cameraEnabled ? 'voice-dock-button-active' : ''
+                voiceStore.screenSharing ? 'voice-dock-button-active' : ''
               "
               :aria-label="
-                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
+                voiceStore.screenSharing
+                  ? 'Stop sharing screen'
+                  : 'Share your screen'
               "
               :data-label="
-                voiceStore.cameraEnabled ? 'Turn camera off' : 'Turn camera on'
+                voiceStore.screenSharing ? 'Stop sharing' : 'Share screen'
               "
-              @click="toggleCamera"
+              @click="requestScreenShare"
             >
-              <Icon name="lucide:camera" class="size-5" />
+              <Icon name="lucide:monitor-up" class="size-5" />
             </button>
-          </MediaSettingsContextMenu>
 
-          <button
-            class="voice-dock-button metro-transition"
-            :class="voiceStore.screenSharing ? 'voice-dock-button-active' : ''"
-            :aria-label="
-              voiceStore.screenSharing
-                ? 'Stop sharing screen'
-                : 'Share your screen'
-            "
-            :data-label="
-              voiceStore.screenSharing ? 'Stop sharing' : 'Share screen'
-            "
-            @click="requestScreenShare"
-          >
-            <Icon name="lucide:monitor-up" class="size-5" />
-          </button>
-
-          <button
-            class="voice-dock-button metro-transition"
-            :class="
-              voiceStore.systemAudioSharing ? 'voice-dock-button-active' : ''
-            "
-            :aria-label="
-              voiceStore.systemAudioSharing
-                ? 'Stop sharing system audio'
-                : 'Share system audio only'
-            "
-            :data-label="
-              voiceStore.systemAudioSharing
-                ? 'Stop system audio'
-                : 'System audio'
-            "
-            @click="requestSystemAudioShare"
-          >
-            <Icon name="lucide:volume-2" class="size-5" />
-          </button>
-
-          <SoundboardPanel
-            :room-id="String(channel.room)"
-            :channel-id="String(channel.id)"
-            compact
-          />
-        </div>
-
-        <button
-          type="button"
-          class="voice-dock-button voice-dock-button-leave metro-transition"
-          aria-label="Leave voice channel"
-          data-label="Leave"
-          @click="leaveChannel"
-        >
-          <Icon name="lucide:phone-off" class="size-5" />
-        </button>
-      </div>
-      <div
-        v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
-        class="shared-audio-status mx-auto mt-3 max-w-3xl"
-      >
-        <div class="shared-audio-heading">
-          <span class="shared-audio-icon">
-            <Icon
-              :name="
-                voiceStore.systemAudioSharing
-                  ? 'lucide:volume-2'
-                  : 'lucide:monitor-up'
+            <button
+              class="voice-dock-button metro-transition"
+              :class="
+                voiceStore.systemAudioSharing ? 'voice-dock-button-active' : ''
               "
-              class="size-4"
-            />
-          </span>
-          <div>
-            <p class="text-sm font-semibold">
-              {{
+              :aria-label="
                 voiceStore.systemAudioSharing
-                  ? "System audio is live"
-                  : "Screen audio is live"
-              }}
-            </p>
-            <p class="text-xs text-white/60">
-              Control what everyone else hears
-            </p>
-          </div>
-        </div>
-
-        <div class="shared-audio-control">
-          <label for="shared-audio-volume" class="shared-audio-label">
-            <span>Shared volume</span>
-            <span class="shared-audio-volume-status">
-              <output class="tabular-nums" aria-live="polite">
-                <span>{{ voiceStore.sharedAudioVolume }}%</span>
-                <template v-if="voiceStore.sharedAudioDucking.active">
-                  <span class="shared-audio-ducking-arrow" aria-hidden="true"
-                    >→</span
-                  >
-                  <span class="shared-audio-ducking-value">
-                    {{
-                      Math.round(
-                        (voiceStore.sharedAudioVolume *
-                          voiceStore.sharedAudioDucking.effectivePercent) /
-                          100,
-                      )
-                    }}%
-                  </span>
-                  <span class="sr-only">effective while voice is detected</span>
-                </template>
-              </output>
-            </span>
-          </label>
-          <input
-            id="shared-audio-volume"
-            class="metro-range w-full"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            :value="voiceStore.sharedAudioVolume"
-            :style="{
-              '--metro-range-progress': `${voiceStore.sharedAudioVolume}%`,
-            }"
-            @input="voiceStore.setSharedAudioVolume($event.target.value)"
-          />
-        </div>
-
-        <div
-          class="shared-audio-meter"
-          :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
-        >
-          <div class="shared-audio-label">
-            <span>Signal sent</span>
-            <span class="tabular-nums"
-              >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
+                  ? 'Stop sharing system audio'
+                  : 'Share system audio only'
+              "
+              :data-label="
+                voiceStore.systemAudioSharing
+                  ? 'Stop system audio'
+                  : 'System audio'
+              "
+              @click="requestSystemAudioShare"
             >
+              <Icon name="lucide:volume-2" class="size-5" />
+            </button>
+
+            <SoundboardPanel
+              :room-id="String(channel.room)"
+              :channel-id="String(channel.id)"
+              compact
+            />
           </div>
-          <progress
-            :class="[
-              'progress h-2 w-full',
-              voiceStore.sharedAudioStats.dbfs >= -12
-                ? 'progress-error'
-                : 'progress-success',
-            ]"
-            max="1"
-            :value="voiceStore.sharedAudioStats.level"
-          ></progress>
-          <span class="shared-audio-detail tabular-nums">
-            {{ voiceStore.sharedAudioStats.dbfs.toFixed(1) }} dBFS
-          </span>
+
+          <button
+            type="button"
+            class="voice-dock-button voice-dock-button-leave metro-transition"
+            aria-label="Leave voice channel"
+            data-label="Leave"
+            @click="leaveChannel"
+          >
+            <Icon name="lucide:phone-off" class="size-5" />
+          </button>
         </div>
-      </div>
-    </footer>
+        <div
+          v-if="voiceStore.screenSharing || voiceStore.systemAudioSharing"
+          class="shared-audio-status mx-auto mt-3 max-w-3xl"
+        >
+          <div class="shared-audio-heading">
+            <span class="shared-audio-icon">
+              <Icon
+                :name="
+                  voiceStore.systemAudioSharing
+                    ? 'lucide:volume-2'
+                    : 'lucide:monitor-up'
+                "
+                class="size-4"
+              />
+            </span>
+            <div>
+              <p class="text-sm font-semibold">
+                {{
+                  voiceStore.systemAudioSharing
+                    ? "System audio is live"
+                    : "Screen audio is live"
+                }}
+              </p>
+              <p class="text-xs text-white/60">
+                Control what everyone else hears
+              </p>
+            </div>
+          </div>
+
+          <div class="shared-audio-control">
+            <label for="shared-audio-volume" class="shared-audio-label">
+              <span>Shared volume</span>
+              <span class="shared-audio-volume-status">
+                <output class="tabular-nums" aria-live="polite">
+                  <span>{{ voiceStore.sharedAudioVolume }}%</span>
+                  <template v-if="voiceStore.sharedAudioDucking.active">
+                    <span class="shared-audio-ducking-arrow" aria-hidden="true"
+                      >→</span
+                    >
+                    <span class="shared-audio-ducking-value">
+                      {{
+                        Math.round(
+                          (voiceStore.sharedAudioVolume *
+                            voiceStore.sharedAudioDucking.effectivePercent) /
+                            100,
+                        )
+                      }}%
+                    </span>
+                    <span class="sr-only"
+                      >effective while voice is detected</span
+                    >
+                  </template>
+                </output>
+              </span>
+            </label>
+            <input
+              id="shared-audio-volume"
+              class="metro-range w-full"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              :value="voiceStore.sharedAudioVolume"
+              :style="{
+                '--metro-range-progress': `${voiceStore.sharedAudioVolume}%`,
+              }"
+              @input="voiceStore.setSharedAudioVolume($event.target.value)"
+            />
+          </div>
+
+          <div
+            class="shared-audio-meter"
+            :title="`${voiceStore.sharedAudioStats.dbfs.toFixed(1)} dBFS`"
+          >
+            <div class="shared-audio-label">
+              <span>Signal sent</span>
+              <span class="tabular-nums"
+                >{{ voiceStore.sharedAudioStats.kbps.toFixed(1) }} kbps</span
+              >
+            </div>
+            <progress
+              :class="[
+                'progress h-2 w-full',
+                voiceStore.sharedAudioStats.dbfs >= -12
+                  ? 'progress-error'
+                  : 'progress-success',
+              ]"
+              max="1"
+              :value="voiceStore.sharedAudioStats.level"
+            ></progress>
+            <span class="shared-audio-detail tabular-nums">
+              {{ voiceStore.sharedAudioStats.dbfs.toFixed(1) }} dBFS
+            </span>
+          </div>
+        </div>
+      </footer>
+    </div>
   </div>
 </template>
 
@@ -836,6 +860,15 @@ import { getDesktopCaptureApi } from "../shared/desktop-capture";
 import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 import { useDesktopMediaPopouts } from "../composables/useDesktopMediaPopouts";
 import { useAdaptiveVideoGrid } from "../composables/useAdaptiveVideoGrid";
+import { useVideoRoomLayout } from "../composables/useVideoRoomLayout";
+import {
+  mergeLocalVoiceParticipant,
+  shouldRenderVoiceParticipant,
+} from "../shared/voice-room-participants.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 
 const DesktopCapturePicker = defineAsyncComponent(
   () => import("./DesktopCapturePicker.vue"),
@@ -864,21 +897,35 @@ const { openPopout, closePopout, focusPopout, isPoppedOut, syncPopoutFeeds } =
   useDesktopMediaPopouts();
 const router = useRouter();
 const config = useRuntimeConfig();
-const viewMode = ref("overview");
+const {
+  mode: viewMode,
+  focusedTileKey,
+  focusTile,
+  showOverview,
+  reconcileTiles,
+} = useVideoRoomLayout();
 const videoStage = ref(null);
 const { layout: adaptiveLayout } = useAdaptiveVideoGrid(
   videoStage,
-  computed(() => displayedRoomTiles.value.length),
+  computed(() => (viewMode.value === "overview" ? roomTiles.value.length : 0)),
 );
 const { status: voiceConnectionStatus } = useVoiceConnectionStatus(voiceStore);
 function reloadForMediaUpdate() {
   window.location.reload();
 }
-const focusedTileKey = ref(null);
-let tileFocusTimer = null;
 
 const connectedUsers = computed(() => {
-  return voiceStore.getDisplayUsersArray();
+  const currentUser = authStore.getUserData?.();
+  return mergeLocalVoiceParticipant(voiceStore.getDisplayUsersArray(), {
+    channelMatches:
+      voiceStore.connected && voiceStore.currentChannelId === props.channel.id,
+    connected: voiceStore.connected,
+    currentUser: currentUser || null,
+    muted: Boolean(voiceStore.micMuted),
+    deafened: Boolean(voiceStore.deafened),
+    cameraEnabled: Boolean(voiceStore.cameraEnabled),
+    screenSharing: Boolean(voiceStore.screenSharing),
+  });
 });
 const mediaFeedRevision = ref(0);
 watch(
@@ -893,7 +940,7 @@ watch(
   { immediate: true },
 );
 const videoFeeds = computed(() => {
-  mediaFeedRevision.value;
+  void mediaFeedRevision.value;
   const currentUser = authStore.getUserData?.();
   const currentUserId = currentUser?.id;
   const sessionLocalFeeds = unref(mediaSessionRef.value?.localVideoFeeds);
@@ -950,7 +997,9 @@ const roomTiles = computed(() => {
     broadcast,
   }));
   const participants = connectedUsers.value
-    .filter((user) => !representedUsers.has(String(user.id)))
+    .filter((user) =>
+      shouldRenderVoiceParticipant(String(user.id), representedUsers),
+    )
     .map((user) => ({
       key: `participant-${user.id}`,
       type: "participant",
@@ -966,12 +1015,20 @@ const displayedRoomTiles = computed(() => {
       Number(a.key === focusedTileKey.value),
   );
 });
+const focusedSupportTiles = computed(() =>
+  displayedRoomTiles.value.filter((tile) => tile.key !== focusedTileKey.value),
+);
+const isSoloAudioOverview = computed(
+  () =>
+    viewMode.value === "overview" &&
+    roomTiles.value.length === 1 &&
+    roomTiles.value[0]?.type === "participant",
+);
 const ownCameraFeed = computed(
   () =>
     videoFeeds.value.find((feed) => feed.local && feed.source === "camera") ||
     null,
 );
-
 watch(mediaFeedRevision, () => syncPopoutFeeds(videoFeeds.value), {
   immediate: true,
 });
@@ -1007,49 +1064,36 @@ function openTileVolumeMenu(tile) {
   if (user) openVolumeMenu(user);
 }
 
-function focusTile(key) {
-  if (viewMode.value === "focused" && focusedTileKey.value === key) {
-    viewMode.value = "overview";
-    return;
+function getTileAriaLabel(tile) {
+  if (tile.type === "feed") {
+    return `Focus ${tile.feed.label} ${tile.feed.source}`;
   }
-  focusedTileKey.value = key;
-  viewMode.value = "focused";
+  if (tile.type === "broadcast") {
+    return `Focus DJ broadcast from ${tile.broadcast.label}`;
+  }
+  return `Focus ${getUserDisplayName(tile.user)}`;
 }
 
-function cancelTileFocus() {
-  if (tileFocusTimer) clearTimeout(tileFocusTimer);
-  tileFocusTimer = null;
+function isFocusedSupportTile(tile) {
+  return viewMode.value === "focused" && tile.key !== focusedTileKey.value;
 }
 
-function scheduleTileFocus(key) {
-  cancelTileFocus();
-  tileFocusTimer = setTimeout(() => {
-    tileFocusTimer = null;
-    focusTile(key);
-  }, 240);
+function focusedTileStyle(tile) {
+  if (viewMode.value !== "focused" || tile.key === focusedTileKey.value) {
+    return undefined;
+  }
+  const supportIndex = focusedSupportTiles.value.findIndex(
+    (supportTile) => supportTile.key === tile.key,
+  );
+  return {
+    "--voice-support-index": supportIndex,
+    "--voice-support-count": focusedSupportTiles.value.length,
+  };
 }
 
 watch(roomTiles, (tiles) => {
-  if (
-    focusedTileKey.value &&
-    !tiles.some((tile) => tile.key === focusedTileKey.value)
-  ) {
-    focusedTileKey.value =
-      tiles.find((tile) => tile.type === "feed")?.key || null;
-    if (!focusedTileKey.value) viewMode.value = "overview";
-  }
+  reconcileTiles(tiles.map((tile) => tile.key));
 });
-watch(
-  broadcastFeeds,
-  (feeds, previous) => {
-    const previousKeys = new Set((previous || []).map((feed) => feed.key));
-    const started = feeds.find((feed) => !previousKeys.has(feed.key));
-    if (!started) return;
-    focusedTileKey.value = `broadcast-${started.key}`;
-    viewMode.value = "focused";
-  },
-  { flush: "post" },
-);
 const remoteSystemAudioShares = computed(() => {
   return Array.from(remoteAudioFeedsRef.value)
     .filter(
@@ -1068,6 +1112,37 @@ const remoteSystemAudioShares = computed(() => {
 function setScreenReceiving(feed, receiving) {
   if (feed.local || feed.source !== "screen") return;
   voiceStore.setRemoteScreenReceiving(feed.key, receiving);
+}
+
+function onRemoteFirstFrame(event) {
+  const eventRecord = isExternalRecord(event) ? event : null;
+  const feedKey = isExternalString(event) ? event : eventRecord?.feedKey;
+  const receiverIncarnationId = isExternalString(event)
+    ? null
+    : eventRecord?.receiverIncarnationId || null;
+  const observationMode = eventRecord?.observationMode;
+  if (!feedKey) return;
+  mediaSessionRef.value?.markRemoteFirstFrame?.(
+    feedKey,
+    receiverIncarnationId,
+    eventRecord?.fallback === true,
+    observationMode,
+  );
+}
+
+function onRemoteFramePresented(event) {
+  const eventRecord = isExternalRecord(event) ? event : null;
+  const feedKey = isExternalString(event) ? event : eventRecord?.feedKey;
+  const receiverIncarnationId = isExternalString(event)
+    ? null
+    : eventRecord?.receiverIncarnationId || null;
+  const observationMode = eventRecord?.observationMode;
+  if (!feedKey) return;
+  mediaSessionRef.value?.markRemoteFramePresented?.(
+    feedKey,
+    receiverIncarnationId,
+    observationMode,
+  );
 }
 
 function setLocalPreview(feed, enabled) {
@@ -1323,10 +1398,23 @@ async function leaveChannel() {
   }
 }
 
-onMounted(() => document.addEventListener("keydown", onVolumeDialogKeydown));
+function onVideoLayoutKeydown(event) {
+  if (
+    event.key === "Escape" &&
+    viewMode.value === "focused" &&
+    !document.fullscreenElement
+  ) {
+    showOverview();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("keydown", onVolumeDialogKeydown);
+  document.addEventListener("keydown", onVideoLayoutKeydown);
+});
 onUnmounted(() => {
-  cancelTileFocus();
   document.removeEventListener("keydown", onVolumeDialogKeydown);
+  document.removeEventListener("keydown", onVideoLayoutKeydown);
 });
 </script>
 
@@ -1336,14 +1424,17 @@ onUnmounted(() => {
 }
 
 .voice-stage {
+  position: relative;
   background: #050505;
+  --voice-control-safe-area: 5rem;
 }
 
 .screen-feed-area {
   container-type: size;
+  padding-bottom: calc(var(--voice-control-safe-area) + 1.5rem);
 }
 
-.voice-room-grid:not(.voice-room-grid-focused) {
+.voice-room-grid-overview {
   display: flex;
   flex-wrap: wrap;
   align-content: center;
@@ -1351,7 +1442,7 @@ onUnmounted(() => {
   gap: var(--video-grid-gap);
 }
 
-.voice-room-grid:not(.voice-room-grid-focused) .voice-room-tile {
+.voice-room-grid-overview .voice-room-tile {
   flex: 0 0 auto;
   width: var(--video-tile-width);
   height: var(--video-tile-height);
@@ -1359,12 +1450,56 @@ onUnmounted(() => {
   min-height: 0;
 }
 
-.voice-room-grid.voice-room-grid-focused {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 14rem));
-  grid-template-rows: minmax(0, 1fr) 8rem;
-  justify-content: center;
-  gap: 0.75rem;
+.voice-room-grid-focused {
+  position: relative;
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: calc(var(--voice-filmstrip-height) + var(--voice-layout-gap));
+  --voice-layout-gap: 0.75rem;
+  --voice-filmstrip-height: clamp(5rem, 12vh, 8rem);
+  --voice-filmstrip-width: calc(var(--voice-filmstrip-height) * 16 / 9);
+}
+
+.voice-room-grid-focused-no-support {
+  --voice-filmstrip-height: 0px;
+  --voice-layout-gap: 0px;
+}
+
+.voice-room-grid-focused .voice-room-tile-focused {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  width: min(100%, 72rem);
+  height: calc(100% - var(--voice-filmstrip-height) - var(--voice-layout-gap));
+  max-width: 72rem;
+  max-height: 100%;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+.voice-room-grid-focused .voice-room-tile:not(.voice-room-tile-focused) {
+  position: absolute;
+  bottom: 0;
+  width: var(--voice-filmstrip-width);
+  height: var(--voice-filmstrip-height);
+  --voice-support-total-width: calc(
+    var(--voice-support-count) * var(--voice-filmstrip-width) +
+      (var(--voice-support-count) - 1) * var(--voice-layout-gap)
+  );
+  --voice-support-half-width: calc(var(--voice-support-total-width) * 0.5);
+  left: calc(
+    max(0px, 50% - var(--voice-support-half-width)) +
+      var(--voice-support-index) *
+      (var(--voice-filmstrip-width) + var(--voice-layout-gap))
+  );
+}
+
+.voice-room-grid-solo-audio .voice-room-tile {
+  width: min(100%, clamp(14rem, 42vw, 28rem));
+  height: min(100%, clamp(10rem, 30vw, 16rem));
+  aspect-ratio: 1.35;
 }
 
 .voice-room-tile {
@@ -1381,17 +1516,6 @@ onUnmounted(() => {
 .voice-room-tile[role="button"]:focus-visible {
   outline: 3px solid var(--color-primary);
   outline-offset: 2px;
-}
-
-.voice-room-tile-focused {
-  grid-column: 1 / -1;
-  width: 100%;
-  height: 100%;
-}
-
-.voice-room-grid-focused .voice-room-tile:not(.voice-room-tile-focused) {
-  width: 100%;
-  height: 8rem;
 }
 
 .participant-audio-tile-compact {

@@ -2,22 +2,32 @@ import { db } from "../db/client.ts";
 import { userPresence } from "../db/schema/index.ts";
 import { eq, ne, and, lt } from "drizzle-orm";
 import {
-  PRESENCE_STATUSES,
   type PresenceStatus,
   type PresenceUpdateOptions,
 } from "../types/presence.ts";
+import {
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 export const OFFLINE_AFTER_MS = 15 * 60 * 1000;
 
-export function normalizePresenceStatus(value: unknown): PresenceStatus {
-  return PRESENCE_STATUSES.includes(value as PresenceStatus)
-    ? (value as PresenceStatus)
-    : "online";
+export function normalizePresenceStatus(value: ExternalField): PresenceStatus {
+  const status = parseExternalString(value);
+  switch (status) {
+    case "online":
+    case "idle":
+    case "dnd":
+    case "offline":
+      return status;
+    default:
+      return "online";
+  }
 }
 
 export async function setPresence(
   userId: string,
-  status: unknown,
+  status: ExternalField,
   { timestamp, isManualOverride, platform }: PresenceUpdateOptions = {},
 ) {
   const normalizedStatus = normalizePresenceStatus(status);
@@ -28,8 +38,7 @@ export async function setPresence(
       statusMessage: "Invalid presence timestamp",
     });
   }
-  const platformValue =
-    typeof platform === "string" && platform ? platform : "web";
+  const platformValue = parseExternalString(platform) || "web";
   await db
     .insert(userPresence)
     .values({

@@ -6,6 +6,44 @@ import type {
   CloudflareSessionOptions,
 } from "./types/cloudflare-media.ts";
 export class CloudflareRealtimeSession {
+  declare send: CloudflareSessionOptions["send"];
+  declare iceServers: CloudflareSessionOptions["iceServers"];
+  declare onRemoteTrack: CloudflareSessionOptions["onRemoteTrack"];
+  declare onRemoteTrackEnded: CloudflareSessionOptions["onRemoteTrackEnded"];
+  declare onStateChange: CloudflareSessionOptions["onStateChange"];
+  declare getVideoSettings: CloudflareSessionOptions["getVideoSettings"];
+  declare controlConnectionEpoch: number;
+  declare localPeerId: string | null;
+  declare connectionState: CloudflareSessionLike["connectionState"];
+  declare getMetrics: CloudflareSessionLike["getMetrics"];
+  declare currentSession: CloudflareSessionLike["currentSession"];
+  declare assertCurrentSession: CloudflareSessionLike["assertCurrentSession"];
+  declare request: CloudflareSessionLike["request"];
+  declare initialize: CloudflareSessionLike["initialize"];
+  declare closeMedia: CloudflareSessionLike["closeMedia"];
+  declare addSource: CloudflareSessionLike["addSource"];
+  declare handle: CloudflareSessionLike["handle"];
+  declare setJitterBufferConfig: CloudflareSessionLike["setJitterBufferConfig"];
+  declare enqueueNegotiation: CloudflareSessionLike["enqueueNegotiation"];
+  declare enqueueSourceOperation: CloudflareSessionLike["enqueueSourceOperation"];
+  declare addSourceInternal: CloudflareSessionLike["addSourceInternal"];
+  declare subscribe: CloudflareSessionLike["subscribe"];
+  declare subscribePublicationBatch: CloudflareSessionLike["subscribePublicationBatch"];
+  declare subscribePublications: CloudflareSessionLike["subscribePublications"];
+  declare recoverRemotePublication: CloudflareSessionLike["recoverRemotePublication"];
+  declare closePulledRemoteTracksSafely: CloudflareSessionLike["closePulledRemoteTracksSafely"];
+  declare removeSourceInternal: CloudflareSessionLike["removeSourceInternal"];
+  declare setRemoteReceiving: CloudflareSessionLike["setRemoteReceiving"];
+  declare handleRemoteTrack: CloudflareSessionLike["handleRemoteTrack"];
+  declare queueRemoteTrack: CloudflareSessionLike["queueRemoteTrack"];
+  declare shouldReceive: CloudflareSessionLike["shouldReceive"];
+  declare setSourceTransmission: CloudflareSessionLike["setSourceTransmission"];
+  declare configureVideoSender: CloudflareSessionLike["configureVideoSender"];
+  declare updateSenderParameters: CloudflareSessionLike["updateSenderParameters"];
+  declare reconcilePublications: CloudflareSessionLike["reconcilePublications"];
+  declare reconcilePublicationsOnce: CloudflareSessionLike["reconcilePublicationsOnce"];
+  declare provider?: string;
+  declare providerId?: string | null;
   declare peerConnection: RTCPeerConnection | null;
   declare sessionId: string | null;
   declare initializing: Promise<void> | null;
@@ -17,6 +55,7 @@ export class CloudflareRealtimeSession {
   declare publications: CloudflareSessionLike["publications"];
   declare remoteByMid: CloudflareSessionLike["remoteByMid"];
   declare pendingRemoteTracks: CloudflareSessionLike["pendingRemoteTracks"];
+  declare remoteCompensationOwners: CloudflareSessionLike["remoteCompensationOwners"];
   declare rtpSamples: CloudflareSessionLike["rtpSamples"];
   declare subscriptionTasks: CloudflareSessionLike["subscriptionTasks"];
   declare subscribedTrackNames: Set<string>;
@@ -34,7 +73,9 @@ export class CloudflareRealtimeSession {
     onRemoteTrackEnded,
     onStateChange,
     getVideoSettings,
-  }: CloudflareSessionOptions) {
+    getControlConnectionEpoch,
+    localPeerId,
+  }: CloudflareSessionOptions & { localPeerId?: string }) {
     this.send = send;
     this.iceServers = iceServers;
     this.onRemoteTrack = onRemoteTrack;
@@ -52,6 +93,7 @@ export class CloudflareRealtimeSession {
     this.publications = new Map();
     this.remoteByMid = new Map();
     this.pendingRemoteTracks = new Map();
+    this.remoteCompensationOwners = new Map();
     this.rtpSamples = new Map();
     this.subscriptionTasks = new Map();
     this.subscribedTrackNames = new Set();
@@ -60,12 +102,18 @@ export class CloudflareRealtimeSession {
     this.sourceOperations = new Map();
     this.sessionGeneration = 0;
     this.connectionEpoch = 0;
+    this.controlConnectionEpoch = 0;
+    this.localPeerId = localPeerId || null;
     this.lastSentClientRtpCapabilities = null;
     this.lastReceivedConsumerParams = null;
+    if (getControlConnectionEpoch)
+      this.getControlConnectionEpoch = getControlConnectionEpoch;
   }
+
+  getControlConnectionEpoch = () => this.controlConnectionEpoch;
 }
 
-export interface CloudflareRealtimeSession extends CloudflareSessionLike {}
+export interface CloudflareRealtimeSessionContract extends CloudflareSessionLike {}
 
 const cloudflareMethodGroups = [
   CloudflareNegotiationMethods,

@@ -1,10 +1,10 @@
-const htmlEntities: Record<string, string> = {
+const htmlEntities = {
   "&": "&amp;",
   "<": "&lt;",
   ">": "&gt;",
   '"': "&quot;",
   "'": "&#039;",
-};
+} satisfies Record<string, string>;
 
 export function parseMarkdown(text: string | null | undefined): string {
   if (!text) return "";
@@ -25,7 +25,22 @@ export function parseMarkdown(text: string | null | undefined): string {
 }
 
 export function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (char: string) => htmlEntities[char] || char);
+  return text.replace(/[&<>"']/g, (char: string) => {
+    switch (char) {
+      case "&":
+        return htmlEntities["&"];
+      case "<":
+        return htmlEntities["<"];
+      case ">":
+        return htmlEntities[">"];
+      case '"':
+        return htmlEntities['"'];
+      case "'":
+        return htmlEntities["'"];
+      default:
+        return char;
+    }
+  });
 }
 
 export function hasMarkdown(text: string | null | undefined): boolean {

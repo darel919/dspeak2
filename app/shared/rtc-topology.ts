@@ -2,6 +2,8 @@ export const MAX_P2P_PARTICIPANTS = 8;
 export const P2P_VIDEO_MAX_PARTICIPANTS = 4;
 export const P2P_QUALIFICATION_TIMEOUT_MS = 8000;
 
+import { isExternalString } from "./types/boundary.ts";
+
 export function isP2pParticipantCount(
   count: number | string,
   hasVideo = false,
@@ -13,16 +15,16 @@ export function isP2pParticipantCount(
   );
 }
 
-export function addressFamily(address: unknown) {
-  const value = String(address || "");
+export function addressFamily<T>(address: T) {
+  const value = isExternalString(address) ? address : String(address || "");
   if (!value) return "unknown";
   if (value.includes(":")) return "ipv6";
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(value)) return "ipv4";
   return "unknown";
 }
 
-export function formatTopologyReason(value: unknown) {
-  const reason = String(value || "");
+export function formatTopologyReason<T>(value: T) {
+  const reason = isExternalString(value) ? value : String(value || "");
   if (!reason || reason === "provider-transition") return "Active media path";
   if (reason.startsWith("provider-cooldown-"))
     return "Recovered after provider cooldown";
@@ -188,14 +190,15 @@ export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
       });
     }
     if (sfuAddressFamily === "ipv4") {
-      edges.push({
+      const fallbackEdge = {
         from: "ipv4-fallback",
         to: "sfu",
         state: switching && snapshot.target === "sfu" ? "probing" : "active",
         transport: "sfu",
         addressFamily: "ipv4",
-        ...(snapshot.sfuEdge || {}),
-      });
+      };
+      if (snapshot.sfuEdge) Object.assign(fallbackEdge, snapshot.sfuEdge);
+      edges.push(fallbackEdge);
     }
   }
 

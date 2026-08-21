@@ -7,8 +7,11 @@ export interface IdentityProfile {
 }
 
 export interface IdentityRequestOptions {
-  method?: string;
-  body?: unknown;
+  method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
+  body?:
+    | BodyInit
+    | Record<string, string | number | boolean | null | undefined>
+    | null;
   headers?: Record<string, string>;
 }
 

@@ -11,6 +11,12 @@ import {
   cancelFriendRequest,
   removeFriend,
 } from "../../../utils/friends-manager.ts";
+import {
+  parseExternalBoolean,
+  parseExternalError,
+  parseExternalRecord,
+  parseExternalString,
+} from "../../../../shared/types/external.ts";
 
 export default defineEventHandler(async (event) => {
   const userId = await requireAuthenticatedUser(event);
@@ -43,35 +49,40 @@ export default defineEventHandler(async (event) => {
     }
 
     if (method === "POST") {
-      const body = (await readBody(event)) as Record<string, unknown>;
-      const { action, recipientHandle, targetUserId, requestId, accept } = body;
+      const body = parseExternalRecord(await readBody(event));
+      const action = parseExternalString(body?.action);
+      const recipientHandle = parseExternalString(body?.recipientHandle);
+      const targetUserId = parseExternalString(body?.targetUserId);
+      const requestId = parseExternalString(body?.requestId);
+      const accept =
+        parseExternalBoolean(body?.accept) ?? parseExternalString(body?.accept);
 
       if (action === "send" && recipientHandle) {
-        return await sendFriendRequest(userId, String(recipientHandle));
+        return await sendFriendRequest(userId, recipientHandle);
       }
 
       if (action === "send" && targetUserId) {
-        return await sendFriendRequestById(userId, String(targetUserId));
+        return await sendFriendRequestById(userId, targetUserId);
       }
 
       if (action === "respond" && requestId) {
         return await respondToFriendRequest(
-          String(requestId),
+          requestId,
           userId,
           accept === true || accept === "true",
         );
       }
 
       if (action === "cancel" && requestId) {
-        return await cancelFriendRequest(String(requestId), userId);
+        return await cancelFriendRequest(requestId, userId);
       }
 
       throw createError({ statusCode: 400, statusMessage: "Invalid request" });
     }
 
     if (method === "DELETE") {
-      const body = (await readBody(event)) as { friendId?: unknown };
-      const { friendId } = body;
+      const body = parseExternalRecord(await readBody(event));
+      const friendId = parseExternalString(body?.friendId);
 
       if (!friendId) {
         throw createError({
@@ -80,19 +91,16 @@ export default defineEventHandler(async (event) => {
         });
       }
 
-      return await removeFriend(userId, String(body.friendId));
+      return await removeFriend(userId, friendId);
     }
 
     throw createError({ statusCode: 405, statusMessage: "Method not allowed" });
-  } catch (error: unknown) {
-    const errorRecord =
-      error && typeof error === "object"
-        ? (error as { statusCode?: number; status?: number; message?: string })
-        : {};
-    if (errorRecord.statusCode || errorRecord.status) throw error;
+  } catch (error) {
+    const errorDetails = parseExternalError(error);
+    if (errorDetails.statusCode || errorDetails.status) throw error;
     throw createError({
       statusCode: 400,
-      statusMessage: errorRecord.message || "Friend request failed",
+      statusMessage: errorDetails.message || "Friend request failed",
     });
   }
 });

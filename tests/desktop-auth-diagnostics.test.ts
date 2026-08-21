@@ -30,6 +30,17 @@ test("transport failure maps to DESKTOP_API_SESSION_TRANSPORT_ERROR", () => {
     clientBuildCommit: "client-commit",
     serverProjectRef: "",
     clientProjectRef: "crmucqnebwlssqzthnek",
+    requestId: "",
+    transport: "webview-fetch",
+    requestUrl: "",
+    responseUrl: "",
+    redirected: false,
+    statusText: "",
+    retryAfter: "",
+    serverHeader: "",
+    viaHeader: "",
+    vercelRequestId: "",
+    cloudflareRay: "",
   });
 });
 
@@ -107,6 +118,17 @@ test("bare DESKTOP_API_SESSION_BRIDGE_FAILED still renders a diagnostic", () => 
     clientBuildCommit: "",
     serverProjectRef: "",
     clientProjectRef: "",
+    requestId: "",
+    transport: "webview-fetch",
+    requestUrl: "",
+    responseUrl: "",
+    redirected: false,
+    statusText: "",
+    retryAfter: "",
+    serverHeader: "",
+    viaHeader: "",
+    vercelRequestId: "",
+    cloudflareRay: "",
   });
 });
 
@@ -123,6 +145,17 @@ test("non-native errors map to DESKTOP_AUTH_UNKNOWN_ERROR with no leak", () => {
     clientBuildCommit: "",
     serverProjectRef: "",
     clientProjectRef: "",
+    requestId: "",
+    transport: "webview-fetch",
+    requestUrl: "",
+    responseUrl: "",
+    redirected: false,
+    statusText: "",
+    retryAfter: "",
+    serverHeader: "",
+    viaHeader: "",
+    vercelRequestId: "",
+    cloudflareRay: "",
   });
 });
 
@@ -138,4 +171,40 @@ test("session restore failure carries its own code and stage", () => {
   assert.equal(diagnostic?.code, "DESKTOP_API_SESSION_RESTORE_FAILED");
   assert.equal(diagnostic?.stage, "session-restore");
   assert.equal(diagnostic?.httpStatus, null);
+});
+
+test("unknown HTTP 429 maps to DESKTOP_API_SESSION_HTTP_429", () => {
+  const error = createDesktopAuthError(
+    "DESKTOP_API_SESSION_BRIDGE_FAILED",
+    "Too Many Requests",
+    {
+      stage: "server-session",
+      httpStatus: 429,
+      serverDiagnostic: "Too Many Requests",
+    },
+  );
+
+  const diagnostic = mapFailureDiagnostic(error);
+
+  assert.equal(diagnostic?.code, "DESKTOP_API_SESSION_HTTP_429");
+  assert.equal(diagnostic?.stage, "server-session");
+  assert.equal(diagnostic?.httpStatus, 429);
+});
+
+test("unknown HTTP 404 maps to DESKTOP_API_SESSION_HTTP_404", () => {
+  const error = createDesktopAuthError(
+    "DESKTOP_API_SESSION_BRIDGE_FAILED",
+    "Not Found",
+    {
+      stage: "server-session",
+      httpStatus: 404,
+      serverDiagnostic: "Not Found",
+    },
+  );
+
+  const diagnostic = mapFailureDiagnostic(error);
+
+  assert.equal(diagnostic?.code, "DESKTOP_API_SESSION_HTTP_404");
+  assert.equal(diagnostic?.stage, "server-session");
+  assert.equal(diagnostic?.httpStatus, 404);
 });

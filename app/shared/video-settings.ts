@@ -12,6 +12,19 @@ import type {
   VideoSettingsInput,
   VideoSettingsResolutionInput,
 } from "./types/video-settings.ts";
+import { isExternalBoolean, isExternalString } from "./types/boundary.ts";
+
+type LowSpecVideoMaximum = {
+  width: number;
+  height: number;
+  resolution: "360p" | "720p";
+};
+
+export function isVideoResolution<T>(
+  value: T,
+): value is T & VideoSettings["resolution"] {
+  return isExternalString(value) && Object.hasOwn(VIDEO_RESOLUTIONS, value);
+}
 
 export const VIDEO_FRAME_RATE_MIN = 25;
 export const LOW_SPEC_VIDEO_FRAME_RATE_MIN = 15;
@@ -51,7 +64,6 @@ export function resolveRequestedVideoSettings({
     source === "screen" ? settings.screenVideo : settings.cameraVideo;
   return {
     ...base,
-    ...(base.lowSpec === true ? { lowSpec: true } : {}),
     maxBitrate:
       Number(source === "screen" ? policy?.screenKbps : policy?.cameraKbps) *
         1000 || null,
@@ -61,11 +73,9 @@ export function resolveRequestedVideoSettings({
 export function normalizeVideoSettings(
   value: VideoSettingsInput = {},
 ): VideoSettings {
-  const resolution =
-    typeof value.resolution === "string" &&
-    Object.hasOwn(VIDEO_RESOLUTIONS, value.resolution)
-      ? (value.resolution as VideoSettings["resolution"])
-      : "original";
+  const resolution = isVideoResolution(value.resolution)
+    ? value.resolution
+    : "original";
   const requestedFrameRate = Number(value.frameRate);
   const frameRatePresets =
     value.lowSpec === true
@@ -85,19 +95,20 @@ export function normalizeVideoSettings(
       ? value.qualityPriority
       : "framerate";
 
-  return {
+  const normalized: VideoSettings = {
     resolution,
     frameRate,
     qualityPriority,
-    ...(value.lowSpec === true ? { lowSpec: true } : {}),
   };
+  if (value.lowSpec === true) normalized.lowSpec = true;
+  return normalized;
 }
 
 export function isLowSpecNativeRuntime(): boolean {
-  if (typeof navigator === "undefined") return false;
+  if (!import.meta.client) return false;
   const hardwareConcurrency = Number(navigator.hardwareConcurrency);
   const deviceMemory = Number(
-    (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    "deviceMemory" in navigator ? navigator.deviceMemory : undefined,
   );
   return (
     (Number.isFinite(hardwareConcurrency) && hardwareConcurrency <= 4) ||
@@ -112,9 +123,9 @@ export function applyLowSpecNativeVideoProfile(
 ): VideoSettings {
   if (!enabled || (source !== "camera" && source !== "screen")) return settings;
   const screen = source === "screen";
-  const maximum = screen
-    ? { width: 1280, height: 720, resolution: "720p" as const }
-    : { width: 640, height: 360, resolution: "360p" as const };
+  const maximum: LowSpecVideoMaximum = screen
+    ? { width: 1280, height: 720, resolution: "720p" }
+    : { width: 640, height: 360, resolution: "360p" };
   const width = Number(settings.width);
   const height = Number(settings.height);
   const requestedWidth = Number.isFinite(width) && width > 0 ? width : null;
@@ -125,17 +136,18 @@ export function applyLowSpecNativeVideoProfile(
     : 15;
   const maxBitrate = Number(settings.maxBitrate);
   const bitrateCeiling = screen ? 1_800_000 : 900_000;
-  return {
+  const profiledSettings = {
     ...settings,
     resolution: maximum.resolution,
     width: Math.min(requestedWidth || maximum.width, maximum.width),
     height: Math.min(requestedHeight || maximum.height, maximum.height),
     frameRate: Math.max(LOW_SPEC_VIDEO_FRAME_RATE_MIN, frameRate),
     lowSpec: true,
-    ...(Number.isFinite(maxBitrate) && maxBitrate > 0
-      ? { maxBitrate: Math.min(maxBitrate, bitrateCeiling) }
-      : { maxBitrate: bitrateCeiling }),
+    maxBitrate: bitrateCeiling,
   };
+  if (Number.isFinite(maxBitrate) && maxBitrate > 0)
+    profiledSettings.maxBitrate = Math.min(maxBitrate, bitrateCeiling);
+  return profiledSettings;
 }
 
 export function buildVideoConstraints(
@@ -287,21 +299,14 @@ export function resolveNativeCaptureVideoSettings(
   captureSelection: VideoCaptureSelection | null = null,
   requestedSettings: VideoSettingsInput = {},
 ) {
-  const captureVideo =
-    captureSelection?.video && typeof captureSelection.video === "object"
-      ? captureSelection.video
-      : {};
-  const bounds =
-    captureSelection?.bounds && typeof captureSelection.bounds === "object"
-      ? captureSelection.bounds
-      : {};
+  const captureVideo = captureSelection?.video ?? {};
+  const bounds = captureSelection?.bounds ?? {};
   const requestedResolution =
-    typeof requestedSettings.resolution === "string" &&
-    Object.hasOwn(VIDEO_RESOLUTIONS, requestedSettings.resolution) &&
+    isVideoResolution(requestedSettings.resolution) &&
     requestedSettings.resolution !== "original"
       ? VIDEO_RESOLUTIONS[requestedSettings.resolution]
       : null;
-  const positiveNumber = (value: unknown) => {
+  const positiveNumber = <T>(value: T) => {
     const number = Number(value);
     return Number.isFinite(number) && number > 0 ? number : null;
   };
@@ -318,22 +323,19 @@ export function resolveNativeCaptureVideoSettings(
   const frameRate =
     positiveNumber(requestedSettings.frameRate) ||
     positiveNumber(captureVideo.frameRate);
-  return {
+  const resolvedSettings = {
     ...captureVideo,
     ...requestedSettings,
-    ...(width ? { width } : {}),
-    ...(height ? { height } : {}),
-    ...(frameRate ? { frameRate } : {}),
-    ...(requestedSettings.qualityPriority
-      ? { qualityPriority: requestedSettings.qualityPriority }
-      : {}),
-    ...(requestedSettings.maxBitrate
-      ? { maxBitrate: requestedSettings.maxBitrate }
-      : {}),
   };
+  if (width) resolvedSettings.width = width;
+  if (height) resolvedSettings.height = height;
+  if (frameRate) resolvedSettings.frameRate = frameRate;
+  return resolvedSettings;
 }
 
-export function sortP2pVideoCodecPreferences(codecs: VideoCodec[] = []) {
+export function sortP2pVideoCodecPreferences<
+  T extends Pick<VideoCodec, "mimeType">,
+>(codecs: T[] = []) {
   const priorities = ["video/H264", "video/VP9", "video/VP8"];
   return [...codecs].sort((left, right) => {
     const leftIndex = priorities.findIndex(
@@ -349,10 +351,10 @@ export function sortP2pVideoCodecPreferences(codecs: VideoCodec[] = []) {
   });
 }
 
-export function updateVideoAdaptationState(
+export function updateVideoAdaptationState<TSendFps, TTargetFps>(
   state: VideoAdaptationState = {},
-  sendFps: unknown,
-  targetFps: unknown,
+  sendFps: TSendFps,
+  targetFps: TTargetFps,
 ) {
   const currentScale =
     state.scale !== undefined && VIDEO_SCALE_STEPS.includes(state.scale)
@@ -398,9 +400,9 @@ export function updateVideoAdaptationState(
   };
 }
 
-export function isScreenShareFpsBelowTarget(
-  sendFps: unknown,
-  targetFps: unknown,
+export function isScreenShareFpsBelowTarget<TSendFps, TTargetFps>(
+  sendFps: TSendFps,
+  targetFps: TTargetFps,
   ratio = SCREEN_SHARE_FPS_HEALTH_RATIO,
 ) {
   if (sendFps == null || targetFps == null) return false;
@@ -414,9 +416,9 @@ export function isScreenShareFpsBelowTarget(
   );
 }
 
-export function calculateFrameTimeMs(
-  totalEncodeTime: unknown,
-  framesEncoded: unknown,
+export function calculateFrameTimeMs<TTotalEncodeTime, TFramesEncoded>(
+  totalEncodeTime: TTotalEncodeTime,
+  framesEncoded: TFramesEncoded,
   previous: AdaptiveFrameCounters | null = null,
 ) {
   const total = Number(totalEncodeTime);
@@ -434,9 +436,9 @@ export function calculateFrameTimeMs(
   return (encodeTime / encodedFrames) * 1000;
 }
 
-export function calculateEncodedFps(
-  framesEncoded: unknown,
-  timestamp: unknown,
+export function calculateEncodedFps<TFramesEncoded, TTimestamp>(
+  framesEncoded: TFramesEncoded,
+  timestamp: TTimestamp,
   previous: VideoFrameMetrics | null = null,
 ) {
   const frames = Number(framesEncoded);
@@ -451,9 +453,9 @@ export function calculateEncodedFps(
   return (encodedFrames * 1000) / elapsedMs;
 }
 
-export function calculateBitrateKbps(
-  bytes: unknown,
-  timestamp: unknown,
+export function calculateBitrateKbps<TBytes, TTimestamp>(
+  bytes: TBytes,
+  timestamp: TTimestamp,
   previous: VideoFrameMetrics | null = null,
 ) {
   const currentBytes = Number(bytes);
@@ -472,8 +474,8 @@ export function calculateBitrateKbps(
   return (transferredBytes * 8) / elapsedMs;
 }
 
-export function classifyCodecImplementation(implementation: unknown) {
-  const value = typeof implementation === "string" ? implementation.trim() : "";
+export function classifyCodecImplementation<T>(implementation: T) {
+  const value = isExternalString(implementation) ? implementation.trim() : "";
   if (!value) return { type: "unknown", label: "Not reported by browser" };
 
   const normalized = value.toLowerCase();
@@ -508,9 +510,9 @@ export function classifyCodecImplementation(implementation: unknown) {
   };
 }
 
-export function calculateMediaEngineUtilization(
-  processingTimeMs: unknown,
-  fps: unknown,
+export function calculateMediaEngineUtilization<TProcessingTimeMs, TFps>(
+  processingTimeMs: TProcessingTimeMs,
+  fps: TFps,
 ) {
   if (processingTimeMs == null || fps == null) return null;
   const time = Number(processingTimeMs);
@@ -620,11 +622,13 @@ export async function inspectVideoCodecCapabilities(
           framerate: Math.max(1, Number(video.framerate) || 30),
         },
       });
-      report.supported =
-        typeof info.supported === "boolean" ? info.supported : null;
-      report.smooth = typeof info.smooth === "boolean" ? info.smooth : null;
-      report.powerEfficient =
-        typeof info.powerEfficient === "boolean" ? info.powerEfficient : null;
+      report.supported = isExternalBoolean(info.supported)
+        ? info.supported
+        : null;
+      report.smooth = isExternalBoolean(info.smooth) ? info.smooth : null;
+      report.powerEfficient = isExternalBoolean(info.powerEfficient)
+        ? info.powerEfficient
+        : null;
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error);
     }
@@ -653,10 +657,11 @@ export async function inspectH264ProfileCapabilities(
     video,
     mediaCapabilities,
   );
-  return reports.map(({ codec, ...report }, index) => ({
-    ...report,
-    profileLevelId: profiles[index],
-  }));
+  return reports.map((entry, index) => {
+    const { codec, ...report } = entry;
+    void codec;
+    return { ...report, profileLevelId: profiles[index] };
+  });
 }
 
 export async function rankVideoCodecsByHardwarePreference(

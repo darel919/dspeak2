@@ -8,7 +8,7 @@ function sourceFromTrackId(trackId: string, kind: "audio" | "video") {
   return kind === "video" ? "camera" : "audio";
 }
 
-function asPeerId(value: unknown) {
+function asPeerId<T>(value: T) {
   return value == null ? "" : String(value);
 }
 

@@ -1,3 +1,5 @@
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+
 type ImageDimensions = { width?: number; height?: number };
 type UploadRecord = {
   id: string;
@@ -6,10 +8,8 @@ type UploadRecord = {
   mimeType: string;
 };
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object"
-    ? (value as Record<string, unknown>)
-    : {};
+function record<T>(value: T): Record<string, unknown> {
+  return isExternalRecord(value) ? value : {};
 }
 
 export function validateImageFile(file: File | null | undefined) {
@@ -54,25 +54,37 @@ export function getImageDimensions(
   });
 }
 
-async function parseJsonResponse(response: Response): Promise<unknown> {
+async function parseJsonResponse(
+  response: Response,
+): Promise<Record<string, unknown> | string> {
   const responseText = await response.text();
   let result: unknown;
   try {
     result = JSON.parse(responseText);
   } catch {
-    result = responseText;
+    if (!response.ok)
+      throw Object.assign(
+        new Error(`Upload failed with status ${response.status}`),
+        { status: response.status },
+      );
+    return responseText;
+  }
+  if (isExternalRecord(result)) {
+    if (!response.ok) {
+      const message = isExternalString(result.message)
+        ? result.message
+        : `Upload failed with status ${response.status}`;
+      throw Object.assign(new Error(message), { status: response.status });
+    }
+    return result;
   }
   if (!response.ok) {
-    const resultRecord = record(result);
-    const message =
-      typeof resultRecord.message === "string"
-        ? resultRecord.message
-        : `Upload failed with status ${response.status}`;
-    const error = new Error(message) as Error & { status?: number };
-    error.status = response.status;
-    throw error;
+    throw Object.assign(
+      new Error(`Upload failed with status ${response.status}`),
+      { status: response.status },
+    );
   }
-  return result;
+  return responseText;
 }
 
 export async function uploadChatFile(
@@ -95,11 +107,13 @@ export async function uploadChatFile(
     }),
   });
   const prepared = record(await parseJsonResponse(prepare));
-  const uploadUrl =
-    typeof prepared.uploadUrl === "string" ? prepared.uploadUrl : "";
-  const key = typeof prepared.key === "string" ? prepared.key : "";
-  const cleanupToken =
-    typeof prepared.cleanupToken === "string" ? prepared.cleanupToken : "";
+  const uploadUrl = isExternalString(prepared.uploadUrl)
+    ? prepared.uploadUrl
+    : "";
+  const key = isExternalString(prepared.key) ? prepared.key : "";
+  const cleanupToken = isExternalString(prepared.cleanupToken)
+    ? prepared.cleanupToken
+    : "";
   if (!uploadUrl || !key || !cleanupToken)
     throw new Error("Upload preparation response is incomplete");
 
@@ -134,19 +148,20 @@ export async function uploadChatFile(
     });
     const committed = record(await parseJsonResponse(commit));
     const committedRecord = record(committed.record);
+    const committedSize = Number(committedRecord.size);
     if (
-      typeof committedRecord.id !== "string" ||
-      typeof committedRecord.size !== "number" ||
-      typeof committedRecord.mimeType !== "string"
+      !isExternalString(committedRecord.id) ||
+      !Object.is(committedRecord.size, committedSize) ||
+      !Number.isFinite(committedSize) ||
+      !isExternalString(committedRecord.mimeType)
     )
       throw new Error("Upload commit response is incomplete");
     result = {
       id: committedRecord.id,
-      fileName:
-        typeof committedRecord.fileName === "string"
-          ? committedRecord.fileName
-          : undefined,
-      size: committedRecord.size,
+      fileName: isExternalString(committedRecord.fileName)
+        ? committedRecord.fileName
+        : undefined,
+      size: committedSize,
       mimeType: committedRecord.mimeType,
     };
   } catch (error) {

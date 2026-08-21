@@ -22,7 +22,7 @@ export type JoinSessionInput = MediaRecord & {
   participantId?: string;
 };
 
-export type ScreenShareOptions = MediaRecord;
+export type ScreenShareOptions = MediaCaptureStartOptions;
 export type MediaSignalMessage = MediaRecord;
 
 export type MediaDeviceInfo = {
@@ -34,3 +34,4 @@ export type MediaDeviceInfo = {
 
 export type MediaStats = MediaRecord;
 export type MediaEngineEventMap = Record<string, (...args: never[]) => void>;
+import type { MediaCaptureStartOptions } from "../types/media-capture.ts";

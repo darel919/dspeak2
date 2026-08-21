@@ -1,4 +1,30 @@
 import type { ChatStoreContext } from "../../shared/types/chat-store.ts";
+import {
+  isExternalNumber,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
+import {
+  parseExternalRecord,
+  parseExternalValue,
+} from "../../utils/external-values.ts";
+
+type LegacyReadState = string[];
+
+function emptyLegacyReadState(): LegacyReadState {
+  return [];
+}
+
+function parseLegacyReadState(value: ExternalField): LegacyReadState {
+  if (!Array.isArray(value)) return emptyLegacyReadState();
+  return value
+    .map((entry) => parseExternalValue(entry))
+    .flatMap((entry) => {
+      if (isExternalString(entry)) return [entry];
+      if (isExternalNumber(entry)) return [String(entry)];
+      return [];
+    });
+}
 
 export function createChatReadActions(context: ChatStoreContext) {
   function markMessageAsRead(messageId: string): void {
@@ -24,12 +50,14 @@ export function createChatReadActions(context: ChatStoreContext) {
     if (context.runtime.pendingReadHydration) return;
     context.runtime.pendingReadHydration = (async () => {
       const stored = await context.dependencies.getPendingReadIds(userId);
-      let legacy: unknown = [];
+      let legacy = emptyLegacyReadState();
       try {
-        legacy = JSON.parse(
-          localStorage.getItem(context.legacyReadStorageKey(userId)) || "[]",
+        legacy = parseLegacyReadState(
+          JSON.parse(
+            localStorage.getItem(context.legacyReadStorageKey(userId)) || "[]",
+          ),
         );
-      } catch (storageError: unknown) {
+      } catch (storageError) {
         console.warn(
           "[ChatStore] Unable to import legacy pending read state:",
           storageError,
@@ -47,13 +75,13 @@ export function createChatReadActions(context: ChatStoreContext) {
       }
       try {
         localStorage.removeItem(context.legacyReadStorageKey(userId));
-      } catch (storageError: unknown) {
+      } catch (storageError) {
         console.warn(
           "[ChatStore] Unable to remove legacy pending read state:",
           storageError,
         );
       }
-    })().catch((storageError: unknown) => {
+    })().catch((storageError) => {
       context.runtime.pendingReadHydration = null;
       console.warn(
         "[ChatStore] Unable to restore pending read state:",
@@ -71,7 +99,7 @@ export function createChatReadActions(context: ChatStoreContext) {
         .then(async () => {
           await context.dependencies.savePendingReadIds(userId, snapshot);
         })
-        .catch((storageError: unknown) => {
+        .catch((storageError) => {
           console.warn(
             "[ChatStore] Unable to persist pending read state:",
             storageError,
@@ -119,22 +147,34 @@ export function createChatReadActions(context: ChatStoreContext) {
       if (!response.ok) {
         throw new Error(`Failed to update read state: ${response.status}`);
       }
-      const payload = (await response.json()) as {
-        results?: Array<{ status?: string; messageId?: string }>;
-      };
+      const payload = parseExternalValue(await response.json());
       if (flushGeneration !== context.runtime.localDataGeneration) return;
-      for (const result of payload.results || []) {
+      const payloadRecord = parseExternalRecord(payload);
+      const results =
+        payloadRecord && Array.isArray(payloadRecord.results)
+          ? payloadRecord.results
+              .map(parseExternalRecord)
+              .filter(
+                (result): result is Record<string, unknown> => result !== null,
+              )
+          : [];
+      for (const result of results) {
         if (
           result.status === "marked_as_read" ||
           result.status === "already_read"
         ) {
-          if (result.messageId) context.pendingReadIds.delete(result.messageId);
+          const messageId = result.messageId;
+          if (isExternalString(messageId)) {
+            context.pendingReadIds.delete(messageId);
+          } else if (isExternalNumber(messageId)) {
+            context.pendingReadIds.delete(String(messageId));
+          }
         }
       }
       await context.persistPendingReadIds(String(userData.id));
       await context.dependencies.useChannelsStore().getUnreadCounts();
     })()
-      .catch((readError: unknown) => {
+      .catch((readError) => {
         console.error("[ChatStore] Unable to update read state:", readError);
       })
       .finally(() => {
@@ -171,7 +211,7 @@ export function createChatReadActions(context: ChatStoreContext) {
             },
           },
         })
-        .catch((typingError: unknown) => {
+        .catch((typingError) => {
           context.dependencies.debugLog(
             "[ChatStore] Typing broadcast failed:",
             typingError,

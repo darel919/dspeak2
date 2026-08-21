@@ -5,6 +5,17 @@ import type {
   TopologyResourceHelpersContext,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
+import { isExternalString } from "../types/boundary.ts";
+
+function isTopologySourceEntry(
+  value: Record<string, unknown>,
+): value is TopologySourceEntry {
+  return (
+    isExternalString(value.source) &&
+    globalThis.MediaStreamTrack instanceof Function &&
+    value.track instanceof globalThis.MediaStreamTrack
+  );
+}
 
 export function createTopologyResourceHelpers({
   NativeP2pMesh,
@@ -33,17 +44,20 @@ export function createTopologyResourceHelpers({
   topologyState,
   transportReady,
   updateP2pStats,
+  getConnectionEpoch,
 }: TopologyResourceHelpersContext) {
   function ensureP2p() {
     const existing = getP2pMesh();
-    if (existing || typeof RTCPeerConnection === "undefined") return existing;
+    if (existing || !(globalThis.RTCPeerConnection instanceof Function))
+      return existing;
     const mesh = new NativeP2pMesh({
       iceServers: getIceServers(),
       sendSignal: (payload) =>
         payload.type === "ready"
           ? send({ type: "p2p-qualified", data: payload })
           : send({ type: "p2p-signal", data: payload }),
-      onRemoteTrack: (entry: TopologySourceEntry) =>
+      onRemoteTrack: (entry) => {
+        if (!isTopologySourceEntry(entry)) return;
         handoff.stage(
           {
             ...entry,
@@ -51,19 +65,23 @@ export function createTopologyResourceHelpers({
             provider: "p2p",
           },
           getActiveProvider(),
-        ),
-      onRemoteTrackEnded: (entry: TopologySourceEntry) =>
+        );
+      },
+      onRemoteTrackEnded: (entry) => {
+        if (!isTopologySourceEntry(entry)) return;
         handoff.remove({
           ...entry,
           key: entry.key || remoteMediaFeedKey(entry),
           provider: "p2p",
-        }),
-      onFailure: (failure: unknown) =>
-        send({ type: "p2p-failed", data: failure }),
-      onSnapshot: (snapshot: unknown) =>
+        });
+      },
+      onFailure: (reason: string, error: Error | string | null = null) =>
+        send({ type: "p2p-failed", data: { reason, error } }),
+      onSnapshot: (snapshot: Record<string, unknown>[]) =>
         updateP2pStats(Array.isArray(snapshot) ? snapshot : []),
       getAudioStereo,
       mediaCapabilities: getMediaCapabilities(),
+      getControlConnectionEpoch: getConnectionEpoch,
       getSenderOptions: (source, track) => {
         if (track.kind === "audio") {
           const options = buildVoiceProducerOptions(
@@ -99,13 +117,27 @@ export function createTopologyResourceHelpers({
 
   async function closeP2pSafely() {
     const provider = getP2pMesh();
+    const wasActive = getActiveProvider() === "p2p";
+
     setP2pMesh(null);
+
+    if (wasActive) {
+      setActiveProvider(null);
+    }
+
     await closeMediaProviderSafely(provider, "P2P");
   }
 
   async function closeSfuSafely() {
     const provider = getSfu();
+    const wasActive = getActiveProvider() === "sfu";
+
     setSfu(null);
+
+    if (wasActive) {
+      setActiveProvider?.(null);
+    }
+
     await closeMediaProviderSafely(provider, "SFU");
   }
 
@@ -164,8 +196,6 @@ export function createTopologyResourceHelpers({
       retryAfterMs: data.retryAfterMs,
       reason,
     });
-    // Queue a topology check - the provider will be retried when alarm fires on server
-    // and sends a new route-commit with the recovered provider
   }
 
   function handleP2pQualification(data: Record<string, unknown> = {}) {

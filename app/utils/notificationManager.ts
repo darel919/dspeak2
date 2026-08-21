@@ -1,4 +1,8 @@
 import { STORAGE_KEYS } from "~/const/storage";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 interface NotificationMessage {
   id?: string;
   content?: string;
@@ -21,7 +25,7 @@ class NotificationManager {
   }
 
   init() {
-    if (typeof window === "undefined") return;
+    if (!import.meta.client) return;
 
     this.isSupported = "Notification" in window;
     if (this.isSupported) {
@@ -107,7 +111,7 @@ class NotificationManager {
 
     const viewerId = currentUserId || storedUserData?.id;
     const sender = message?.sender;
-    const senderId = sender && typeof sender === "object" ? sender.id : sender;
+    const senderId = isExternalRecord(sender) ? sender.id : sender;
     if (viewerId && senderId && String(senderId) === String(viewerId)) {
       return null;
     }
@@ -117,12 +121,11 @@ class NotificationManager {
     }
 
     const title = roomName ? `New message in ${roomName}` : "New message";
-    const senderName =
-      sender && typeof sender === "object"
-        ? sender.name || "Someone"
-        : typeof sender === "string"
-          ? sender
-          : "Someone";
+    const senderName = isExternalRecord(sender)
+      ? sender.name || "Someone"
+      : isExternalString(sender)
+        ? sender
+        : "Someone";
     const body = `${senderName}: ${message.content || "New message"}`;
 
     this.playNotificationSound();
@@ -141,11 +144,12 @@ class NotificationManager {
 
   playNotificationSound() {
     try {
-      if (
-        typeof AudioContext !== "undefined" ||
-        typeof webkitAudioContext !== "undefined"
-      ) {
-        const audioContext = new (AudioContext || webkitAudioContext)();
+      const audioContextConstructor =
+        Object.getOwnPropertyDescriptor(globalThis, "AudioContext")?.value ||
+        Object.getOwnPropertyDescriptor(globalThis, "webkitAudioContext")
+          ?.value;
+      if (audioContextConstructor instanceof Function) {
+        const audioContext = new audioContextConstructor();
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
 

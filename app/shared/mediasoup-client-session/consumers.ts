@@ -8,8 +8,9 @@ import type {
   MediasoupConsumerEntry,
   MediasoupMessage,
 } from "../types/mediasoup-client.ts";
+import { isExternalString } from "../types/boundary.ts";
 
-export const methods: Record<string, unknown> = {
+export const methods = {
   requestConsumer(this: MediasoupClientSessionLike, producerId: string) {
     if (
       !producerId ||
@@ -46,7 +47,7 @@ export const methods: Record<string, unknown> = {
         },
         "SFU consumer request",
       );
-    } catch (_) {
+    } catch {
       this.requestedConsumers.delete(producerId);
       this.pendingConsumers.add(producerId);
     }
@@ -62,6 +63,23 @@ export const methods: Record<string, unknown> = {
     clearTimeout(this.consumerRetryTimers.get(data.producerId));
     this.consumerRetryTimers.delete(data.producerId);
     if (!this.recvTransport || this.consumers.has(data.id)) return;
+    const appData = data.appData;
+    const source =
+      data.source ||
+      (isExternalString(appData?.source) ? appData.source : data.kind) ||
+      null;
+    if (!source) return;
+    const ownerSource =
+      data.ownerSource ??
+      (isExternalString(appData?.ownerSource) ? appData.ownerSource : null);
+    const logicalStreamId =
+      data.logicalStreamId ??
+      (isExternalString(appData?.logicalStreamId)
+        ? appData.logicalStreamId
+        : null);
+    const variantId =
+      data.variantId ??
+      (isExternalString(appData?.variantId) ? appData.variantId : null);
     const mediaRevision = this.mediaRevision;
     this.lastReceivedConsumerParams = data;
     const consumer = await this.recvTransport.consume({
@@ -69,32 +87,40 @@ export const methods: Record<string, unknown> = {
       producerId: data.producerId,
       kind: data.kind,
       rtpParameters: data.rtpParameters,
-      appData: { userId: data.userId, source: data.source },
+      appData: { userId: data.userId, source },
     });
     if (this.closed || mediaRevision !== this.mediaRevision) {
       consumer.close();
       return;
     }
+    let closed = false;
+    let closeEntry = () => {};
     const entry = {
       key: data.producerId,
       producerId: data.producerId,
+      consumerId: consumer.id,
       userId: data.userId,
-      source: data.source || data.appData?.source || data.kind,
-      ownerSource: data.ownerSource || data.appData?.ownerSource || null,
+      source,
+      ownerSource,
       provider: "sfu",
       consumer,
       track: consumer.track,
       stream: new MediaStream([consumer.track]),
       receiving: false,
-    } as MediasoupConsumerEntry;
+      connectionEpoch: Number(data.connectionEpoch) || 1,
+      sourceGeneration: Number(data.generation ?? data.sourceGeneration) || 1,
+      receiverIncarnationId: `sfu:${consumer.id}`,
+      logicalStreamId,
+      variantId,
+      close: () => closeEntry(),
+    } satisfies MediasoupConsumerEntry;
     this.consumers.set(consumer.id, entry);
     this.onStateChange?.(
       "consumer",
       this.transportStates.get("recv") || "new",
       this.connectionState(),
     );
-    let closed = false;
-    const close = () => {
+    closeEntry = () => {
       if (closed) return;
       closed = true;
       this.consumers.delete(consumer.id);
@@ -105,14 +131,13 @@ export const methods: Record<string, unknown> = {
         this.connectionState(),
       );
     };
-    entry.close = close;
-    consumer.on("transportclose", close);
-    consumer.on("trackended", close);
+    consumer.on("transportclose", closeEntry);
+    consumer.on("trackended", closeEntry);
     try {
       if (consumer.receiver?.jitterBufferTarget !== undefined)
         consumer.receiver.jitterBufferTarget =
           this.jitterBufferTargetDelay ?? 20;
-    } catch (_) {}
+    } catch {}
     this.applyJitterBufferConfig(entry);
     try {
       if (this.shouldReceive(data.userId, entry.source, entry.ownerSource))
@@ -121,7 +146,7 @@ export const methods: Record<string, unknown> = {
       try {
         consumer.close();
       } catch {}
-      close();
+      closeEntry();
       throw error;
     }
     this.onRemoteTrack?.(entry);
@@ -166,7 +191,7 @@ export const methods: Record<string, unknown> = {
         receiver.jitterBufferMinimumDelay = this.jitterBufferMinimumDelay ?? 0;
       if (receiver.jitterBufferTarget !== undefined)
         receiver.jitterBufferTarget = this.jitterBufferTargetDelay ?? 20;
-    } catch (_) {}
+    } catch {}
   },
 
   setJitterBufferConfig(
@@ -207,4 +232,4 @@ export const methods: Record<string, unknown> = {
   ) {
     return handleMediasoupServerError(this, data);
   },
-};
+} satisfies Record<string, unknown>;

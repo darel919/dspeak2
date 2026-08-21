@@ -1,36 +1,27 @@
-import { runtimeClient, directClient } from "./client.ts";
-import { db } from "./client.ts";
-import { drizzle } from "drizzle-orm/postgres-js";
-import type { Sql } from "postgres";
+import { db, directDb } from "./client.ts";
+
+export type DatabaseTransaction = Parameters<
+  Parameters<typeof db.transaction>[0]
+>[0];
+
+type TransactionCallback<T> = (tx: DatabaseTransaction) => T | Promise<T>;
 
 export async function withTransaction<T>(
-  fn: (tx: typeof db) => T | Promise<T>,
+  fn: TransactionCallback<T>,
 ): Promise<T> {
-  const result = await runtimeClient.begin<T>(async (tx) => {
-    const txDb = drizzle(tx as unknown as Sql);
-    return fn(txDb);
-  });
-  return result as T;
+  return db.transaction(async (tx) => fn(tx));
 }
 
 export async function withDirectTransaction<T>(
-  fn: (tx: typeof db) => T | Promise<T>,
+  fn: TransactionCallback<T>,
 ): Promise<T> {
-  if (!directClient) throw new Error("DIRECT_DATABASE_URL not configured");
-  const result = await directClient.begin<T>(async (tx) => {
-    const txDb = drizzle(tx as unknown as Sql);
-    return fn(txDb);
-  });
-  return result as T;
+  if (!directDb) throw new Error("DIRECT_DATABASE_URL not configured");
+  return directDb.transaction(async (tx) => fn(tx));
 }
 
 export async function executeInTransaction<T>(
-  client: typeof runtimeClient,
-  fn: (tx: typeof db) => T | Promise<T>,
+  database: typeof db,
+  fn: TransactionCallback<T>,
 ): Promise<T> {
-  const result = await client.begin<T>(async (tx) => {
-    const txDb = drizzle(tx as unknown as Sql);
-    return fn(txDb);
-  });
-  return result as T;
+  return database.transaction(async (tx) => fn(tx));
 }

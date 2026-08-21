@@ -2,6 +2,8 @@ import type {
   MediasoupClientSessionLike,
   MediasoupConsumerEntry,
 } from "./types/mediasoup-client.ts";
+import { isExternalRecord, isExternalString } from "./types/boundary.ts";
+import { asError } from "./native-mediasoup-utils.ts";
 
 export async function setMediasoupConsumerReceiving(
   session: MediasoupClientSessionLike,
@@ -30,11 +32,15 @@ export async function setMediasoupConsumerReceiving(
         `SFU ${desired ? "consumer resume" : "consumer pause"}`,
       );
     } catch (error) {
-      session.pending.get(requestId)?.reject(error);
+      session.pending
+        .get(requestId)
+        ?.reject(asError(error, "SFU consumer control failed"));
     }
     try {
       const result = await acknowledgement;
-      if (result?.consumerClosed) {
+      const consumerClosed =
+        isExternalRecord(result) && result.consumerClosed === true;
+      if (consumerClosed) {
         if (entry.receivingRevision === revision) {
           entry.track.enabled = false;
           entry.receiving = false;
@@ -79,14 +85,14 @@ export function handleMediasoupServerError(
   data: Record<string, unknown>,
 ) {
   const error = new Error(
-    typeof data.message === "string"
+    isExternalString(data.message)
       ? data.message
-      : typeof data.error === "string"
+      : isExternalString(data.error)
         ? data.error
         : "SFU signaling request failed",
   );
   let handled = false;
-  const requestId = typeof data.requestId === "string" ? data.requestId : null;
+  const requestId = isExternalString(data.requestId) ? data.requestId : null;
   if (requestId) {
     const produceRequest = session.pendingProduce.get(requestId);
     const pendingRequest = session.pending.get(requestId);
@@ -99,8 +105,7 @@ export function handleMediasoupServerError(
       pendingRequest.reject(error);
     }
   }
-  const producerId =
-    typeof data.producerId === "string" ? data.producerId : null;
+  const producerId = isExternalString(data.producerId) ? data.producerId : null;
   if (data.requestType === "consume" && producerId) {
     handled = true;
     session.requestedConsumers.delete(producerId);
@@ -123,7 +128,7 @@ export function handleMediasoupServerError(
       "get-rtp-capabilities",
       "client-rtp-capabilities",
       "create-transport",
-    ].includes(data.requestType as string)
+    ].includes(isExternalString(data.requestType) ? data.requestType : "")
   ) {
     handled = true;
     session.readyReject?.(error);

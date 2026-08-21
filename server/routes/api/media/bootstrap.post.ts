@@ -10,6 +10,10 @@ import type {
   MediaConnectionMode,
   MediaSigningKey,
 } from "../../../types/media-bootstrap.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+} from "../../../../shared/types/external.ts";
 
 let privateKeyCache: MediaSigningKey | null = null;
 
@@ -26,8 +30,10 @@ export default defineEventHandler(async (event) => {
   await requireAuth(event);
   const user = event.context.user;
 
-  const body = (await readBody(event)) as MediaBootstrapBody;
-  const { channelId, roomId } = body;
+  const body: MediaBootstrapBody =
+    parseExternalRecord(await readBody(event)) ?? {};
+  const channelId = parseExternalString(body.channelId);
+  const roomId = parseExternalString(body.roomId);
 
   if (!channelId || !roomId) {
     throw createError({
@@ -62,7 +68,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const connectionMode: MediaConnectionMode =
-    body.connectionMode === "direct" ? "direct" : "auto";
+    parseExternalString(body.connectionMode) === "direct" ? "direct" : "auto";
   if (!new Set(["auto", "direct"]).has(connectionMode)) {
     throw createError({
       statusCode: 400,
@@ -76,7 +82,7 @@ export default defineEventHandler(async (event) => {
   websocketUrl.searchParams.set("channelId", validatedChannelId);
   if (websocketUrl.protocol === "http:") websocketUrl.protocol = "ws:";
   if (websocketUrl.protocol === "https:") websocketUrl.protocol = "wss:";
-  const requestedDeviceId = String(body.deviceId || "").trim();
+  const requestedDeviceId = parseExternalString(body.deviceId)?.trim() || "";
   const deviceId = requestedDeviceId || randomUUID();
   if (deviceId.length > 160 || !/^[A-Za-z0-9._:-]+$/.test(deviceId)) {
     throw createError({

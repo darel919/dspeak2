@@ -1,21 +1,43 @@
 import { dequeueMessage, getQueuedMessages } from "../app/utils/idb.ts";
+import {
+  parseExternalRecord,
+  parseExternalString,
+  parseExternalValue,
+} from "../app/utils/external-values.ts";
+import type { ExternalField } from "~~/shared/types/external.ts";
+
+type PrecacheEntry =
+  | { kind: "url"; url: string }
+  | { kind: "asset"; url: string; revision: string | null };
+
+function parsePrecacheEntry(value: ExternalField): PrecacheEntry | null {
+  const parsed = parseExternalValue(value);
+  const stringValue = parseExternalString(parsed);
+  if (stringValue !== null) return { kind: "url", url: stringValue };
+  const record = parseExternalRecord(parsed);
+  const url = parseExternalString(parseExternalValue(record?.url));
+  if (url === null) return null;
+  return {
+    kind: "asset",
+    url,
+    revision: parseExternalString(parseExternalValue(record?.revision)),
+  };
+}
 
 const PRECACHE_ENTRIES = [
   ...new Map(
-    (self.__WB_MANIFEST || []).map((entry) => {
-      const url = typeof entry === "string" ? entry : entry.url;
-      return [new URL(url, self.location.origin).href, entry];
-    }),
+    (self.__WB_MANIFEST || [])
+      .map((entry) => parsePrecacheEntry(entry))
+      .filter((entry): entry is PrecacheEntry => entry !== null)
+      .map((entry) => [new URL(entry.url, self.location.origin).href, entry]),
   ).values(),
 ];
 const PRECACHE_URLS = PRECACHE_ENTRIES.map(
-  (entry) =>
-    new URL(typeof entry === "string" ? entry : entry.url, self.location.origin)
-      .href,
+  (entry) => new URL(entry.url, self.location.origin).href,
 );
 const PRECACHE_SIGNATURE = PRECACHE_ENTRIES.map((entry) =>
-  typeof entry === "string"
-    ? entry
+  entry.kind === "url"
+    ? entry.url
     : `${entry.url}:${entry.revision || "versioned"}`,
 ).join("|");
 let precacheHash = 2166136261;

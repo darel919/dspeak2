@@ -18,7 +18,7 @@ The main Nuxt/Nitro process contains no mediasoup worker, router, transport, pro
 
 ## Protocol versioning
 
-**Protocol ID 919** is a permanent product identifier. All media-control messages use the 919 family handshake keywords (`hello919`, `hi919`, `error919`). Contract revision 4 provides:
+**Protocol ID 919** is a permanent product identifier. All media-control messages use the 919 family handshake keywords (`hello919`, `hi919`, `error919`). Contract revision 5 provides:
 
 - Server-owned connection epochs (never client-controlled)
 - Operation IDs using `crypto.randomUUID()` for idempotent replay

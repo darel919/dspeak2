@@ -3,10 +3,7 @@
     <figure
       ref="feedElement"
       class="fullscreen-feed relative h-full min-h-0 w-full overflow-hidden bg-black shadow-lg"
-      :class="[
-        receiving && !poppedOut ? 'cursor-zoom-in' : '',
-        { 'fullscreen-feed-active': isFullscreen },
-      ]"
+      :class="{ 'fullscreen-feed-active': isFullscreen }"
       :data-feed-key="feedKey"
       :title="
         receiving && !isFullscreen && !poppedOut
@@ -189,13 +186,20 @@
 </template>
 
 <script setup>
+import { nextTick } from "vue";
 import { useSettingsStore } from "~/stores/settings";
 import { playSystemSound } from "~/shared/system-sounds.ts";
+import {
+  isCurrentVideoFrame,
+  scheduleFencedVideoFrame,
+} from "~/shared/video-frame-fencing.ts";
 
 const settingsStore = useSettingsStore();
 const props = defineProps({
   feedKey: { type: String, required: true },
   stream: { type: Object, default: null },
+  track: { type: Object, default: null },
+  receiverIncarnationId: { type: String, default: null },
   native: { type: Boolean, default: false },
   nativeFrame: { type: Object, default: null },
   canPopOut: { type: Boolean, default: false },
@@ -218,6 +222,8 @@ const emit = defineEmits([
   "pop-out",
   "focus-popup",
   "pop-in",
+  "first-frame",
+  "frame-presented",
 ]);
 
 const videoElement = ref(null);
@@ -232,18 +238,28 @@ let nativeCanvasHeight = 0;
 let nativePixelBuffer = null;
 let nativeImageData = null;
 let nativePendingFrame = null;
+let nativePendingFeedKey = null;
+let nativePendingReceiverId = null;
 let nativeFrameAnimation = 0;
 let nativeIntersectionObserver = null;
 let nativeFeedVisible = true;
 let lastTouchAt = 0;
 let fullscreenStateInitialized = false;
 let playbackRecoveryTimer = null;
+let firstFrameFallbackTimer = null;
+let nativeFirstFrameEmitted = false;
+let nativeFirstFrameReceiverId = null;
+let videoFrameCallbackHandle = null;
+let cancelVideoFramePresentation = null;
+let videoFirstFrameEmitted = false;
+
+let currentFeedKey = props.feedKey;
 const localScreenPreviewPaused = computed(
   () => props.local && props.source === "screen" && !previewEnabled.value,
 );
 
 function currentFullscreenElement() {
-  if (typeof document === "undefined") return null;
+  if (!import.meta.client) return null;
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
 
@@ -268,7 +284,7 @@ function syncFullscreenState() {
 }
 
 async function exitFullscreen() {
-  if (typeof document === "undefined" || !currentFullscreenElement()) return;
+  if (!import.meta.client || !currentFullscreenElement()) return;
   const exit = document.exitFullscreen || document.webkitExitFullscreen;
   if (exit) await exit.call(document);
 }
@@ -309,16 +325,30 @@ function handleTouchEnd(event) {
 }
 
 function playVideoElement(element, label) {
-  if (!element?.srcObject || typeof element.play !== "function") return;
+  if (!element?.srcObject || !(element.play instanceof Function)) return;
   const playback = element.play();
   playback?.catch?.((error) =>
     console.warn(`[VideoFeed] ${label} playback failed`, error),
   );
 }
 
-function drawNativeFrame(frame = nativePendingFrame) {
+function drawNativeFrame(
+  frame = nativePendingFrame,
+  feedKey = nativePendingFeedKey,
+  receiverIncarnationId = nativePendingReceiverId,
+) {
   const canvas = nativeCanvasElement.value;
-  if (!frame || !canvas || typeof atob !== "function") return;
+  if (!frame || !canvas || !(globalThis.atob instanceof Function)) return;
+  if (
+    !isCurrentVideoFrame(
+      { feedKey, receiverIncarnationId },
+      {
+        feedKey: props.feedKey,
+        receiverIncarnationId: props.receiverIncarnationId,
+      },
+    )
+  )
+    return;
   const width = Number(frame.width);
   const height = Number(frame.height);
   if (
@@ -351,10 +381,33 @@ function drawNativeFrame(frame = nativePendingFrame) {
     nativeImageData.data.set(pixels);
   }
   nativeCanvasContext?.putImageData(nativeImageData, 0, 0);
+  if (feedKey && receiverIncarnationId)
+    emit("frame-presented", {
+      feedKey,
+      receiverIncarnationId,
+      observationMode: "native",
+    });
+  if (
+    feedKey &&
+    receiverIncarnationId &&
+    (!nativeFirstFrameEmitted ||
+      nativeFirstFrameReceiverId !== receiverIncarnationId)
+  ) {
+    nativeFirstFrameEmitted = true;
+    nativeFirstFrameReceiverId = receiverIncarnationId;
+    emit("first-frame", {
+      feedKey,
+      receiverIncarnationId,
+      observationMode: "native",
+    });
+  }
 }
 
 function cancelNativeFrameAnimation() {
-  if (nativeFrameAnimation && typeof cancelAnimationFrame === "function")
+  if (
+    nativeFrameAnimation &&
+    globalThis.cancelAnimationFrame instanceof Function
+  )
     cancelAnimationFrame(nativeFrameAnimation);
   nativeFrameAnimation = 0;
 }
@@ -366,6 +419,8 @@ function scheduleNativeFrame() {
     return;
   }
   nativePendingFrame = props.nativeFrame;
+  nativePendingFeedKey = props.feedKey;
+  nativePendingReceiverId = props.receiverIncarnationId;
   if (
     !props.native ||
     !props.receiving ||
@@ -375,16 +430,22 @@ function scheduleNativeFrame() {
     nativeFrameAnimation
   )
     return;
-  if (typeof requestAnimationFrame !== "function") {
+  if (!(globalThis.requestAnimationFrame instanceof Function)) {
     drawNativeFrame();
     nativePendingFrame = null;
+    nativePendingFeedKey = null;
+    nativePendingReceiverId = null;
     return;
   }
   nativeFrameAnimation = requestAnimationFrame(() => {
     nativeFrameAnimation = 0;
     const frame = nativePendingFrame;
+    const feedKey = nativePendingFeedKey;
+    const receiverIncarnationId = nativePendingReceiverId;
     nativePendingFrame = null;
-    drawNativeFrame(frame);
+    nativePendingFeedKey = null;
+    nativePendingReceiverId = null;
+    drawNativeFrame(frame, feedKey, receiverIncarnationId);
     if (nativePendingFrame) scheduleNativeFrame();
   });
 }
@@ -412,10 +473,109 @@ function attachStream() {
   }
 }
 
+function cancelVideoFrameEvidence() {
+  clearTimeout(firstFrameFallbackTimer);
+  firstFrameFallbackTimer = null;
+  cancelVideoFramePresentation?.();
+  cancelVideoFramePresentation = null;
+  videoFrameCallbackHandle = null;
+}
+
+function emitFirstFrame(fallback = false, observationMode) {
+  if (!props.feedKey || !props.receiverIncarnationId || videoFirstFrameEmitted)
+    return;
+  videoFirstFrameEmitted = true;
+  const evidence = {
+    feedKey: props.feedKey,
+    receiverIncarnationId: props.receiverIncarnationId,
+    fallback,
+  };
+  if (observationMode) Object.assign(evidence, { observationMode });
+  emit("first-frame", evidence);
+}
+
 function handleVideoReady() {
   clearTimeout(playbackRecoveryTimer);
   playbackRecoveryTimer = null;
   playVideoElement(videoElement.value, "Remote preview");
+  const element = videoElement.value;
+  const stream = props.stream;
+  const track = props.track || stream?.getVideoTracks?.()[0] || null;
+  const receiverIncarnationId = props.receiverIncarnationId;
+  if (!element || !stream || !track || !receiverIncarnationId) return;
+  cancelVideoFrameEvidence();
+  if (element && element.requestVideoFrameCallback instanceof Function) {
+    const callbackElement = element;
+    const callbackStream = stream;
+    const callbackTrack = track;
+    const callbackReceiverIncarnationId = receiverIncarnationId;
+    const schedulePresentation = () => {
+      if (
+        videoElement.value !== callbackElement ||
+        props.stream !== callbackStream ||
+        props.track !== callbackTrack ||
+        !isCurrentVideoFrame(
+          {
+            feedKey: props.feedKey,
+            receiverIncarnationId: callbackReceiverIncarnationId,
+          },
+          {
+            feedKey: props.feedKey,
+            receiverIncarnationId: props.receiverIncarnationId,
+          },
+        )
+      )
+        return;
+      const scheduled = scheduleFencedVideoFrame(
+        {
+          request: (callback) =>
+            callbackElement.requestVideoFrameCallback(() => callback()),
+          cancel: (handle) => callbackElement.cancelVideoFrameCallback(handle),
+        },
+        {
+          feedKey: props.feedKey,
+          receiverIncarnationId: callbackReceiverIncarnationId,
+        },
+        () => ({
+          feedKey: props.feedKey,
+          receiverIncarnationId: props.receiverIncarnationId,
+        }),
+        () => {
+          videoFrameCallbackHandle = null;
+          cancelVideoFramePresentation = null;
+          if (
+            videoElement.value !== callbackElement ||
+            props.stream !== callbackStream ||
+            props.track !== callbackTrack
+          )
+            return;
+          emit("frame-presented", {
+            feedKey: props.feedKey,
+            receiverIncarnationId: callbackReceiverIncarnationId,
+            observationMode: "rvfc",
+          });
+          emitFirstFrame(false, "rvfc");
+          schedulePresentation();
+        },
+      );
+      videoFrameCallbackHandle = scheduled.handle;
+      cancelVideoFramePresentation = scheduled.cancel;
+    };
+    schedulePresentation();
+  } else {
+    firstFrameFallbackTimer = setTimeout(() => {
+      firstFrameFallbackTimer = null;
+      if (
+        videoElement.value === element &&
+        props.stream === stream &&
+        props.track === track &&
+        props.receiverIncarnationId === receiverIncarnationId &&
+        element.readyState >= 2 &&
+        element.currentTime > 0
+      )
+        emitFirstFrame(true);
+    }, 100);
+  }
 }
 
 function recoverVideoPlayback() {
@@ -445,7 +605,7 @@ function enablePreview() {
   previewEnabled.value = true;
   if (props.local && props.native && props.source === "screen")
     emit("preview-change", true);
-  attachStream();
+  void nextTick(() => attachStream());
 }
 
 function notifyPreviewDemand() {
@@ -461,12 +621,14 @@ onMounted(() => {
   document.addEventListener("webkitfullscreenchange", syncFullscreenState);
   document.addEventListener("visibilitychange", handlePageVisible);
   window.addEventListener("pageshow", handlePageVisible);
-  if (props.native && typeof IntersectionObserver === "function") {
+  if (props.native && globalThis.IntersectionObserver instanceof Function) {
     nativeIntersectionObserver = new IntersectionObserver(([entry]) => {
       nativeFeedVisible = entry?.isIntersecting === true;
       if (nativeFeedVisible) scheduleNativeFrame();
       else {
         nativePendingFrame = null;
+        nativePendingFeedKey = null;
+        nativePendingReceiverId = null;
         cancelNativeFrameAnimation();
       }
     });
@@ -482,7 +644,16 @@ watch(
   () => props.stream,
   () => {
     if (props.local && props.source === "screen") previewEnabled.value = false;
+    videoFirstFrameEmitted = false;
+    cancelVideoFrameEvidence();
     attachStream();
+  },
+);
+watch(
+  () => props.track,
+  () => {
+    videoFirstFrameEmitted = false;
+    cancelVideoFrameEvidence();
   },
 );
 watch(() => props.nativeFrame, scheduleNativeFrame);
@@ -491,6 +662,8 @@ watch(
   (poppedOut) => {
     if (poppedOut) {
       nativePendingFrame = null;
+      nativePendingFeedKey = null;
+      nativePendingReceiverId = null;
       cancelNativeFrameAnimation();
       if (videoElement.value) videoElement.value.srcObject = null;
     } else attachStream();
@@ -502,12 +675,44 @@ watch(
     if (receiving) attachStream();
     else {
       nativePendingFrame = null;
+      nativePendingFeedKey = null;
+      nativePendingReceiverId = null;
       cancelNativeFrameAnimation();
+      cancelVideoFrameEvidence();
     }
   },
 );
 watch(() => props.ownCameraStream, attachStream);
 watch(isFullscreen, attachStream);
+watch(
+  () => props.feedKey,
+  (newFeedKey) => {
+    if (newFeedKey !== currentFeedKey) {
+      currentFeedKey = newFeedKey;
+      videoFirstFrameEmitted = false;
+      nativeFirstFrameEmitted = false;
+      nativeFirstFrameReceiverId = null;
+      nativePendingFrame = null;
+      nativePendingFeedKey = null;
+      nativePendingReceiverId = null;
+      cancelNativeFrameAnimation();
+      cancelVideoFrameEvidence();
+    }
+  },
+);
+watch(
+  () => props.receiverIncarnationId,
+  () => {
+    videoFirstFrameEmitted = false;
+    nativeFirstFrameEmitted = false;
+    nativeFirstFrameReceiverId = null;
+    nativePendingFrame = null;
+    nativePendingFeedKey = null;
+    nativePendingReceiverId = null;
+    cancelNativeFrameAnimation();
+    cancelVideoFrameEvidence();
+  },
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener("fullscreenchange", syncFullscreenState);
@@ -515,11 +720,16 @@ onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", handlePageVisible);
   window.removeEventListener("pageshow", handlePageVisible);
   nativePendingFrame = null;
+  nativePendingFeedKey = null;
+  nativePendingReceiverId = null;
   cancelNativeFrameAnimation();
   nativeIntersectionObserver?.disconnect();
   nativeIntersectionObserver = null;
   clearTimeout(playbackRecoveryTimer);
-  if (videoElement.value) videoElement.value.srcObject = null;
+  cancelVideoFrameEvidence();
+  if (videoElement.value) {
+    videoElement.value.srcObject = null;
+  }
   if (ownCameraElement.value) ownCameraElement.value.srcObject = null;
 });
 </script>

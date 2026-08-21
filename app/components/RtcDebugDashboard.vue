@@ -675,7 +675,7 @@ function formatAudioLevel(value) {
     : "—";
 }
 function formatBoolean(value) {
-  return typeof value === "boolean" ? (value ? "Yes" : "No") : "—";
+  return value === true || value === false ? (value ? "Yes" : "No") : "—";
 }
 function formatCounts(stream) {
   return [stream.nackCount, stream.pliCount, stream.firCount]

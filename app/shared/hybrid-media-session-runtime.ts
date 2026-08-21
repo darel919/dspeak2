@@ -71,12 +71,16 @@ export function createHybridMediaSessionRuntime({
   getConnectionEpoch,
   setConnectionEpoch,
   getLastAppliedRoomRevision,
+  getLastAppliedPublicationRevision,
+  setLastAppliedPublicationRevision,
   applyRoomRevision,
   requestSnapshot,
   setTopologyWaiter,
   setupMessageHandlers,
   queueCloudflarePublication,
   queueTargetedReconciliation,
+  handlePublicationsDigest,
+  sourceController,
 }: RuntimeDependencyContext) {
   return createHybridMediaSessionLifecycle({
     authStore,
@@ -150,13 +154,21 @@ export function createHybridMediaSessionRuntime({
       resolveOperationAck,
       rejectOperationAck,
       getConnectionEpoch,
+      setConnectionEpoch,
       getLastAppliedRoomRevision,
+      getLastAppliedPublicationRevision,
+      setLastAppliedPublicationRevision,
       applyRoomRevision,
       requestSnapshot,
       setTopologyWaiter,
       setupMessageHandlers,
       queueCloudflarePublication,
       queueTargetedReconciliation,
+      handlePublicationsDigest,
+      getLocalSources: () => sourceController?.getLocalSources?.() ?? new Map(),
+      sourceController,
+      processPendingRetirements: () =>
+        sourceController?.processPendingRetirements?.() ?? Promise.resolve(),
     },
   });
 }

@@ -1,8 +1,4 @@
 import {
-  getConnectionQualityBars,
-  getConnectionQualityLabel,
-} from "./connection-quality.ts";
-import {
   mapPeerRoundTripTimes,
   mapPeerConnectionMetrics,
   getAverageJitterBufferDelayMs,
@@ -28,7 +24,7 @@ export {
 
 export function buildVoiceProducerOptions(
   track: MediaStreamTrack,
-  maxBitrate: unknown,
+  maxBitrate: number | string | null | undefined,
   stereo = false,
 ) {
   const policy = getAudioCodecPolicy("microphone", stereo);
@@ -43,8 +39,8 @@ export function buildVoiceProducerOptions(
 
 export function getAudioBitrateBps(
   source: string,
-  channelBitrateKbps: unknown,
-  systemAudioBitrateKbps: unknown,
+  channelBitrateKbps: number | string | null | undefined,
+  systemAudioBitrateKbps: number | string | null | undefined,
 ) {
   const channel = Number(channelBitrateKbps);
   const requested =

@@ -7,13 +7,19 @@ export function createChatTransportActions(context: ChatStoreContext) {
     data: { type?: string; pendingId?: string; status?: number };
   }): void {
     if (event.data.type === "BACKGROUND_SYNC_SUCCESS") {
-      context.handleBackgroundSyncSuccess(event.data.pendingId);
+      if (event.data.pendingId)
+        context.handleBackgroundSyncSuccess(event.data.pendingId);
     }
     if (event.data.type === "BACKGROUND_SYNC_FAILURE") {
-      context.handleBackgroundSyncFailure(
-        event.data.pendingId,
-        event.data.status,
-      );
+      if (
+        event.data.pendingId &&
+        event.data.status !== undefined &&
+        Number.isFinite(event.data.status)
+      )
+        context.handleBackgroundSyncFailure(
+          event.data.pendingId,
+          event.data.status,
+        );
     }
   }
 
@@ -42,7 +48,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
     context.dependencies
       .useChannelsStore()
       .joinChannel(channelId)
-      .catch((joinError: unknown) => {
+      .catch((joinError) => {
         context.dependencies.debugLog(
           "[ChatStore] Failed to join channel membership:",
           joinError,
@@ -66,7 +72,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
     context.dependencies
       .useChannelsStore()
       .leaveChannel(channelId)
-      .catch((leaveError: unknown) => {
+      .catch((leaveError) => {
         context.dependencies.debugLog(
           "[ChatStore] Failed to leave channel membership:",
           leaveError,
@@ -311,7 +317,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
       const supabaseChannel = supabaseClient.channel(`chat:${channelId}`, {
         config: { private: true },
       });
-      const channel = supabaseChannel as unknown as RealtimeChannelLike;
+      const channel: RealtimeChannelLike = supabaseChannel;
       context.realtimeChannel.value = channel;
 
       supabaseChannel
@@ -367,7 +373,7 @@ export function createChatTransportActions(context: ChatStoreContext) {
           }
         });
 
-      if (typeof window !== "undefined") {
+      if (import.meta.client) {
         try {
           const { usePushSubscription } =
             await import("../../composables/usePushSubscription");

@@ -2,6 +2,7 @@ import type {
   RealtimeChannelPublisher,
   RealtimePublisher,
 } from "../types/realtime.ts";
+import type { ExternalField } from "../../shared/types/external.ts";
 
 let realtimePublisher: RealtimePublisher | null = null;
 let publisherOverride: RealtimePublisher | null = null;
@@ -15,7 +16,19 @@ async function loadPublisher(): Promise<RealtimePublisher | null> {
   }
   const { supabaseAdmin } = await import("../auth/supabase.ts");
   if (!supabaseAdmin) return null;
-  realtimePublisher = supabaseAdmin as unknown as RealtimePublisher;
+  realtimePublisher = {
+    channel(topic, options) {
+      const channel = supabaseAdmin.channel(
+        topic,
+        options?.config
+          ? { config: { private: options.config.private === true } }
+          : undefined,
+      );
+      return {
+        httpSend: (event, message) => channel.httpSend(event, message),
+      };
+    },
+  };
   return realtimePublisher;
 }
 
@@ -28,7 +41,7 @@ export function setRealtimePublisherForTests(
 
 export async function publishToRealtime(
   topic: string,
-  message: unknown,
+  message: ExternalField,
 ): Promise<void> {
   const publisher = await loadPublisher();
   if (!publisher) return;
@@ -44,27 +57,27 @@ export async function publishToRealtime(
   }
 }
 
-export function broadcastGlobally(message: unknown): Promise<void> {
+export function broadcastGlobally(message: ExternalField): Promise<void> {
   return publishToRealtime("global", message);
 }
 
 export function broadcastToUser(
   userId: string | number,
-  message: unknown,
+  message: ExternalField,
 ): Promise<void> {
   return publishToRealtime(`notify:${String(userId)}`, message);
 }
 
 export function broadcastToChannel(
   channelId: string | number,
-  message: unknown,
+  message: ExternalField,
 ): Promise<void> {
   return publishToRealtime(`chat:${String(channelId)}`, message);
 }
 
 export function broadcastToRoom(
   roomId: string | number,
-  message: unknown,
+  message: ExternalField,
 ): Promise<void> {
   return publishToRealtime(`room:${String(roomId)}`, message);
 }

@@ -37,7 +37,7 @@ function harness(options = {}) {
     buildUrl: () => "wss://example.test/socket",
     connectionTimeoutMs: 20,
     defaultHeartbeatIntervalMs: 5000,
-    defaultHeartbeatTimeoutMs: 20000,
+    defaultHeartbeatTimeoutMs: 15000,
     handleMessage() {},
     isIntentionalClose: () => false,
     onClose() {},
@@ -124,7 +124,7 @@ test("media signaling includes a control ticket in the hello payload", async () 
     assert.equal(
       signaling.acceptServerHello({
         protocolVersion: 919,
-        contractRevision: 3,
+        contractRevision: 5,
         mediaSessionId: "session-1",
         heartbeatIntervalMs: 30000,
         heartbeatTimeoutMs: 90000,
@@ -139,12 +139,80 @@ test("media signaling includes a control ticket in the hello payload", async () 
         mediaSessionId: "session-1",
         ticket: "control-ticket",
         protocolVersion: 919,
-        contractRevision: 3,
+        contractRevision: 5,
       },
     });
     candidate.onclose({ code: 4000, reason: "test" });
     await assert.rejects(opening, /connection closed/);
     signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("media signaling reaches ready after a compatible 919 handshake", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  try {
+    const signaling = harness();
+    const opening = signaling.open();
+    /* SAFETY: open() synchronously constructs the single fake socket before the first candidate is read. */
+    const candidate = FakeWebSocket.instances[0] as {
+      readyState: number;
+      lastMessage: string;
+    };
+    candidate.readyState = FakeWebSocket.OPEN;
+    assert.equal(
+      signaling.acceptServerHello({
+        protocolVersion: 919,
+        contractRevision: 5,
+        mediaSessionId: "session-ready",
+        heartbeatIntervalMs: 5000,
+        heartbeatTimeoutMs: 15000,
+        serverTime: Date.now(),
+      }),
+      true,
+    );
+    assert.equal(JSON.parse(candidate.lastMessage).type, "hello919");
+    assert.equal(signaling.markReady(), true);
+    await opening;
+    signaling.stop();
+  } finally {
+    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("media signaling rejects a mismatched contract revision", async () => {
+  const originalWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  resetFakeWebSocket();
+  try {
+    const signaling = harness();
+    const opening = signaling.open();
+    /* SAFETY: open() synchronously constructs the single fake socket before the first candidate is read. */
+    const candidate = FakeWebSocket.instances[0] as {
+      readyState: number;
+      closeRequest?: { code: number; reason: string };
+    };
+    candidate.readyState = FakeWebSocket.OPEN;
+    assert.equal(
+      signaling.acceptServerHello({
+        protocolVersion: 919,
+        contractRevision: 6,
+        mediaSessionId: "session-mismatch",
+        heartbeatIntervalMs: 5000,
+        heartbeatTimeoutMs: 15000,
+        serverTime: Date.now(),
+      }),
+      false,
+    );
+    assert.deepEqual(candidate.closeRequest, {
+      code: 4002,
+      reason: "Media client update required",
+    });
+    signaling.stop();
+    await assert.rejects(opening, /connection stopped/);
   } finally {
     globalThis.WebSocket = originalWebSocket;
   }

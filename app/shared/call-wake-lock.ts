@@ -29,7 +29,7 @@ export function createCallWakeLockController({
       sentinel ||
       pendingRequest ||
       !isVisible() ||
-      typeof wakeLock?.request !== "function"
+      !(wakeLock?.request instanceof Function)
     ) {
       return false;
     }
@@ -83,7 +83,7 @@ export function createCallWakeLockController({
     listening = false;
   }
 
-  async function setConnected(nextConnected: unknown) {
+  async function setConnected(nextConnected: boolean) {
     const next = nextConnected === true;
     if (connected === next) {
       if (next) return acquire();

@@ -3,7 +3,7 @@ interface ClipboardNavigator {
 }
 
 interface ClipboardDocument {
-  body?: { appendChild(element: HTMLTextAreaElement): unknown } | null;
+  body?: { appendChild(element: HTMLTextAreaElement): void } | null;
   createElement?(tagName: string): HTMLTextAreaElement;
   execCommand?(command: string): boolean;
 }
@@ -19,10 +19,9 @@ export async function copyTextToClipboard(
   } = {},
 ) {
   const currentNavigator =
-    navigatorObject || (typeof navigator !== "undefined" ? navigator : null);
+    navigatorObject || (import.meta.client ? navigator : null);
   const currentDocument: ClipboardDocument | null =
-    documentObject ||
-    (typeof document !== "undefined" ? (document as ClipboardDocument) : null);
+    documentObject || (import.meta.client ? document : null);
 
   if (currentNavigator?.clipboard?.writeText) {
     try {
@@ -33,8 +32,8 @@ export async function copyTextToClipboard(
 
   if (
     !currentDocument?.body ||
-    typeof currentDocument.createElement !== "function" ||
-    typeof currentDocument.execCommand !== "function"
+    !(currentDocument.createElement instanceof Function) ||
+    !(currentDocument.execCommand instanceof Function)
   )
     return false;
 

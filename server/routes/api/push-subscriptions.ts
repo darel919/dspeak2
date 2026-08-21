@@ -24,8 +24,6 @@ export default defineEventHandler(async (event) => {
       return { success: true };
     }
 
-    const deviceId = getHeader(event, "x-dspeak-device") || "unknown";
-
     await notificationRepository.addPushSubscription(userId, {
       endpoint: subscription.endpoint,
       p256dh: subscription.keys?.p256dh || "",

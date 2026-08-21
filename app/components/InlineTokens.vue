@@ -44,14 +44,16 @@
 </template>
 
 <script setup>
+import { isExternalString } from "../shared/types/boundary.ts";
+
 defineProps({
   tokens: { type: Array, required: true },
 });
 
 function safeHref(value) {
-  if (typeof value !== "string" || !value.trim()) return "";
+  if (!isExternalString(value) || !value.trim()) return "";
   const href = value.trim();
-  if (/[\u0000-\u001f\u007f]/.test(href)) return "";
+  if (/\p{Cc}/u.test(href)) return "";
   try {
     const url = new URL(href, "https://dspeak.invalid");
     if (!["http:", "https:", "mailto:"].includes(url.protocol)) return "";

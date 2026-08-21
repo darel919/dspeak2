@@ -1,4 +1,10 @@
 import { createHmac } from "node:crypto";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 const PUBLIC_STUN_SERVERS = [
   { urls: "stun:stun.cloudflare.com:3478" },
@@ -14,14 +20,19 @@ interface IceServer {
 
 type Environment = Record<string, string | undefined>;
 
-function positiveInteger(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+function positiveInteger(value: ExternalField, fallback: number) {
+  const parsed = parseExternalNumber(value);
+  return parsed !== null && Number.isSafeInteger(parsed) && parsed > 0
+    ? parsed
+    : fallback;
 }
 
-function port(value: unknown, fallback: number) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535
+function port(value: ExternalField, fallback: number) {
+  const parsed = parseExternalNumber(value);
+  return parsed !== null &&
+    Number.isInteger(parsed) &&
+    parsed >= 1 &&
+    parsed <= 65535
     ? parsed
     : fallback;
 }
@@ -105,24 +116,31 @@ export async function createCloudflareTurnServers(
   );
   if (!response.ok)
     throw new Error(`Cloudflare TURN credentials failed (${response.status})`);
-  const body = await response.json();
-  const iceServers = Array.isArray(body.iceServers)
-    ? body.iceServers
-    : body.iceServers
-      ? [body.iceServers]
+  const body = parseExternalRecord(await response.json());
+  const rawIceServers = body?.iceServers;
+  const iceServers = Array.isArray(rawIceServers)
+    ? rawIceServers
+    : rawIceServers
+      ? [rawIceServers]
       : [];
-  return iceServers.filter((server: unknown): server is IceServer =>
-    Boolean(
-      server &&
-      typeof server === "object" &&
-      "urls" in server &&
-      (typeof server.urls === "string" || Array.isArray(server.urls)) &&
-      "username" in server &&
-      typeof server.username === "string" &&
-      "credential" in server &&
-      typeof server.credential === "string",
-    ),
-  );
+  return iceServers.flatMap((server): IceServer[] => {
+    const record = parseExternalRecord(server);
+    if (record === null) return [];
+    const username = parseExternalString(record.username);
+    const credential = parseExternalString(record.credential);
+    const directUrls = parseExternalString(record.urls);
+    const listUrls = Array.isArray(record.urls)
+      ? record.urls.flatMap((url) => {
+          const parsedUrl = parseExternalString(url);
+          return parsedUrl === null ? [] : [parsedUrl];
+        })
+      : [];
+    if (username === null || credential === null) return [];
+    if (directUrls !== null)
+      return [{ urls: directUrls, username, credential }];
+    if (listUrls.length > 0) return [{ urls: listUrls, username, credential }];
+    return [];
+  });
 }
 
 export { PUBLIC_STUN_SERVERS };

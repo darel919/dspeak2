@@ -26,20 +26,51 @@ import {
 import type { OwnedErrorValue } from "~/shared/types/shared-utilities.ts";
 import type {
   VoiceMediaSessionLike,
-  VoiceSettingsLike,
   VoiceSoundboardActivityInput,
   VoiceUserRecord,
 } from "~/shared/types/voice-media-actions.ts";
-import type { VoiceStateUpdate } from "~/shared/types/voice-participant-state.ts";
-import type {
-  SharedAudioAttenuationLike,
-  SharedAudioDuckingLike,
-  SharedAudioStatsLike,
-} from "~~/shared/types/voice.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
+import {
+  parseExternalNumber,
+  type ExternalField,
+} from "~~/shared/types/external.ts";
 
 const EMPTY_MEDIA_FEEDS = new Map<string, unknown>();
 const MAX_USER_VOLUME_ENTRIES = 200;
 const MAX_TRACK_VOLUME_ENTRIES = 400;
+
+interface DjSessionRecord extends Record<string, unknown> {
+  id: string;
+  status?: string;
+}
+
+function boundedVolumeMap(
+  value: ExternalField,
+  limit: number,
+): Record<string, number> {
+  const bounded = boundedStorageMap(value, limit);
+  return Object.fromEntries(
+    Object.entries(bounded).flatMap(([key, entry]) => {
+      const number = parseExternalNumber(entry);
+      return number === null ? [] : [[key, number]];
+    }),
+  );
+}
+
+function normalizeDjSession(value: ExternalField): DjSessionRecord {
+  if (!isExternalRecord(value) || !isExternalString(value.id) || !value.id)
+    throw new TypeError("DJ session response is invalid");
+  const session = {
+    ...Object.fromEntries(Object.entries(value)),
+    id: value.id,
+  };
+  if (isExternalString(value.status))
+    Object.assign(session, { status: value.status });
+  return session;
+}
 
 export const useVoiceStore = defineStore("voice", () => {
   const config = useRuntimeConfig();
@@ -79,21 +110,15 @@ export const useVoiceStore = defineStore("voice", () => {
   }
   const sharedAudioVolume = computed(() => settingsStore.sharedAudioVolume);
   const sharedAudioStats = computed(() =>
-    normalizeSharedAudioStats(
-      unref(sfuComposable.value?.sharedAudioStats) as SharedAudioStatsLike,
-    ),
+    normalizeSharedAudioStats(unref(sfuComposable.value?.sharedAudioStats)),
   );
   const sharedAudioAttenuation = computed(() =>
     normalizeSharedAudioAttenuation(
-      unref(
-        sfuComposable.value?.sharedAudioAttenuation,
-      ) as SharedAudioAttenuationLike,
+      unref(sfuComposable.value?.sharedAudioAttenuation),
     ),
   );
   const sharedAudioDucking = computed(() =>
-    normalizeSharedAudioDucking(
-      unref(sfuComposable.value?.sharedAudioDucking) as SharedAudioDuckingLike,
-    ),
+    normalizeSharedAudioDucking(unref(sfuComposable.value?.sharedAudioDucking)),
   );
   const effectiveSystemAudioBitrate = computed(() => {
     const requested = Number(settingsStore.systemAudioBitrate) || 128;
@@ -126,7 +151,7 @@ export const useVoiceStore = defineStore("voice", () => {
     ReturnType<typeof setTimeout>
   >();
 
-  function setP2pQualification(value: unknown) {
+  function setP2pQualification(value: ExternalField) {
     p2pQualification.value = value || null;
   }
 
@@ -184,7 +209,7 @@ export const useVoiceStore = defineStore("voice", () => {
     return visibleActivity;
   }
 
-  if (typeof window !== "undefined") {
+  if (import.meta.client) {
     try {
       const persistedMic = localStorage.getItem(STORAGE_KEYS.voiceMicMuted);
       const persistedDeafen = localStorage.getItem(STORAGE_KEYS.voiceDeafened);
@@ -203,39 +228,33 @@ export const useVoiceStore = defineStore("voice", () => {
       if (persistedVolumes) {
         try {
           const parsed = JSON.parse(persistedVolumes);
-          if (parsed && typeof parsed === "object") {
+          if (isExternalRecord(parsed)) {
             Object.assign(
               userVolumes.value,
-              boundedStorageMap(parsed, MAX_USER_VOLUME_ENTRIES),
+              boundedVolumeMap(parsed, MAX_USER_VOLUME_ENTRIES),
             );
           }
-        } catch (_) {
-          /* ignore */
-        }
+        } catch {}
       }
       const persistedTrackVolumes = localStorage.getItem("voice.trackVolumes");
       if (persistedTrackVolumes)
         Object.assign(
           trackVolumes.value,
-          boundedStorageMap(
+          boundedVolumeMap(
             JSON.parse(persistedTrackVolumes),
             MAX_TRACK_VOLUME_ENTRIES,
           ),
         );
-    } catch (_) {
-      /* noop */
-    }
+    } catch {}
   }
 
-  if (typeof window !== "undefined") {
+  if (import.meta.client) {
     watch(
       micMuted,
       (v) => {
         try {
           localStorage.setItem(STORAGE_KEYS.voiceMicMuted, String(!!v));
-        } catch (_) {
-          /* noop */
-        }
+        } catch {}
       },
       { immediate: true },
     );
@@ -244,9 +263,7 @@ export const useVoiceStore = defineStore("voice", () => {
       (v) => {
         try {
           localStorage.setItem(STORAGE_KEYS.voiceDeafened, String(!!v));
-        } catch (_) {
-          /* noop */
-        }
+        } catch {}
       },
       { immediate: true },
     );
@@ -254,15 +271,13 @@ export const useVoiceStore = defineStore("voice", () => {
       userVolumes,
       (vols) => {
         try {
-          const bounded = boundedStorageMap(vols, MAX_USER_VOLUME_ENTRIES);
+          const bounded = boundedVolumeMap(vols, MAX_USER_VOLUME_ENTRIES);
           if (Object.keys(vols).length > MAX_USER_VOLUME_ENTRIES) {
-            userVolumes.value = bounded as Record<string, number>;
+            userVolumes.value = bounded;
           }
           localStorage.setItem("voice.userVolumes", JSON.stringify(bounded));
           reportBrowserStorageMetric("voice.userVolumes", bounded);
-        } catch (_) {
-          /* noop */
-        }
+        } catch {}
       },
       { deep: true },
     );
@@ -270,15 +285,13 @@ export const useVoiceStore = defineStore("voice", () => {
       trackVolumes,
       (vols) => {
         try {
-          const bounded = boundedStorageMap(vols, MAX_TRACK_VOLUME_ENTRIES);
+          const bounded = boundedVolumeMap(vols, MAX_TRACK_VOLUME_ENTRIES);
           if (Object.keys(vols).length > MAX_TRACK_VOLUME_ENTRIES) {
-            trackVolumes.value = bounded as Record<string, number>;
+            trackVolumes.value = bounded;
           }
           localStorage.setItem("voice.trackVolumes", JSON.stringify(bounded));
           reportBrowserStorageMetric("voice.trackVolumes", bounded);
-        } catch (_) {
-          /* noop */
-        }
+        } catch {}
       },
       { deep: true },
     );
@@ -291,10 +304,11 @@ export const useVoiceStore = defineStore("voice", () => {
       const reconciled = reconcileOwnedError(
         error.value,
         mediaSessionError,
-        typeof sessionErrorValue === "string" ? sessionErrorValue : null,
+        isExternalString(sessionErrorValue) ? sessionErrorValue : null,
       );
-      error.value =
-        typeof reconciled.error === "string" ? reconciled.error : null;
+      error.value = isExternalString(reconciled.error)
+        ? reconciled.error
+        : null;
       mediaSessionError = reconciled.ownedError;
     },
   );
@@ -306,9 +320,11 @@ export const useVoiceStore = defineStore("voice", () => {
 
   watch(
     () => {
-      const roomAttenuation = currentRoomId.value
-        ? (roomsStore.getRoomById(currentRoomId.value)?.attenuation as
-            Record<string, unknown> | null | undefined)
+      const roomValue = currentRoomId.value
+        ? roomsStore.getRoomById(currentRoomId.value)?.attenuation
+        : undefined;
+      const roomAttenuation = isExternalRecord(roomValue)
+        ? roomValue
         : undefined;
       return buildMediaAttenuationWatchKey({
         roomAttenuation,
@@ -318,7 +334,7 @@ export const useVoiceStore = defineStore("voice", () => {
         ),
         connected: connected.value,
         sessionAvailable:
-          typeof sfuComposable.value?.setSharedAudioAttenuation === "function",
+          sfuComposable.value?.setSharedAudioAttenuation instanceof Function,
       });
     },
     () => {
@@ -327,9 +343,11 @@ export const useVoiceStore = defineStore("voice", () => {
       const speaking = [...connectedUsers.value.values()].some(
         (participant) => participant.speaking === true,
       );
-      const roomAttenuation = currentRoomId.value
-        ? (roomsStore.getRoomById(currentRoomId.value)?.attenuation as
-            Record<string, unknown> | null | undefined)
+      const roomValue = currentRoomId.value
+        ? roomsStore.getRoomById(currentRoomId.value)?.attenuation
+        : undefined;
+      const roomAttenuation = isExternalRecord(roomValue)
+        ? roomValue
         : undefined;
       Promise.resolve(
         session.setSharedAudioAttenuation(
@@ -419,7 +437,7 @@ export const useVoiceStore = defineStore("voice", () => {
     playFatalError: (joinError) => useFatalClientError().report(joinError),
     protocolUpdateRequired,
     screenSharing,
-    settingsStore: settingsStore as unknown as VoiceSettingsLike,
+    settingsStore,
     soundboardActivityTimers,
     stopBroadcast,
     systemAudioSharing,
@@ -436,24 +454,21 @@ export const useVoiceStore = defineStore("voice", () => {
   async function refreshDjSession(sessionId: string) {
     if (!djSession.value || djSession.value.id !== sessionId) return;
     try {
-      const fetchUnknown = $fetch as unknown as (
-        url: string,
-        options: Record<string, unknown>,
-      ) => Promise<unknown>;
-      const next = (await fetchUnknown(`${config.public.apiPath}/dj/session`, {
-        query: { sessionId },
-      })) as { id: string; status: string };
+      const next = normalizeDjSession(
+        await $fetch(`${config.public.apiPath}/dj/session`, {
+          query: { sessionId },
+        }),
+      );
       if (!djSession.value || djSession.value.id !== sessionId) return;
       djSession.value = next;
       broadcastAudioSharing.value = next.status === "live";
-      if (!["stopped", "error"].includes(next.status)) {
+      if (!["stopped", "error"].includes(next.status ?? "")) {
         djStatusTimer = setTimeout(() => refreshDjSession(sessionId), 1500);
       }
     } catch (err: unknown) {
-      const statusCode =
-        err && typeof err === "object" && "statusCode" in err
-          ? (err as { statusCode?: number }).statusCode
-          : undefined;
+      const statusCode = isExternalRecord(err)
+        ? parseExternalNumber(err.statusCode)
+        : null;
       if (statusCode === 404) {
         djSession.value = null;
         broadcastAudioSharing.value = false;
@@ -467,14 +482,12 @@ export const useVoiceStore = defineStore("voice", () => {
     if (!connected.value || !sfuComposable.value)
       throw new Error("Not connected to a voice channel");
     clearDjStatusTimer();
-    const fetchUnknown = $fetch as unknown as (
-      url: string,
-      options: Record<string, unknown>,
-    ) => Promise<unknown>;
-    const session = (await fetchUnknown(`${config.public.apiPath}/dj/session`, {
-      method: "POST",
-      body: { channelId: currentChannelId.value },
-    })) as { id: string; status?: string };
+    const session = normalizeDjSession(
+      await $fetch(`${config.public.apiPath}/dj/session`, {
+        method: "POST",
+        body: { channelId: currentChannelId.value },
+      }),
+    );
     djSession.value = session;
     broadcastAudioSharing.value = false;
     djStatusTimer = setTimeout(() => refreshDjSession(session.id), 1000);
@@ -536,7 +549,7 @@ export const useVoiceStore = defineStore("voice", () => {
   async function applyOutputDevice() {
     if (
       sfuComposable.value &&
-      typeof sfuComposable.value.applyOutputDeviceToAll === "function"
+      sfuComposable.value.applyOutputDeviceToAll instanceof Function
     ) {
       try {
         await sfuComposable.value.applyOutputDeviceToAll();
@@ -555,24 +568,20 @@ export const useVoiceStore = defineStore("voice", () => {
     getSession: () => sfuComposable.value,
     onError: (message) => (error.value = message),
   });
-  if (typeof window !== "undefined") {
+  if (import.meta.client) {
     watch(
       [() => roomsStore.rooms, currentRoomId],
       ([rooms]) => {
         try {
           if (!currentRoomId.value) return;
           const room = (Array.isArray(rooms) ? rooms : [])
-            .map((value) =>
-              value && typeof value === "object"
-                ? (value as Record<string, unknown>)
-                : null,
-            )
+            .map((value) => (isExternalRecord(value) ? value : null))
             .find((value) => value?.id === currentRoomId.value);
           if (room) {
             if (Array.isArray(room.members)) {
               room.members.forEach((value) => {
-                if (!value || typeof value !== "object") return;
-                const member = value as Record<string, unknown>;
+                if (!isExternalRecord(value)) return;
+                const member = value;
                 if (member.id == null) return;
                 const id = String(member.id);
                 upsertUserProfile({
@@ -587,8 +596,8 @@ export const useVoiceStore = defineStore("voice", () => {
                 });
               });
             }
-            if (room.owner && typeof room.owner === "object") {
-              const owner = room.owner as Record<string, unknown>;
+            if (isExternalRecord(room.owner)) {
+              const owner = room.owner;
               if (owner.id == null) return;
               const id = String(owner.id);
               upsertUserProfile({
@@ -603,9 +612,7 @@ export const useVoiceStore = defineStore("voice", () => {
               });
             }
           }
-        } catch (_) {
-          /* noop */
-        }
+        } catch {}
       },
       { immediate: true, deep: true },
     );

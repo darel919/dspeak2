@@ -1,12 +1,17 @@
-export type UnknownRecord = Record<string, unknown>;
+import type {
+  ExternalField,
+  ExternalRecord,
+} from "../../shared/types/external.ts";
+
+export type UnknownRecord = ExternalRecord;
 
 export interface BuildSnapshotInput {
-  version?: unknown;
-  commit?: unknown;
-  branch?: unknown;
-  builtAt?: unknown;
-  repository?: unknown;
-  updateBranch?: unknown;
+  version?: ExternalField;
+  commit?: ExternalField;
+  branch?: ExternalField;
+  builtAt?: ExternalField;
+  repository?: ExternalField;
+  updateBranch?: ExternalField;
 }
 
 export interface PresentedBuild {

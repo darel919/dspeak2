@@ -1,3 +1,11 @@
+import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+} from "./types/boundary.ts";
+
 export type DesktopSessionDiagnostic = {
   diagnosticCategory: string;
   serverBuildCommit: string;
@@ -24,54 +32,94 @@ export type DesktopFailureDiagnostic = {
   clientProjectRef: string;
   requestId: string;
   transport: "webview-fetch" | "tauri-http";
+  requestUrl: string;
+  responseUrl: string;
+  redirected: boolean;
+  statusText: string;
+  retryAfter: string;
+  serverHeader: string;
+  viaHeader: string;
+  vercelRequestId: string;
+  cloudflareRay: string;
 };
 
-export function mapFailureDiagnostic(
-  error: unknown,
+type DesktopDiagnosticPayload = {
+  statusMessage?: string;
+  message?: string;
+};
+
+function recordValue<T>(value: T): ExternalObject | null {
+  return isExternalRecord(value) ? value : null;
+}
+
+function stringValue<T>(value: T): string {
+  return isExternalString(value) ? value : "";
+}
+
+function diagnosticPayload<T>(value: T): DesktopDiagnosticPayload {
+  const record = recordValue(value);
+  if (!record) return {};
+  const statusMessage = stringValue(record.statusMessage);
+  const message = stringValue(record.message);
+  const payload: DesktopDiagnosticPayload = {};
+  if (statusMessage) payload.statusMessage = statusMessage;
+  if (message) payload.message = message;
+  return payload;
+}
+
+export function mapFailureDiagnostic<T>(
+  error: T,
 ): DesktopFailureDiagnostic | null {
-  if (!error || typeof error !== "object") return null;
-  const record = error as Record<string, unknown>;
-  const serverDiagnostic =
-    typeof record.serverDiagnostic === "string" ? record.serverDiagnostic : "";
+  const record = recordValue(error);
+  if (!record && !(error instanceof Error)) return null;
+  const serverDiagnostic = stringValue(record?.serverDiagnostic);
+  const rawDiagnosticCategory = stringValue(record?.serverDiagnostic);
   const code =
     serverDiagnostic ||
-    (typeof record.code === "string" ? record.code : "") ||
-    (typeof record.name === "string" && record.name.startsWith("DESKTOP_")
-      ? record.name
+    stringValue(record?.code) ||
+    (stringValue(record?.name).startsWith("DESKTOP_")
+      ? stringValue(record?.name)
       : "");
   const hasCode =
-    code || typeof record.message === "string" || error instanceof Error;
+    code || stringValue(record?.message) || error instanceof Error;
   if (!hasCode) return null;
+
+  const rawHttpStatus = record?.httpStatus;
+  const httpStatus =
+    isExternalNumber(rawHttpStatus) && rawHttpStatus > 0 ? rawHttpStatus : null;
+
+  const diagnosticCode = rawDiagnosticCategory.startsWith("DESKTOP_")
+    ? rawDiagnosticCategory
+    : httpStatus === 429
+      ? "DESKTOP_API_SESSION_HTTP_429"
+      : httpStatus
+        ? `DESKTOP_API_SESSION_HTTP_${httpStatus}`
+        : code || "DESKTOP_AUTH_UNKNOWN_ERROR";
+
   return {
-    code: code || "DESKTOP_AUTH_UNKNOWN_ERROR",
-    stage: typeof record.stage === "string" ? record.stage : "unknown",
-    httpStatus:
-      typeof record.httpStatus === "number" && record.httpStatus > 0
-        ? record.httpStatus
-        : null,
-    serverBuildCommit:
-      typeof record.serverBuildCommit === "string"
-        ? record.serverBuildCommit
-        : "",
-    clientBuildCommit:
-      typeof record.clientBuildCommit === "string"
-        ? record.clientBuildCommit
-        : "",
-    serverProjectRef:
-      typeof record.serverProjectRef === "string"
-        ? record.serverProjectRef
-        : "",
-    clientProjectRef:
-      typeof record.clientProjectRef === "string"
-        ? record.clientProjectRef
-        : "",
-    requestId: typeof record.requestId === "string" ? record.requestId : "",
+    code: diagnosticCode,
+    stage: stringValue(record?.stage) || "unknown",
+    httpStatus,
+    serverBuildCommit: stringValue(record?.serverBuildCommit),
+    clientBuildCommit: stringValue(record?.clientBuildCommit),
+    serverProjectRef: stringValue(record?.serverProjectRef),
+    clientProjectRef: stringValue(record?.clientProjectRef),
+    requestId: stringValue(record?.requestId),
     transport:
-      typeof record.transport === "string" &&
-      (record.transport === "webview-fetch" ||
-        record.transport === "tauri-http")
-        ? record.transport
+      stringValue(record?.transport) === "tauri-http"
+        ? "tauri-http"
         : "webview-fetch",
+    requestUrl: stringValue(record?.requestUrl),
+    responseUrl: stringValue(record?.responseUrl),
+    redirected: isExternalBoolean(record?.redirected)
+      ? record.redirected
+      : false,
+    statusText: stringValue(record?.statusText),
+    retryAfter: stringValue(record?.retryAfter),
+    serverHeader: stringValue(record?.serverHeader),
+    viaHeader: stringValue(record?.viaHeader),
+    vercelRequestId: stringValue(record?.vercelRequestId),
+    cloudflareRay: stringValue(record?.cloudflareRay),
   };
 }
 
@@ -89,12 +137,9 @@ export async function readDesktopSessionDiagnostic(
 ): Promise<DesktopSessionDiagnostic> {
   let diagnosticCategory = response.statusText || "http-error";
   try {
-    const payload = (await response.clone().json()) as {
-      statusMessage?: unknown;
-      message?: unknown;
-    };
+    const payload = diagnosticPayload(await response.clone().json());
     const category = payload.statusMessage || payload.message;
-    if (typeof category === "string" && category) diagnosticCategory = category;
+    if (category) diagnosticCategory = category;
   } catch {}
   return {
     diagnosticCategory,

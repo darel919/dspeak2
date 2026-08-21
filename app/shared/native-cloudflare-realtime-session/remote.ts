@@ -1,6 +1,14 @@
 import { asError, nativeRemoteFeedKey } from "../native-mediasoup-utils.ts";
 import { isPairedScreenAudio } from "../media-source-ownership.ts";
 import {
+  isExternalBoolean,
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+  type ExternalObject,
+} from "../types/boundary.ts";
+import type { PresentableVideoFrame } from "../video-codec-migration.ts";
+import {
   candidateFrameCount,
   createCodecMigrationTelemetry,
   hasAdvancingTimestamp,
@@ -15,8 +23,47 @@ export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_STABILIZATION_MS = 1500;
 export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_REQUIRED_FRAMES = 3;
 export const NATIVE_CLOUDFLARE_CODEC_MIGRATION_MAX_FRAME_GAP_MS = 1000;
 
-function migrationTimer(value: unknown) {
-  return value as ReturnType<typeof setTimeout> | null;
+interface NativeCloudflareFrame extends PresentableVideoFrame {
+  source?: string;
+  [key: string]: unknown;
+}
+
+function isNodeTimerHandle<T>(
+  value: T,
+): value is T & ReturnType<typeof setTimeout> {
+  if (
+    isExternalRecord(value) &&
+    value.ref instanceof Function &&
+    value.unref instanceof Function &&
+    value.hasRef instanceof Function &&
+    value.refresh instanceof Function
+  )
+    return true;
+  return false;
+}
+
+function migrationTimer<T>(
+  value: T,
+): ReturnType<typeof setTimeout> | number | null {
+  if (isExternalNumber(value) || isNodeTimerHandle(value)) return value;
+  return null;
+}
+
+function presentableFrame<T>(value: T): PresentableVideoFrame | null {
+  const record = isExternalRecord(value) ? value : null;
+  if (!record) return null;
+  const frame: PresentableVideoFrame = {};
+  if (isExternalString(record.data)) frame.data = record.data;
+  if (isExternalNumber(record.width)) frame.width = record.width;
+  if (isExternalNumber(record.height)) frame.height = record.height;
+  if (isExternalNumber(record.timestamp)) frame.timestamp = record.timestamp;
+  if (isExternalNumber(record.eventId) || isExternalString(record.eventId))
+    frame.eventId = record.eventId;
+  return frame;
+}
+
+function recordValue<T>(value: T): ExternalObject | null {
+  return isExternalRecord(value) ? value : null;
 }
 
 function reportCodecMigrationState(
@@ -27,16 +74,17 @@ function reportCodecMigrationState(
 ) {
   if (!entry.variantId || !entry.logicalStreamId) return false;
   try {
+    const data: ExternalObject = {
+      receiverId: session.localPeerId,
+      logicalStreamId: entry.logicalStreamId,
+      variantId: entry.variantId,
+      generation: Math.max(1, Math.floor(Number(entry.generation) || 1)),
+      state,
+    };
+    if (reason) data.reason = reason;
     return session.send?.({
       type: "codec-migration-state",
-      data: {
-        receiverId: session.localPeerId,
-        logicalStreamId: entry.logicalStreamId,
-        variantId: entry.variantId,
-        generation: Math.max(1, Math.floor(Number(entry.generation) || 1)),
-        state,
-        ...(reason ? { reason } : {}),
-      },
+      data,
     });
   } catch (error) {
     session.onError?.(
@@ -165,9 +213,7 @@ export function finalizeVideoMigration(
   if (candidate.closed || candidate.migrationState !== "committing")
     return false;
   const healthy = Boolean(
-    isPresentableVideoFrame(
-      candidate.frame as Parameters<typeof isPresentableVideoFrame>[0],
-    ) &&
+    isPresentableVideoFrame(presentableFrame(candidate.frame)) &&
     Number(candidate.presentableFrames) >=
       NATIVE_CLOUDFLARE_CODEC_MIGRATION_REQUIRED_FRAMES &&
     Number.isFinite(Number(candidate.lastFrameAt)) &&
@@ -301,17 +347,14 @@ function commitVideoMigration(
   return true;
 }
 
-export interface NativeCloudflareRemoteMethods extends NativeCloudflareSessionSurface {}
-export class NativeCloudflareRemoteMethods {
+export const nativeCloudflareRemoteMethods: Partial<NativeCloudflareSessionSurface> &
+  ThisType<NativeCloudflareSessionSurface> = {
   async setRemoteReceiving(
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,
     receivingValue?: boolean,
   ): Promise<boolean> {
-    if (
-      typeof sourceOrReceiving === "boolean" &&
-      receivingValue === undefined
-    ) {
+    if (isExternalBoolean(sourceOrReceiving) && receivingValue === undefined) {
       const entry = this.consumers.get(String(userIdOrKey));
       return entry
         ? this.setRemoteReceiving(
@@ -324,7 +367,7 @@ export class NativeCloudflareRemoteMethods {
     const userId = String(userIdOrKey);
     const source = String(sourceOrReceiving || "");
     const receiving = Boolean(receivingValue);
-    const operations: Array<Promise<unknown>> = [];
+    const operations: Array<Promise<Record<string, unknown>>> = [];
     this.remoteReceiving.set(`${userId}:${source}`, receiving);
     let changed = false;
     for (const entry of this.consumers.values()) {
@@ -342,7 +385,7 @@ export class NativeCloudflareRemoteMethods {
     await Promise.all(operations);
     if (changed) this._emitState();
     return true;
-  }
+  },
 
   async setConsumerVolume(
     userId: string | number,
@@ -366,7 +409,7 @@ export class NativeCloudflareRemoteMethods {
       );
     await Promise.all(operations);
     return operations.length > 0;
-  }
+  },
 
   sendParticipantVoiceState(
     state: { muted?: boolean; deafened?: boolean } = {},
@@ -375,7 +418,7 @@ export class NativeCloudflareRemoteMethods {
       type: "participant-voice-state",
       data: { muted: Boolean(state.muted), deafened: Boolean(state.deafened) },
     });
-  }
+  },
 
   applyJitterBufferConfig(entry: Record<string, unknown>) {
     if (!entry?.trackId || entry.kind !== "audio" || !this.handle)
@@ -385,13 +428,13 @@ export class NativeCloudflareRemoteMethods {
       trackId: entry.trackId,
       minDelayMs: Math.max(0, Math.floor(this.jitterBufferMinimumDelay)),
       targetDelayMs: Math.max(0, Math.floor(this.jitterBufferTargetDelay)),
-    }).catch((error: unknown) => {
+    }).catch((error) => {
       this.onError?.(
         asError(error, "Native Cloudflare jitter buffer update failed"),
       );
       return false;
     });
-  }
+  },
 
   setJitterBufferConfig({ minDelayMs = 0, targetDelayMs = 20 } = {}) {
     this.jitterBufferMinimumDelay = Number.isFinite(Number(minDelayMs))
@@ -405,22 +448,21 @@ export class NativeCloudflareRemoteMethods {
         this.applyJitterBufferConfig(entry),
       ),
     );
-  }
+  },
 
   takePendingLocalVideoFrame(source: string) {
     const frame = this.pendingLocalVideoFrames.get(source) || null;
     if (frame) this.pendingLocalVideoFrames.delete(source);
     return frame;
-  }
+  },
 
   handleReceiveEvent(event: NativeCloudflareEvent = {}) {
     const payload = event.payload || {};
     const eventHandle = payload.handle == null ? null : String(payload.handle);
     if (event.kind === 5) {
       const source = String(payload.source || event.id || "");
-      if (!source || typeof event.data !== "string" || !event.data)
-        return false;
-      const frame = {
+      if (!source || !isExternalString(event.data) || !event.data) return false;
+      const frame: NativeCloudflareFrame = {
         ...payload,
         source,
         data: event.data,
@@ -504,12 +546,12 @@ export class NativeCloudflareRemoteMethods {
     if (!entry) return false;
     if (entry.kind === "video" && event.data) {
       const timestamp = Number(payload.timestamp ?? payload.timestampMs);
-      const frame = {
+      const frame: NativeCloudflareFrame = {
         ...payload,
         data: event.data,
         eventId: event.eventId,
-        ...(Number.isFinite(timestamp) ? { timestamp } : {}),
       };
+      if (Number.isFinite(timestamp)) frame.timestamp = timestamp;
       const previousTimestamp =
         entry.lastFrameTimestamp == null
           ? null
@@ -542,7 +584,7 @@ export class NativeCloudflareRemoteMethods {
     if (entry.visible !== false) this.onRemoteTrack?.(entry);
     this._emitState();
     return true;
-  }
+  },
 
   _handleTrackAdded(
     payload: Record<string, unknown> = {},
@@ -578,8 +620,8 @@ export class NativeCloudflareRemoteMethods {
     const source = String(publication.source || kind);
     const trackName = String(publication.trackName || "");
     const userId =
-      typeof publication.userId === "string" ||
-      typeof publication.userId === "number"
+      isExternalString(publication.userId) ||
+      isExternalNumber(publication.userId)
         ? publication.userId
         : null;
     const logicalStream = String(
@@ -603,13 +645,16 @@ export class NativeCloudflareRemoteMethods {
       1,
       Math.floor(Number(publication.generation) || 1),
     );
-    const variantId =
-      typeof publication.variantId === "string" ? publication.variantId : null;
-    const codec =
-      typeof publication.codec === "string" ? publication.codec : null;
-    const previousVariantId =
-      typeof previous?.variantId === "string" ? previous.variantId : null;
-    const entry: Record<string, unknown> = {
+    const variantId = isExternalString(publication.variantId)
+      ? publication.variantId
+      : null;
+    const codec = isExternalString(publication.codec)
+      ? publication.codec
+      : null;
+    const previousVariantId = isExternalString(previous?.variantId)
+      ? previous.variantId
+      : null;
+    const entry = {
       key: nativeRemoteFeedKey(userId, source, trackName),
       id: trackId,
       consumerId,
@@ -624,6 +669,18 @@ export class NativeCloudflareRemoteMethods {
       trackName: publication.trackName,
       provider: "sfu",
       native: true,
+      connectionEpoch:
+        Number(publication.connectionEpoch) ||
+        this.getControlConnectionEpoch?.() ||
+        1,
+      sourceGeneration: generation,
+      receiverIncarnationId: `native-cloudflare:${String(
+        this.sessionId || "",
+      )}:${trackName}:${trackId}:${
+        Number(publication.connectionEpoch) ||
+        this.getControlConnectionEpoch?.() ||
+        1
+      }:${generation}`,
       playback: kind === "audio" ? "coreaudio" : "native-frame",
       frame: null,
       receiving:
@@ -638,14 +695,12 @@ export class NativeCloudflareRemoteMethods {
       generation,
       variantId,
       codec,
-      codecAcceleration:
-        typeof publication.codecAcceleration === "string"
-          ? publication.codecAcceleration
-          : null,
-      codecImplementation:
-        typeof publication.codecImplementation === "string"
-          ? publication.codecImplementation
-          : null,
+      codecAcceleration: isExternalString(publication.codecAcceleration)
+        ? publication.codecAcceleration
+        : null,
+      codecImplementation: isExternalString(publication.codecImplementation)
+        ? publication.codecImplementation
+        : null,
       width: Number.isFinite(Number(publication.width))
         ? Math.floor(Number(publication.width))
         : null,
@@ -658,10 +713,7 @@ export class NativeCloudflareRemoteMethods {
       bitrate: Number.isFinite(Number(publication.bitrate))
         ? Math.floor(Number(publication.bitrate))
         : null,
-      target:
-        publication.target && typeof publication.target === "object"
-          ? { ...publication.target }
-          : null,
+      target: recordValue(publication.target),
       targetAdjusted: publication.targetAdjusted === true,
       migrationState: isVideoMigration ? "warming-receivers" : "stable",
       presentableFrames: 0,
@@ -693,7 +745,7 @@ export class NativeCloudflareRemoteMethods {
       const migrationTimerHandle = setTimeout(() => {
         abortVideoMigration(this, entry, "candidate-timeout");
       }, NATIVE_CLOUDFLARE_CODEC_MIGRATION_TIMEOUT_MS);
-      entry.migrationTimer = migrationTimerHandle;
+      Object.assign(entry, { migrationTimer: migrationTimerHandle });
       migrationTimerHandle.unref?.();
       this.codecMigrationTelemetry.push(
         createCodecMigrationTelemetry(logicalStream, "warming-receivers", {
@@ -719,12 +771,16 @@ export class NativeCloudflareRemoteMethods {
         p2pHandle: this.handle,
         trackId: entry.trackId,
         enabled: false,
-      }).catch((error: unknown) => this.onError?.(error));
+      }).catch((error) =>
+        this.onError?.(
+          asError(error, "Native Cloudflare receive enable failed"),
+        ),
+      );
     this.applyJitterBufferConfig(entry);
     if (entry.kind === "video" && !isVideoMigration)
       reportCodecMigrationState(this, entry, "stable");
     if (entry.visible !== false) this.onRemoteTrack?.(entry);
     this._emitState();
     return true;
-  }
-}
+  },
+};

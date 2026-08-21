@@ -2,13 +2,15 @@ import type {
   CloudflarePeerConnectionLike,
   DeferredPromise,
 } from "../types/cloudflare-media.ts";
+import type { OwnedErrorValue } from "../types/shared-utilities.ts";
+import { isExternalString } from "../types/boundary.ts";
 
-function finiteOrNull(value: unknown): number | null {
+function finiteOrNull<T>(value: T): number | null {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function secondsToMilliseconds(value: unknown): number | null {
+function secondsToMilliseconds<T>(value: T): number | null {
   const number = finiteOrNull(value);
   return number == null ? null : number * 1000;
 }
@@ -16,7 +18,7 @@ function secondsToMilliseconds(value: unknown): number | null {
 function deferred<T>(timeoutMs: number, label: string): DeferredPromise<T> {
   let timer: ReturnType<typeof setTimeout>;
   let resolvePromise: (value: T) => void = () => {};
-  let rejectPromise: (error: unknown) => void = () => {};
+  let rejectPromise: (error: OwnedErrorValue) => void = () => {};
   const promise = new Promise<T>((resolve, reject) => {
     resolvePromise = resolve;
     rejectPromise = reject;
@@ -25,11 +27,10 @@ function deferred<T>(timeoutMs: number, label: string): DeferredPromise<T> {
       timeoutMs,
     );
   });
-  const waiting = promise.finally(() =>
-    clearTimeout(timer),
-  ) as DeferredPromise<T>;
-  waiting.resolve = resolvePromise;
-  waiting.reject = rejectPromise;
+  const waiting: DeferredPromise<T> = Object.assign(
+    promise.finally(() => clearTimeout(timer)),
+    { resolve: resolvePromise, reject: rejectPromise },
+  );
   return waiting;
 }
 
@@ -50,7 +51,7 @@ function waitForIceGatheringComplete(
     !peerConnection ||
     peerConnection.iceGatheringState == null ||
     peerConnection.iceGatheringState === "complete" ||
-    typeof peerConnection.addEventListener !== "function"
+    !(peerConnection.addEventListener instanceof Function)
   )
     return Promise.resolve();
   return new Promise<void>((resolve) => {
@@ -71,7 +72,7 @@ async function getLocalSessionDescription(
 ) {
   await waitForIceGatheringComplete(peerConnection);
   const description = peerConnection.localDescription;
-  if (!description?.type || typeof description.sdp !== "string")
+  if (!description?.type || !isExternalString(description.sdp))
     throw new Error(
       "Cloudflare local WebRTC session description is unavailable",
     );

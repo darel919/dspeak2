@@ -463,6 +463,10 @@ import EmojiPicker from "./EmojiPicker.vue";
 import { STORAGE_KEYS } from "../../const/storage";
 import { isPendingDuplicate } from "../../shared/chat-messages";
 import { STARTUP_READINESS_KEY } from "../../shared/startup-readiness";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../../shared/types/boundary.ts";
 
 const showMemberList = ref(true);
 
@@ -564,8 +568,9 @@ const messagesWithReplyCount = computed(() => {
   const replyCounts = {};
   for (const m of msgList) {
     if (m.reply_to) {
-      const parentId =
-        typeof m.reply_to === "string" ? m.reply_to : m.reply_to.id;
+      const parentId = isExternalString(m.reply_to)
+        ? m.reply_to
+        : m.reply_to.id;
       replyCounts[parentId] = (replyCounts[parentId] || 0) + 1;
     }
   }
@@ -960,7 +965,7 @@ function refreshMessageReplyCount(messageId) {
   const count = chatStore.messages.filter(
     (m) =>
       m.reply_to &&
-      (typeof m.reply_to === "string"
+      (isExternalString(m.reply_to)
         ? m.reply_to === messageId
         : m.reply_to.id === messageId || m.reply_to === messageId),
   ).length;
@@ -1091,8 +1096,9 @@ async function requireSuccessfulResponse(response, fallback) {
 function jumpToMessage(messageOrId) {
   showSearch.value = false;
 
-  const targetId =
-    typeof messageOrId === "string" ? messageOrId : messageOrId?.id;
+  const targetId = isExternalString(messageOrId)
+    ? messageOrId
+    : messageOrId?.id;
   if (!targetId) return;
 
   const index = chatStore.messages.findIndex((m) => m.id === targetId);

@@ -200,10 +200,9 @@ watch(
         }
 
         if (!selectedChannelId.value) {
-          const currentIsMobile =
-            typeof window !== "undefined"
-              ? window.innerWidth < MOBILE_BREAKPOINT_PX
-              : false;
+          const currentIsMobile = import.meta.client
+            ? window.innerWidth < MOBILE_BREAKPOINT_PX
+            : false;
           if (!currentIsMobile) {
             const textChannels = channelsStore.getTextChannels();
             if (textChannels.length > 0) {

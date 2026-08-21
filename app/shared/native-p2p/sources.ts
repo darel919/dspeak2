@@ -8,6 +8,26 @@ import type {
   NativeP2pLocalSourceEntry,
   NativeP2pMeshSurface,
 } from "../types/native-p2p.ts";
+import {
+  isExternalRecord,
+  isExternalString,
+  type MediaCommandResult,
+} from "../types/boundary.ts";
+import { asError } from "../native-mediasoup-utils.ts";
+
+type SourceRemovedMessage = {
+  source: string;
+  connectionEpoch: number;
+  generation?: number;
+};
+
+type SourceAnnouncementMessage = {
+  trackId: string;
+  source: string;
+  ownerSource: string | null;
+  connectionEpoch: number;
+  generation?: number;
+};
 export class NativeP2pSourcesMethods {
   async publishSource(
     this: NativeP2pMeshSurface,
@@ -26,7 +46,7 @@ export class NativeP2pSourcesMethods {
   enqueueSourceOperation(
     this: NativeP2pMeshSurface,
     source: string,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.sourceOperations.get(source) || Promise.resolve();
     const task = previous.catch(() => {}).then(operation);
@@ -54,11 +74,22 @@ export class NativeP2pSourcesMethods {
     const initialStates = new Map(
       [...this.connections.values()].map((state) => [state.peerId, state]),
     );
+    const committedGeneration =
+      Number.isSafeInteger(Number(metadata.generation)) &&
+      Number(metadata.generation) > 0
+        ? Number(metadata.generation)
+        : 0;
     const entry: NativeP2pLocalSourceEntry = {
       track,
       stream,
-      ownerSource:
-        typeof metadata.ownerSource === "string" ? metadata.ownerSource : null,
+      ownerSource: isExternalString(metadata.ownerSource)
+        ? metadata.ownerSource
+        : null,
+      generation:
+        Number.isSafeInteger(Number(metadata.generation)) &&
+        Number(metadata.generation) > 0
+          ? Number(metadata.generation)
+          : undefined,
     };
     this.localSources.set(source, entry);
     const results = await Promise.allSettled(
@@ -97,7 +128,15 @@ export class NativeP2pSourcesMethods {
         await this.updateTrack(sender, () => sender.replaceTrack(null));
         state.senders.delete(source);
         state.sourceReceiving.delete(source);
-        this.signal(state.peerId, { sourceRemoved: { source } });
+        const rollbackGeneration = committedGeneration;
+        const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+        const sourceRemoved: SourceRemovedMessage = {
+          source,
+          connectionEpoch,
+        };
+        if (rollbackGeneration > 0)
+          sourceRemoved.generation = rollbackGeneration;
+        this.signal(state.peerId, { sourceRemoved });
       }),
     );
     const rollbackFailure = rollbackResults.find(
@@ -185,13 +224,15 @@ export class NativeP2pSourcesMethods {
         encoding.active = Boolean(active);
       try {
         await sender.setParameters(parameters);
-      } catch (error: unknown) {
+      } catch (error) {
         const errorName =
           error instanceof DOMException
             ? error.name
-            : error && typeof error === "object" && "name" in error
-              ? String(error.name)
-              : "";
+            : error instanceof Error
+              ? error.name
+              : isExternalRecord(error) && isExternalString(error.name)
+                ? error.name
+                : "";
         if (
           [
             "InvalidModificationError",
@@ -209,7 +250,7 @@ export class NativeP2pSourcesMethods {
   updateSender(
     this: NativeP2pMeshSurface,
     sender: RTCRtpSender,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.senderOperations.get(sender) || Promise.resolve();
     const current = previous.catch(() => {}).then(operation);
@@ -249,10 +290,21 @@ export class NativeP2pSourcesMethods {
             await this.configureSender(existing, source, previousTrack);
           await this.setSenderReceiving(state, source, previousReceiving);
         } catch {}
-        this.fail("track-replacement-failed", error);
+        this.fail(
+          "track-replacement-failed",
+          asError(error, "Native P2P track replacement failed"),
+        );
         throw error;
       }
-      this.signal(state.peerId, { sourceRestored: { source } });
+      const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+      const restoredGeneration = Number(entry.generation) || 0;
+      this.signal(state.peerId, {
+        sourceRestored: {
+          source,
+          connectionEpoch,
+          generation: restoredGeneration,
+        },
+      });
       return existing;
     }
     let sender: RTCRtpSender | null = null;
@@ -267,13 +319,17 @@ export class NativeP2pSourcesMethods {
         state.selectedCodec ? [state.selectedCodec] : null,
       );
       state.senders.set(source, sender);
-      this.signal(state.peerId, {
-        source: {
-          trackId: entry.track.id,
-          source,
-          ownerSource: entry.ownerSource || null,
-        },
-      });
+      const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+      const sourceAnnouncement: SourceAnnouncementMessage = {
+        trackId: entry.track.id,
+        source,
+        ownerSource: entry.ownerSource || null,
+        connectionEpoch,
+      };
+      const announcementGeneration = Math.floor(Number(entry.generation));
+      if (Number.isFinite(announcementGeneration) && announcementGeneration > 0)
+        sourceAnnouncement.generation = announcementGeneration;
+      this.signal(state.peerId, { source: sourceAnnouncement });
       announced = true;
       await this.configureSender(sender, source, entry.track);
       await this.setSenderReceiving(
@@ -287,8 +343,20 @@ export class NativeP2pSourcesMethods {
       try {
         await sender?.replaceTrack(null);
       } catch {}
-      if (announced) this.signal(state.peerId, { sourceRemoved: { source } });
-      this.fail("sender-configuration-failed", error);
+      if (announced) {
+        const removalGeneration = Number(entry.generation) || 0;
+        const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+        const sourceRemoved: SourceRemovedMessage = {
+          source,
+          connectionEpoch,
+        };
+        if (removalGeneration > 0) sourceRemoved.generation = removalGeneration;
+        this.signal(state.peerId, { sourceRemoved });
+      }
+      this.fail(
+        "sender-configuration-failed",
+        asError(error, "Native P2P sender configuration failed"),
+      );
       throw error;
     }
     if (state.pc.remoteDescription && state.pc.signalingState === "stable")
@@ -299,7 +367,7 @@ export class NativeP2pSourcesMethods {
   updateTrack(
     this: NativeP2pMeshSurface,
     sender: RTCRtpSender,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
   ) {
     const previous = this.trackOperations.get(sender) || Promise.resolve();
     const current = previous.catch(() => {}).then(operation);
@@ -318,6 +386,7 @@ export class NativeP2pSourcesMethods {
   }
 
   async unpublishSourceInternal(this: NativeP2pMeshSurface, source: string) {
+    const entry = this.localSources.get(source);
     this.localSources.delete(source);
     await Promise.all(
       [...this.connections.values()].map(async (state) => {
@@ -326,12 +395,22 @@ export class NativeP2pSourcesMethods {
         try {
           await this.updateTrack(sender, () => sender.replaceTrack(null));
         } catch (error) {
-          this.fail("track-removal-failed", error);
+          this.fail(
+            "track-removal-failed",
+            asError(error, "Native P2P track removal failed"),
+          );
           throw error;
         }
         state.senders.delete(source);
         state.sourceReceiving.delete(source);
-        this.signal(state.peerId, { sourceRemoved: { source } });
+        const removalGeneration = Number(entry?.generation) || 0;
+        const connectionEpoch = this.getControlConnectionEpoch?.() || 0;
+        const sourceRemoved: SourceRemovedMessage = {
+          source,
+          connectionEpoch,
+        };
+        if (removalGeneration > 0) sourceRemoved.generation = removalGeneration;
+        this.signal(state.peerId, { sourceRemoved });
       }),
     );
   }
@@ -387,4 +466,5 @@ export class NativeP2pSourcesMethods {
   }
 }
 
-export interface NativeP2pSourcesMethods extends NativeP2pMeshSurface {}
+export type NativeP2pSourcesContract = NativeP2pMeshSurface &
+  NativeP2pSourcesMethods;

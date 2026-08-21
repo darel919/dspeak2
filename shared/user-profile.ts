@@ -4,13 +4,13 @@ export const HANDLE_MIN_LENGTH = 3;
 export const HANDLE_MAX_LENGTH = 32;
 export const NICKNAME_MAX_LENGTH = 32;
 
-function normalizedText(value: unknown) {
+function normalizedText(value: ExternalField) {
   return String(value || "")
     .trim()
     .replace(/\s+/g, " ");
 }
 
-export function normalizeDisplayName(value: unknown) {
+export function normalizeDisplayName(value: ExternalField) {
   const name = normalizedText(value);
   if (
     name.length < DISPLAY_NAME_MIN_LENGTH ||
@@ -22,7 +22,7 @@ export function normalizeDisplayName(value: unknown) {
   return name;
 }
 
-export function normalizeHandle(value: unknown) {
+export function normalizeHandle(value: ExternalField) {
   const handle = String(value || "")
     .trim()
     .toLowerCase();
@@ -37,7 +37,7 @@ export function normalizeHandle(value: unknown) {
   return handle;
 }
 
-export function normalizeNickname(value: unknown) {
+export function normalizeNickname(value: ExternalField) {
   const nickname = normalizedText(value);
   if (nickname.length > NICKNAME_MAX_LENGTH)
     throw new Error(
@@ -68,7 +68,7 @@ export function publicFullName(user: UserProfileLike | null | undefined) {
 
 export function profileIdentityLine(
   user: UserProfileLike | null | undefined,
-  nickname: unknown,
+  nickname: ExternalField,
 ) {
   const displayName = publicDisplayName(user);
   const personalNickname = normalizedText(nickname);
@@ -78,3 +78,4 @@ export function profileIdentityLine(
   return `${personalNickname} AKA ${displayName}`;
 }
 import type { UserProfileLike } from "./types/user.ts";
+import type { ExternalField } from "./types/external.ts";

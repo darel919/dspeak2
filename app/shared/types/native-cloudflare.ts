@@ -1,6 +1,8 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+
 export interface NativeCloudflareMessage extends Record<string, unknown> {
   requestId?: string;
-  error?: unknown;
+  error?: OwnedErrorValue;
   result?: unknown;
   trackName?: string;
   closed?: boolean;

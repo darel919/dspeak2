@@ -5,6 +5,7 @@ import { normalizeNativeInvokeError } from "../app/composables/media/native-medi
 
 describe("native media invoke errors", () => {
   it("preserves structured worker details and exposes the native cause", () => {
+    /* SAFETY: normalizeNativeInvokeError always returns an Error and preserves these documented native fields for structured failures. */
     const error = normalizeNativeInvokeError(
       "media_p2p_set_remote_description",
       {
@@ -31,6 +32,7 @@ describe("native media invoke errors", () => {
   });
 
   it("normalizes string worker failures without losing the command", () => {
+    /* SAFETY: normalizeNativeInvokeError always returns an Error and preserves nativeCommand for string failures. */
     const error = normalizeNativeInvokeError(
       "media_set_camera",
       "native camera capture failed (error -220): camera permission was denied",

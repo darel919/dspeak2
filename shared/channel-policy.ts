@@ -1,7 +1,4 @@
-import {
-  normalizeNotificationMode,
-  messageMentionsHandle,
-} from "./notification-policy.ts";
+import { parseExternalNumber, type ExternalField } from "./types/external.ts";
 
 export const CHANNEL_POLICIES = Object.freeze({
   free: "free",
@@ -10,7 +7,7 @@ export const CHANNEL_POLICIES = Object.freeze({
   moderator_only: "moderator_only",
 });
 
-function isChannelPolicy(value: unknown): value is ChannelPolicy {
+function isChannelPolicy(value: ExternalField): value is ChannelPolicy {
   return (
     value === CHANNEL_POLICIES.free ||
     value === CHANNEL_POLICIES.send_restricted ||
@@ -37,13 +34,13 @@ export const SLOW_MODE_OPTIONS = Object.freeze([
   { value: 3600, label: "1 hour" },
 ]);
 
-export function normalizeChannelPolicy(value: unknown) {
+export function normalizeChannelPolicy(value: ExternalField) {
   return isChannelPolicy(value) ? value : CHANNEL_POLICIES.free;
 }
 
-export function normalizeSlowMode(value: unknown) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(0, Math.min(3600, numeric)) : 0;
+export function normalizeSlowMode(value: ExternalField) {
+  const numeric = parseExternalNumber(value);
+  return numeric !== null ? Math.max(0, Math.min(3600, numeric)) : 0;
 }
 
 export function canSendInChannel({
@@ -65,32 +62,22 @@ export function canSendInChannel({
 }
 
 export function isSlowModeCooldownActive(
-  lastMessageAt: unknown,
-  slowModeSeconds: unknown,
+  lastMessageAt: ExternalField,
+  slowModeSeconds: ExternalField,
 ) {
-  const messageTime = Number(lastMessageAt);
-  const seconds = Number(slowModeSeconds);
-  if (
-    !Number.isFinite(messageTime) ||
-    !Number.isFinite(seconds) ||
-    seconds <= 0
-  )
-    return false;
+  const messageTime = parseExternalNumber(lastMessageAt);
+  const seconds = parseExternalNumber(slowModeSeconds);
+  if (messageTime === null || seconds === null || seconds <= 0) return false;
   return Date.now() - messageTime < seconds * 1000;
 }
 
 export function slowModeRemainingMs(
-  lastMessageAt: unknown,
-  slowModeSeconds: unknown,
+  lastMessageAt: ExternalField,
+  slowModeSeconds: ExternalField,
 ) {
-  const messageTime = Number(lastMessageAt);
-  const seconds = Number(slowModeSeconds);
-  if (
-    !Number.isFinite(messageTime) ||
-    !Number.isFinite(seconds) ||
-    seconds <= 0
-  )
-    return 0;
+  const messageTime = parseExternalNumber(lastMessageAt);
+  const seconds = parseExternalNumber(slowModeSeconds);
+  if (messageTime === null || seconds === null || seconds <= 0) return 0;
   return Math.max(0, seconds * 1000 - (Date.now() - messageTime));
 }
 import type { ChannelPolicy } from "./types/channel.ts";

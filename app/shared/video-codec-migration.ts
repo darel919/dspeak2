@@ -1,3 +1,6 @@
+import { isExternalString } from "./types/boundary.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
+
 export type CodecMigrationState =
   | "stable"
   | "preparing"
@@ -96,7 +99,7 @@ export function isPresentableVideoFrame(
 ) {
   return Boolean(
     frame &&
-    typeof frame.data === "string" &&
+    isExternalString(frame.data) &&
     frame.data.length > 0 &&
     Number(frame.width) > 0 &&
     Number(frame.height) > 0,
@@ -149,12 +152,15 @@ export function createCodecMigrationTelemetry(
 }
 
 export interface MakeBeforeBreakCallbacks<TCandidate> {
-  prepare: () => Promise<unknown>;
+  prepare: () => Promise<MediaCommandResult>;
   publishCandidate: () => Promise<TCandidate>;
-  warmCandidate: (candidate: TCandidate) => Promise<unknown>;
+  warmCandidate: (candidate: TCandidate) => Promise<MediaCommandResult>;
   candidateReady: (candidate: TCandidate) => Promise<boolean>;
-  commit: (candidate: TCandidate) => Promise<unknown>;
-  abort?: (candidate: TCandidate | null, reason: string) => Promise<unknown>;
+  commit: (candidate: TCandidate) => Promise<MediaCommandResult>;
+  abort?: (
+    candidate: TCandidate | null,
+    reason: string,
+  ) => Promise<MediaCommandResult>;
   timeoutMs?: number;
 }
 

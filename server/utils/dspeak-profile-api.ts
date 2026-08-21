@@ -14,8 +14,9 @@ import { getRoomById } from "./room-authorization.ts";
 import type { H3Event } from "h3";
 import type { ProfileUpdateInput } from "../types/profile-repository.ts";
 import type { ProfileApiDependencies } from "../types/profile-api.ts";
+import type { ExternalError } from "../../shared/types/external.ts";
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: ExternalError): string {
   return error instanceof Error ? error.message : String(error);
 }
 

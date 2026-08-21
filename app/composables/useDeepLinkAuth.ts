@@ -1,6 +1,10 @@
 import { onMounted, onUnmounted } from "vue";
 import { useAuthStore } from "~/stores/auth";
 import { useRuntimeStore } from "~/stores/runtime";
+import {
+  isExternalRecord,
+  isExternalString,
+} from "../shared/types/boundary.ts";
 
 export function useDeepLinkAuth() {
   const authStore = useAuthStore();
@@ -34,7 +38,9 @@ export function useDeepLinkAuth() {
       console.error(
         "[DesktopAuth] Desktop callback handling failed",
         error instanceof Error
-          ? (error as Error & { code?: string }).code || error.name
+          ? isExternalRecord(error) && isExternalString(error.code)
+            ? error.code
+            : error.name
           : "unknown",
       );
       return false;

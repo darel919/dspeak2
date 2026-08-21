@@ -7,6 +7,7 @@ import type {
   DjSession,
   DjState,
 } from "../../types/dj-sessions.ts";
+import type { ExternalField } from "../../../shared/types/external.ts";
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const ACTIVE_SESSION_TTL_MS = 6 * 60 * 60 * 1000;
@@ -15,25 +16,31 @@ const BRIDGE_RETRY_MS = 1000;
 const stateKey = Symbol.for("dspeak.dj.sessions");
 
 async function createDjBroadcastProducer(
-  ..._args: unknown[]
+  ..._args: ExternalField[]
 ): Promise<DjBridge> {
   throw new Error("DJ media ingest is unavailable with the external SFU");
 }
 
 function state() {
+  /*
+   * SAFETY: This symbol is private to DJ session state, and initialization
+   * below stores a complete DjState before any read returns.
+   */
   const globalState = globalThis as typeof globalThis & {
     [stateKey]?: DjState;
   };
-  if (!globalState[stateKey])
-    globalState[stateKey] = {
-      sessions: new Map(),
-      userSessions: new Map(),
-      channelSessions: new Map(),
-    };
-  return globalState[stateKey]!;
+  const existing = globalState[stateKey];
+  if (existing) return existing;
+  const nextState: DjState = {
+    sessions: new Map(),
+    userSessions: new Map(),
+    channelSessions: new Map(),
+  };
+  globalState[stateKey] = nextState;
+  return nextState;
 }
 
-function safeEqual(left: unknown, right: unknown) {
+function safeEqual(left: ExternalField, right: ExternalField) {
   const leftBuffer = Buffer.from(String(left || ""));
   const rightBuffer = Buffer.from(String(right || ""));
   return (
@@ -90,7 +97,7 @@ export function closeDjSession(
 
 registerDjParticipantDisconnectedHandler(
   (channelId: string, userId: string) => {
-    for (const session of [...state().sessions.values()]) {
+    for (const session of Array.from(state().sessions.values())) {
       if (
         session.channelId === String(channelId) &&
         session.userId === String(userId)
@@ -261,7 +268,7 @@ async function startBridge(session: DjSession) {
           );
           session.expiryTimer.unref?.();
         })
-        .catch((error: unknown) => {
+        .catch((error: ExternalField) => {
           if (session.process !== bridgeProcess || session.status === "stopped")
             return;
           scheduleRecovery(

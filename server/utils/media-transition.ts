@@ -6,6 +6,10 @@ import type {
 
 const DIRECT_AUDIO_ONLY_MAX_PARTICIPANTS = 8;
 const DIRECT_VIDEO_MAX_PARTICIPANTS = 4;
+type P2pRoutingPolicy = {
+  recoveryDelayMs: number;
+  stabilityDelayMs: number;
+};
 
 function maxP2pParticipants(hasVideo = false): number {
   return hasVideo
@@ -16,10 +20,7 @@ function maxP2pParticipants(hasVideo = false): number {
 export function p2pRoutingPolicy(
   participantCount: number,
   hasVideo = false,
-): {
-  recoveryDelayMs: number;
-  stabilityDelayMs: number;
-} {
+): P2pRoutingPolicy {
   const count = Math.max(
     2,
     Math.min(maxP2pParticipants(hasVideo), Number(participantCount) || 2),

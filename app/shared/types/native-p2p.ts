@@ -1,3 +1,7 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
 import type {
   ParticipantMediaCapabilities,
   VideoCodecName,
@@ -23,7 +27,10 @@ export interface NativeP2pLocalSourceEntry {
   track: MediaStreamTrack;
   stream?: MediaStream;
   ownerSource?: string | null;
+  generation?: number;
 }
+
+export type NativeP2pSnapshot = Array<Record<string, unknown>>;
 
 export interface NativeP2pConnectionState {
   peerId: string;
@@ -49,7 +56,7 @@ export interface NativeP2pConnectionState {
   lastInboundSourceProgressAt: Map<string, number>;
   lastOutboundSourceBytes: Map<string, number>;
   lastInboundSourceBytes: Map<string, number>;
-  signalingOperation: Promise<unknown> | null;
+  signalingOperation: Promise<MediaCommandResult> | null;
   signalingPhase: string | null;
   negotiationRequested: boolean;
   negotiationTimer: ReturnType<typeof setTimeout> | null;
@@ -82,50 +89,56 @@ export interface NativeP2pHealthMesh {
   localSources: Map<string, NativeP2pLocalSourceEntry>;
   sourceTransmission: Map<string, boolean>;
   epoch: number;
-  fail: (reason: string, error?: unknown) => unknown;
-  emitSnapshot: () => unknown;
+  fail: (reason: string, error?: OwnedErrorValue) => MediaCommandResult;
+  emitSnapshot: () => MediaCommandResult;
   sendControl: (data: Record<string, unknown>) => boolean;
 }
 
 export interface NativeP2pMeshOptions {
   iceServers: unknown[];
-  sendSignal: (payload: Record<string, unknown>) => unknown;
-  onRemoteTrack: (entry: Record<string, unknown>) => unknown;
-  onRemoteTrackEnded: (entry: Record<string, unknown>) => unknown;
-  onFailure: (reason: string, error?: unknown) => unknown;
-  onSnapshot: (snapshot: unknown) => unknown;
+  sendSignal: (payload: Record<string, unknown>) => MediaCommandResult;
+  onRemoteTrack: (entry: Record<string, unknown>) => MediaCommandResult;
+  onRemoteTrackEnded: (entry: Record<string, unknown>) => MediaCommandResult;
+  onFailure: (reason: string, error?: OwnedErrorValue) => MediaCommandResult;
+  onSnapshot: (snapshot: NativeP2pSnapshot) => void;
   getSenderOptions: (
     source: string,
     track: MediaStreamTrack,
   ) => Record<string, unknown> | null;
   getAudioStereo: (source: string) => boolean;
   mediaCapabilities?: ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch: () => number;
 }
 
 export interface NativeP2pSignalingMesh {
   connections: Map<string, NativeP2pConnectionState>;
   pendingSignals: Map<number, Array<Record<string, unknown>>>;
   pendingSignalLimit: number;
-  sendSignal: (payload: Record<string, unknown>) => unknown;
+  sendSignal: (payload: Record<string, unknown>) => MediaCommandResult;
   mode: string;
   epoch: number;
   localPeerId: string | null;
   mediaCapabilities: ParticipantMediaCapabilities | null;
-  fail: (reason: string, error?: unknown) => unknown;
-  emitSnapshot: () => unknown;
+  fail: (reason: string, error?: OwnedErrorValue) => MediaCommandResult;
+  emitSnapshot: () => MediaCommandResult;
   sendControl: (data: Record<string, unknown>) => boolean;
   remoteSources: Map<string, string>;
   remoteSourceOwners: Map<string, string | null>;
-  onRemoteTrack: (entry: Record<string, unknown>) => unknown;
-  onRemoteTrackEnded: (entry: Record<string, unknown>) => unknown;
+  remoteSourceGenerations: Map<string, number>;
+  remoteSourceConnectionEpochs: Map<string, number>;
+  onRemoteTrack: (entry: Record<string, unknown>) => MediaCommandResult;
+  onRemoteTrackEnded: (entry: Record<string, unknown>) => MediaCommandResult;
   queuePendingSignal: (data: Record<string, unknown>) => boolean;
   usesStereoAudio: () => boolean;
-  configureStateSenders: (state: NativeP2pConnectionState) => Promise<unknown>;
+  configureStateSenders: (
+    state: NativeP2pConnectionState,
+  ) => Promise<MediaCommandResult>;
   setSenderReceiving: (
     state: NativeP2pConnectionState,
     source: string,
     receiving: boolean,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
+  getControlConnectionEpoch: () => number;
 }
 
 export interface NativeP2pMeshSurface
@@ -136,9 +149,9 @@ export interface NativeP2pMeshSurface
   localPeerId: string | null;
   readyReported: boolean;
   failureReportedKey: string | null;
-  senderOperations: WeakMap<RTCRtpSender, Promise<unknown>>;
-  trackOperations: WeakMap<RTCRtpSender, Promise<unknown>>;
-  sourceOperations: Map<string, Promise<unknown>>;
+  senderOperations: WeakMap<RTCRtpSender, Promise<MediaCommandResult>>;
+  trackOperations: WeakMap<RTCRtpSender, Promise<MediaCommandResult>>;
+  sourceOperations: Map<string, Promise<MediaCommandResult>>;
   qualificationTimeout: ReturnType<typeof setTimeout> | null;
   healthInterval: ReturnType<typeof setInterval> | null;
   jitterBufferMinimumDelay: number;
@@ -149,15 +162,15 @@ export interface NativeP2pMeshSurface
   ) => Record<string, unknown> | null;
   getAudioStereo: (source: string) => boolean;
   mediaCapabilities: ParticipantMediaCapabilities | null;
-  onFailure: (reason: string, error?: unknown) => unknown;
-  onSnapshot: (snapshot: unknown) => unknown;
+  onFailure: (reason: string, error?: OwnedErrorValue) => MediaCommandResult;
+  onSnapshot: (snapshot: NativeP2pSnapshot) => void;
   closeConnection: (peerId: string) => void;
   closeAll: () => void;
   startQualificationTimeout: () => void;
   startHealthChecks: () => void;
   stopHealthChecks: () => void;
   checkQualification: () => void;
-  flushPendingSignals: () => Promise<unknown>;
+  flushPendingSignals: () => Promise<MediaCommandResult>;
   ensureConnection: (
     peerId: string,
     userId: string | number | null,
@@ -174,18 +187,20 @@ export interface NativeP2pMeshSurface
   ) => boolean;
   enqueuePeerSignaling: (
     state: NativeP2pConnectionState,
-    operation: () => Promise<unknown>,
+    operation: () => Promise<MediaCommandResult>,
     phase?: string,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   schedulePeerNegotiation: (
     state: NativeP2pConnectionState,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   retryPeerNegotiation: (state: NativeP2pConnectionState) => void;
-  receiveSignal: (payload: Record<string, unknown>) => Promise<unknown>;
+  receiveSignal: (
+    payload: Record<string, unknown>,
+  ) => Promise<MediaCommandResult>;
   applyPeerSignal: (
     state: NativeP2pConnectionState,
     signal: Record<string, unknown>,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   bindHealthChannel: (
     state: NativeP2pConnectionState,
     channel: RTCDataChannel,
@@ -195,65 +210,70 @@ export interface NativeP2pMeshSurface
   handleTrack: (state: NativeP2pConnectionState, event: RTCTrackEvent) => void;
   updateSender: (
     sender: RTCRtpSender,
-    operation: () => Promise<unknown>,
-  ) => Promise<unknown>;
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
   updateTrack: (
     sender: RTCRtpSender,
-    operation: () => Promise<unknown>,
-  ) => Promise<unknown>;
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
   setSenderActive: (
     sender: RTCRtpSender | undefined,
     active: boolean,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   setSenderReceiving: (
     state: NativeP2pConnectionState,
     source: string,
     receiving: boolean,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   configureSender: (
     sender: RTCRtpSender,
     source: string,
     track: MediaStreamTrack,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   getSnapshot: () => Promise<Array<Record<string, unknown>>>;
   emitSnapshot: () => void;
-  applyTopology: (topology: Record<string, unknown>) => Promise<unknown>;
+  applyTopology: (
+    topology: Record<string, unknown>,
+  ) => Promise<MediaCommandResult>;
   publishSource: (
     source: string,
     track: MediaStreamTrack,
     stream?: MediaStream,
     metadata?: Record<string, unknown>,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   enqueueSourceOperation: (
     source: string,
-    operation: () => Promise<unknown>,
-  ) => Promise<unknown>;
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
   publishSourceInternal: (
     source: string,
     track: MediaStreamTrack,
     stream?: MediaStream,
     metadata?: Record<string, unknown>,
-  ) => Promise<unknown>;
-  unpublishSource: (source: string) => Promise<unknown>;
-  unpublishSourceInternal: (source: string) => Promise<unknown>;
-  setSourceTransmission: (source: string, enabled: boolean) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
+  unpublishSource: (source: string) => Promise<MediaCommandResult>;
+  unpublishSourceInternal: (source: string) => Promise<MediaCommandResult>;
+  setSourceTransmission: (
+    source: string,
+    enabled: boolean,
+  ) => Promise<MediaCommandResult>;
   setRemoteReceiving: (
     peerId: string | number | undefined,
     source: string,
     receiving: boolean,
-  ) => unknown;
+  ) => MediaCommandResult;
   isMediaReady: () => boolean;
-  stats: () => Promise<unknown[]>;
-  diagnosticStats: () => Promise<unknown[]>;
+  stats: () => Promise<MediaCommandResult>;
+  diagnosticStats: () => Promise<MediaCommandResult>;
   getInboundTrackStats: (
     peerId: string | number,
     track: MediaStreamTrack,
-  ) => Promise<unknown>;
+  ) => Promise<MediaCommandResult>;
   getOutboundTrackStats: (source: string) => Promise<RTCStatsReport | null>;
   getOutboundTrackParameters: (source: string) => RTCRtpSendParameters | null;
   setJitterBufferConfig: (config?: {
     minDelayMs?: number;
     targetDelayMs?: number;
-  }) => unknown;
-  reconfigureSource: (source: string) => Promise<unknown>;
+  }) => MediaCommandResult;
+  reconfigureSource: (source: string) => Promise<MediaCommandResult>;
 }

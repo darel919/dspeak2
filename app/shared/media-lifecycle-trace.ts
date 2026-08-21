@@ -1,4 +1,9 @@
 import { ref } from "vue";
+import {
+  isExternalNumber,
+  isExternalRecord,
+  isExternalString,
+} from "./types/boundary.ts";
 
 const MEDIA_LIFECYCLE_TRACE_LIMIT = 64;
 type LifecycleDetails = Record<string, string | number | boolean | null>;
@@ -20,23 +25,24 @@ const allowedDetailKeys = new Set([
   "topologyMode",
 ]);
 
-function sanitizedDetails(details: unknown): LifecycleDetails {
-  const result: LifecycleDetails = {};
-  const source =
-    details && typeof details === "object"
-      ? (details as Record<string, unknown>)
-      : {};
+function sanitizedDetails<T>(details: T) {
+  const entries: Array<[string, string | number | boolean | null]> = [];
+  const source = isExternalRecord(details) ? details : {};
   for (const [key, value] of Object.entries(source)) {
     if (!allowedDetailKeys.has(key)) continue;
     if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean" ||
+      isExternalString(value) ||
+      isExternalNumber(value) ||
+      value === true ||
+      value === false ||
       value === null
     )
-      result[key] = typeof value === "string" ? value.slice(0, 160) : value;
+      entries.push([
+        key,
+        isExternalString(value) ? value.slice(0, 160) : value,
+      ]);
   }
-  return result;
+  return Object.fromEntries(entries);
 }
 
 export function createMediaLifecycleTrace({
@@ -56,7 +62,7 @@ export function createMediaLifecycleTrace({
     entries = [];
   }
 
-  function record(phase: string, details: unknown = {}) {
+  function record<T>(phase: string, details?: T) {
     const entry: LifecycleEntry = {
       phase,
       elapsedMs: Math.max(0, Math.round(monotonicNow() - startedAt)),
@@ -83,7 +89,7 @@ export function createMediaLifecycleState() {
   const phase = ref("closed");
   const lifecycle = ref<LifecycleEntry[]>([]);
 
-  function record(nextPhase: string, details: unknown = {}) {
+  function record<T>(nextPhase: string, details?: T) {
     phase.value = nextPhase;
     trace.record(nextPhase, details);
     lifecycle.value = trace.snapshot();

@@ -1,4 +1,5 @@
 import { mediaDebug } from "./media-debug.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
 
 export function createProviderRecoveryState({
   error,
@@ -12,7 +13,7 @@ export function createProviderRecoveryState({
   setConnectionPhase: (
     phase: string,
     details?: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
 }) {
   let retryAt = 0;
   return {

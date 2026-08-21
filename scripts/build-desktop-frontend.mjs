@@ -68,21 +68,19 @@ if (apiUrl.protocol !== "https:") {
 
 rmSync(desktopOutput, { force: true, recursive: true });
 
+const buildEnv = {
+  ...process.env,
+  DSPEAK_DESKTOP: "1",
+  NITRO_PRESET: "static",
+};
+if (desktopApiOrigin) buildEnv.VITE_DSPEAK_API_PATH = desktopApiOrigin;
+if (desktopPublicOrigin) buildEnv.DSPEAK_PUBLIC_ORIGIN = desktopPublicOrigin;
+if (desktopSupabaseUrl) buildEnv.SUPABASE_URL = desktopSupabaseUrl;
+if (desktopSupabaseAnonKey) buildEnv.SUPABASE_ANON_KEY = desktopSupabaseAnonKey;
+
 const result = spawnSync(process.execPath, [nuxi, "generate"], {
   cwd: desktopRoot,
-  env: {
-    ...process.env,
-    DSPEAK_DESKTOP: "1",
-    NITRO_PRESET: "static",
-    ...(desktopApiOrigin ? { VITE_DSPEAK_API_PATH: desktopApiOrigin } : {}),
-    ...(desktopPublicOrigin
-      ? { DSPEAK_PUBLIC_ORIGIN: desktopPublicOrigin }
-      : {}),
-    ...(desktopSupabaseUrl ? { SUPABASE_URL: desktopSupabaseUrl } : {}),
-    ...(desktopSupabaseAnonKey
-      ? { SUPABASE_ANON_KEY: desktopSupabaseAnonKey }
-      : {}),
-  },
+  env: buildEnv,
   stdio: "inherit",
 });
 

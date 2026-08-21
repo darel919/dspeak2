@@ -19,11 +19,12 @@ export function createVoiceParticipantState({
   function upsertUserProfile(profile: VoiceUserRecord) {
     if (!profile?.id) return;
     const userId = String(profile.id);
-    const merged = {
-      ...(userDirectory.value.get(userId) || {}),
-      ...profile,
-      id: userId,
-    };
+    const merged = Object.assign(
+      {},
+      userDirectory.value.get(userId) || {},
+      profile,
+      { id: userId },
+    );
     userDirectory.value.set(userId, merged);
     const connectedUser = connectedUsers.value.get(userId);
     if (connectedUser) {
@@ -39,27 +40,30 @@ export function createVoiceParticipantState({
     const normalizedUserId = String(userId);
     const pendingState = pendingVoiceStates.get(normalizedUserId);
     pendingVoiceStates.delete(normalizedUserId);
-    connectedUsers.value.set(normalizedUserId, {
-      ...(userDirectory.value.get(normalizedUserId) || {}),
-      speaking: false,
-      muted: false,
-      deafened: false,
-      cameraEnabled: false,
-      screenSharing: false,
-      soundboardActivity: null,
-      ...userInfo,
-      ...pendingState,
-      id: normalizedUserId,
-    });
+    connectedUsers.value.set(
+      normalizedUserId,
+      Object.assign(
+        {
+          speaking: false,
+          muted: false,
+          deafened: false,
+          cameraEnabled: false,
+          screenSharing: false,
+          soundboardActivity: null,
+        },
+        userDirectory.value.get(normalizedUserId) || {},
+        userInfo,
+        pendingState || {},
+        { id: normalizedUserId },
+      ),
+    );
     publishConnectedUsers();
     if (
-      typeof userVolumes.value[normalizedUserId] === "undefined" &&
-      typeof document !== "undefined"
+      userVolumes.value[normalizedUserId] === undefined &&
+      import.meta.client
     ) {
-      const element = document.getElementById(
-        `audio-${normalizedUserId}`,
-      ) as HTMLAudioElement | null;
-      if (typeof element?.volume === "number")
+      const element = document.getElementById(`audio-${normalizedUserId}`);
+      if (element instanceof HTMLAudioElement)
         userVolumes.value[normalizedUserId] = element.volume;
     }
   }
@@ -79,7 +83,7 @@ export function createVoiceParticipantState({
   }
 
   function getUserVolume(userId: string) {
-    return typeof userVolumes.value[userId] !== "undefined"
+    return userVolumes.value[userId] !== undefined
       ? userVolumes.value[userId]
       : 1;
   }
@@ -93,7 +97,7 @@ export function createVoiceParticipantState({
 
   function getTrackVolume(userId: string, source: string) {
     const value = trackVolumes.value[`${userId}:${source}`];
-    if (typeof value !== "undefined") return value;
+    if (value !== undefined) return value;
     return source === "audio" ? getUserVolume(userId) : 1;
   }
 
@@ -117,8 +121,15 @@ export function createVoiceParticipantState({
     connectedUsers.value.set(normalizedUserId, {
       ...user,
       muted,
-      ...(muted ? { speaking: false } : {}),
     });
+    if (muted) {
+      const updated = connectedUsers.value.get(normalizedUserId);
+      if (updated)
+        connectedUsers.value.set(normalizedUserId, {
+          ...updated,
+          speaking: false,
+        });
+    }
     publishConnectedUsers();
   }
 
@@ -128,37 +139,38 @@ export function createVoiceParticipantState({
   ) {
     const normalizedUserId = String(userId || "");
     const user = connectedUsers.value.get(normalizedUserId);
-    const hasMuted = typeof state?.muted === "boolean";
-    const hasDeafened = typeof state?.deafened === "boolean";
+    const hasMuted = state?.muted !== undefined;
+    const hasDeafened = state?.deafened !== undefined;
     if (!normalizedUserId || (!hasMuted && !hasDeafened)) return;
     if (!user) {
-      if (hasMuted && hasDeafened)
-        pendingVoiceStates.set(normalizedUserId, {
+      if (hasMuted && hasDeafened) {
+        const pendingState: VoiceStateUpdate = {
           muted: state.muted,
           deafened: state.deafened,
-          ...(typeof state.cameraEnabled === "boolean"
-            ? { cameraEnabled: state.cameraEnabled }
-            : {}),
-          ...(typeof state.screenSharing === "boolean"
-            ? { screenSharing: state.screenSharing }
-            : {}),
-        });
+        };
+        if (state.cameraEnabled !== undefined)
+          pendingState.cameraEnabled = state.cameraEnabled;
+        if (state.screenSharing !== undefined)
+          pendingState.screenSharing = state.screenSharing;
+        pendingVoiceStates.set(normalizedUserId, pendingState);
+      }
       return;
     }
-    connectedUsers.value.set(normalizedUserId, {
+    const nextState = {
       ...user,
       muted: hasMuted ? state.muted : user.muted,
       deafened: hasDeafened ? state.deafened : user.deafened,
       cameraEnabled:
-        typeof state.cameraEnabled === "boolean"
+        state.cameraEnabled !== undefined
           ? state.cameraEnabled
           : user.cameraEnabled,
       screenSharing:
-        typeof state.screenSharing === "boolean"
+        state.screenSharing !== undefined
           ? state.screenSharing
           : user.screenSharing,
-      ...(state.muted === true ? { speaking: false } : {}),
-    });
+    };
+    if (state.muted === true) nextState.speaking = false;
+    connectedUsers.value.set(normalizedUserId, nextState);
     publishConnectedUsers();
   }
 

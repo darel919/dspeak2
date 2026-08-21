@@ -1,3 +1,17 @@
+import type { OwnedErrorValue } from "./shared-utilities.ts";
+import type { ExternalObject } from "./boundary.ts";
+
+import type { MediaCommandResult } from "./boundary.ts";
+
+import type { CloudflarePublication } from "./cloudflare-media.ts";
+import type {
+  NativeCloudflareEvent,
+  NativeCloudflareMessage,
+  NativeCloudflarePublication,
+  NativeCloudflareSourceEntry,
+} from "./native-cloudflare.ts";
+import type { SignalingMessage } from "./media-signaling.ts";
+
 export interface NativeCloudflareSessionOptions {
   invoke: NativeCloudflareSessionSurface["invoke"];
   send?: NativeCloudflareSessionSurface["send"];
@@ -23,6 +37,7 @@ export interface NativeCloudflareSessionOptions {
   remoteAudioFeeds?: NativeCloudflareSessionSurface["remoteAudioFeeds"];
   mediaCapabilities?:
     import("./video-codec-capabilities.ts").ParticipantMediaCapabilities | null;
+  getControlConnectionEpoch?: () => number;
 }
 
 export interface NativeCloudflareSessionSurface {
@@ -30,12 +45,12 @@ export interface NativeCloudflareSessionSurface {
     operation: string,
     payload?: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
-  send?: (message: unknown) => unknown;
-  ensureControlReady?: () => Promise<unknown>;
-  onRemoteTrack?: (entry: Record<string, unknown>) => unknown;
-  onRemoteTrackEnded?: (entry: Record<string, unknown>) => unknown;
-  onStateChange?: (...args: unknown[]) => unknown;
-  onError?: (error: unknown) => unknown;
+  send?: (message: SignalingMessage) => MediaCommandResult;
+  ensureControlReady?: () => Promise<MediaCommandResult>;
+  onRemoteTrack?: (entry: Record<string, unknown>) => MediaCommandResult;
+  onRemoteTrackEnded?: (entry: Record<string, unknown>) => MediaCommandResult;
+  onStateChange?: (...args: unknown[]) => MediaCommandResult;
+  onError?: (error: OwnedErrorValue) => MediaCommandResult;
   getAudioBitrate?: (source: string) => number | null;
   getAudioStereo?: (source: string) => boolean | null;
   getVideoSettings?: (
@@ -43,9 +58,9 @@ export interface NativeCloudflareSessionSurface {
   ) => import("./video-settings.ts").VideoSettings;
   requestTimeoutMs: number;
   localPeerId: string;
-  sources: Map<string, Record<string, unknown>>;
-  producers: Map<string, Record<string, unknown>>;
-  producerVariants: Map<string, Record<string, unknown>>;
+  sources: Map<string, NativeCloudflareSourceEntry>;
+  producers: Map<string, NativeCloudflareSourceEntry>;
+  producerVariants: Map<string, NativeCloudflareSourceEntry>;
   consumers: Map<string, Record<string, unknown>>;
   sourceTransmission: Map<string, boolean>;
   remoteReceiving: Map<string, boolean>;
@@ -62,94 +77,175 @@ export interface NativeCloudflareSessionSurface {
   codecMigrationTelemetry: import("../video-codec-migration.ts").CodecMigrationTelemetry[];
   videoDecodeOverloadTelemetry: import("../video-codec-migration.ts").VideoDecodeOverloadTelemetry[];
   codecRuntimeTelemetry: import("../video-codec-migration.ts").VideoCodecRuntimeTelemetry[];
-  publications: Map<string, Record<string, unknown>>;
+  publications: Map<string, NativeCloudflarePublication>;
   remoteByMid: Map<string, Record<string, unknown>>;
   pendingRemoteTrackEvents: Map<string, Array<Record<string, unknown>>>;
   pending: Map<
     string,
     {
-      resolve: (value?: unknown) => void;
-      reject: (error: unknown) => void;
+      resolve: (value: NativeCloudflareMessage) => void;
+      reject: (error: OwnedErrorValue) => void;
       timer: ReturnType<typeof setTimeout>;
     }
   >;
-  subscriptionTasks: Map<string, Promise<unknown>>;
+  subscriptionTasks: Map<string, Promise<MediaCommandResult>>;
   subscribedTrackNames: Set<string>;
   subscriptionsStarted: boolean;
-  negotiationQueue: Promise<unknown>;
-  sourceOperations: Map<string, Promise<unknown>>;
+  negotiationQueue: Promise<MediaCommandResult>;
+  sourceOperations: Map<string, Promise<MediaCommandResult>>;
   rtpSamples: Map<string, { timestamp: number | null; bytes: number | null }>;
   handle: string | number | null;
   sessionId: string | null;
-  initializing: Promise<unknown> | null;
+  initializing: Promise<MediaCommandResult> | null;
   sessionGeneration: number;
   closed: boolean;
   iceState: number;
   jitterBufferMinimumDelay: number;
   jitterBufferTargetDelay: number;
   lastReceivedConsumerParams: unknown;
+  controlConnectionEpoch: number;
+  getControlConnectionEpoch: () => number;
+  connectionState: () => {
+    ready: boolean;
+    send: string;
+    recv: string;
+    sendRequired: boolean;
+    receiveRequired: boolean;
+  };
+  stats: () => Promise<Array<Record<string, unknown>>>;
+  diagnosticStats: () => Promise<Array<Record<string, unknown>>>;
+  mediaReadiness: (expectedInbound: number) => Promise<Record<string, unknown>>;
+  getOutboundRtpStats: () => Promise<Array<Record<string, unknown>>>;
+  getInboundRtpStats: () => Promise<Array<Record<string, unknown>>>;
+  expectedInboundFlowCount: () => number;
+  waitForRemoteTracks: (
+    topology?: import("./native-cloudflare.ts").NativeCloudflareTopology,
+    timeoutMs?: number,
+  ) => Promise<boolean>;
+  _rawStats: () => Promise<MediaCommandResult>;
   _assertCurrent: (generation: number, handle?: string | number | null) => void;
-  _emitState: () => unknown;
-  closeMedia: () => unknown;
-  removeSource: (source: string) => unknown;
-  removeVariant: (variantId: string, force?: boolean) => unknown;
+  _emitState: () => MediaCommandResult;
+  closeMedia: () => MediaCommandResult;
+  shutdown: () => MediaCommandResult;
+  removeSource: (source: string) => MediaCommandResult;
+  removeVariant: (variantId: string, force?: boolean) => MediaCommandResult;
   retireVariants: (
     logicalStreamId: string,
     desiredVariantIds: string[],
-  ) => unknown;
+  ) => MediaCommandResult;
   hasVariant: (variantId: string) => boolean;
   updateVariantMetadata: (
     entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
-  ) => Promise<unknown>;
-  setSourceTransmission: (source: string, enabled: boolean) => unknown;
-  updateAudioBitrate: (source: string, bitrate: number) => unknown;
-  updateVideoBitrate: (source: string, bitrate: number) => unknown;
+  ) => Promise<MediaCommandResult>;
+  setSourceTransmission: (
+    source: string,
+    enabled: boolean,
+  ) => MediaCommandResult;
+  updateAudioBitrate: (source: string, bitrate: number) => MediaCommandResult;
+  updateVideoBitrate: (source: string, bitrate: number) => MediaCommandResult;
   updateVideoParameters: (
     source: string,
     parameters: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   updateVariantVideoParameters: (
     variantId: string,
     parameters: Record<string, unknown>,
-  ) => unknown;
+  ) => MediaCommandResult;
   setRemoteReceiving: (
     userIdOrKey: string,
     sourceOrReceiving: string | boolean,
     receivingValue?: boolean,
-  ) => unknown;
+  ) => Promise<boolean>;
   setConsumerVolume: (
     userId: string | number,
     source: string,
     volume: number,
-  ) => unknown;
+  ) => MediaCommandResult;
   sendParticipantVoiceState: (state: {
     muted?: boolean;
     deafened?: boolean;
-  }) => unknown;
+  }) => MediaCommandResult;
   setJitterBufferConfig: (config: {
     minDelayMs?: number;
     targetDelayMs?: number;
-  }) => unknown;
-  handleReceiveEvent: (event: Record<string, unknown>) => boolean;
-  startSubscriptions: () => Promise<unknown>;
+  }) => MediaCommandResult;
+  handleReceiveEvent: (event: NativeCloudflareEvent) => boolean;
+  startSubscriptions: () => Promise<MediaCommandResult>;
   addSource: (
     entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
-  ) => Promise<unknown>;
-  handleMessage: (type: string, data: Record<string, unknown>) => unknown;
+  ) => Promise<MediaCommandResult>;
+  handleMessage: (
+    type: string,
+    data: Record<string, unknown>,
+  ) => MediaCommandResult;
+  reconcilePublications: (
+    publications: CloudflarePublication[],
+    removedPublications?: CloudflarePublication[],
+    isStale?: () => boolean,
+    getLatestCanonical?: () => CloudflarePublication[],
+    getLatestRevision?: () => string | null,
+  ) => Promise<MediaCommandResult>;
+  reconcilePublicationsOnce?: (
+    publications: CloudflarePublication[],
+    isStale: () => boolean,
+  ) => Promise<MediaCommandResult>;
   subscribe: (
     publication: import("./native-cloudflare.ts").NativeCloudflarePublication,
     generation?: number,
-  ) => Promise<unknown>;
-  _closeConsumer: (entry: Record<string, unknown>) => unknown;
-  request: (operation: string, body?: unknown) => Promise<unknown>;
-  enqueueNegotiation: (operation: () => Promise<unknown>) => Promise<unknown>;
-  applyJitterBufferConfig: (entry: Record<string, unknown>) => unknown;
+  ) => Promise<MediaCommandResult>;
+  _closeConsumer: (entry: Record<string, unknown>) => MediaCommandResult;
+  request: (
+    operation: string,
+    body?: ExternalObject,
+  ) => Promise<NativeCloudflareMessage>;
+  enqueueNegotiation: (
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
+  enqueueSourceOperation: (
+    source: string,
+    operation: () => Promise<MediaCommandResult>,
+  ) => Promise<MediaCommandResult>;
+  updateVariantMetadataInternal: (
+    entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
+  ) => Promise<MediaCommandResult>;
+  addSourceInternal: (
+    entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
+  ) => Promise<MediaCommandResult>;
+  removeSourceInternal: (source: string) => Promise<MediaCommandResult>;
+  subscribePublications: (
+    publications: import("./native-cloudflare.ts").NativeCloudflarePublication[],
+    generation?: number,
+  ) => Promise<MediaCommandResult>;
+  _subscribePublicationBatch: (
+    publications: import("./native-cloudflare.ts").NativeCloudflarePublication[],
+    generation: number,
+  ) => Promise<MediaCommandResult>;
+  _subscribePublication: (
+    publication: import("./native-cloudflare.ts").NativeCloudflarePublication,
+    generation: number,
+  ) => Promise<MediaCommandResult>;
+  _updateBitrate: (
+    source: string,
+    maxBitrate: number,
+    kind: "audio" | "video",
+  ) => Promise<boolean>;
+  _setSourceParameters: (
+    entry: import("./native-cloudflare.ts").NativeCloudflareSourceEntry,
+    generation?: number,
+    overrides?: Record<string, unknown>,
+  ) => Promise<boolean>;
+  applyJitterBufferConfig: (
+    entry: Record<string, unknown>,
+  ) => MediaCommandResult;
   takePendingLocalVideoFrame: (
     source: string,
   ) => Record<string, unknown> | null;
-  initialize: () => Promise<unknown>;
+  initialize: () => Promise<MediaCommandResult>;
   _handleTrackAdded: (
     payload: Record<string, unknown>,
     event: import("./native-cloudflare.ts").NativeCloudflareEvent,
-  ) => unknown;
+  ) => boolean;
+  reannounceLocalPublications: (options: {
+    connectionEpoch: number;
+  }) => MediaCommandResult;
 }

@@ -1,16 +1,17 @@
+import { isExternalRecord } from "./types/boundary.ts";
+import type { MediaCommandResult } from "./types/boundary.ts";
+
 type StatsRecord = Record<string, unknown>;
 
-function sourceEntries(value: unknown, source: string) {
-  return (Array.isArray(value) ? value : []).filter(
-    (entry) => String(entry?.source || "") === String(source || ""),
-  );
+function sourceEntries<T>(value: T, source: string): StatsRecord[] {
+  return (Array.isArray(value) ? value : [])
+    .filter(isExternalRecord)
+    .filter((entry) => String(entry.source || "") === String(source || ""));
 }
 
-function flowingBytes(entry: StatsRecord) {
-  const stats =
-    entry.stats && typeof entry.stats === "object"
-      ? (entry.stats as StatsRecord)
-      : entry;
+function flowingBytes<T>(entry: T) {
+  if (!isExternalRecord(entry)) return 0;
+  const stats = isExternalRecord(entry.stats) ? entry.stats : entry;
   const bytes = Number(stats.bytesSent);
   const packets = Number(stats.packetsSent);
   if (Number.isFinite(bytes) && bytes > 0) return bytes;
@@ -18,7 +19,7 @@ function flowingBytes(entry: StatsRecord) {
   return 0;
 }
 
-export function outboundSourceHasFlow(value: unknown, source: string) {
+export function outboundSourceHasFlow<T>(value: T, source: string) {
   return sourceEntries(value, source).some((entry) => flowingBytes(entry) > 0);
 }
 
@@ -30,12 +31,12 @@ export async function waitForOutboundSourceFlow({
   now = Date.now,
   wait = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
 }: {
-  getStats: () => Promise<unknown>;
+  getStats: () => Promise<MediaCommandResult>;
   source: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
   now?: () => number;
-  wait?: (duration: number) => Promise<unknown>;
+  wait?: (duration: number) => Promise<void>;
 }) {
   const startedAt = now();
   const timeout = Number(timeoutMs);

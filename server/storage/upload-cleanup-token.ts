@@ -1,4 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import {
+  parseExternalNumber,
+  parseExternalRecord,
+  parseExternalString,
+  type ExternalField,
+} from "../../shared/types/external.ts";
 
 const configuredCleanupSecret = process.env.DSPEAK_CSRF_SECRET;
 const CLEANUP_TOKEN_LIFETIME_SECONDS = 2 * 60 * 60;
@@ -26,12 +32,13 @@ export function createUploadCleanupToken(
 }
 
 export function verifyUploadCleanupToken(
-  token: unknown,
+  token: ExternalField,
   userId: string,
   now = Math.floor(Date.now() / 1000),
 ) {
-  if (typeof token !== "string") return null;
-  const [payload, suppliedSignature, extra] = token.split(".");
+  const encodedToken = parseExternalString(token);
+  if (encodedToken === null) return null;
+  const [payload, suppliedSignature, extra] = encodedToken.split(".");
   if (!payload || !suppliedSignature || extra) return null;
 
   const expectedSignature = sign(payload);
@@ -44,18 +51,21 @@ export function verifyUploadCleanupToken(
     return null;
 
   try {
-    const claims = JSON.parse(
-      Buffer.from(payload, "base64url").toString("utf8"),
+    const claims = parseExternalRecord(
+      JSON.parse(Buffer.from(payload, "base64url").toString("utf8")),
     );
+    const key = parseExternalString(claims?.key);
+    const expiresAt = parseExternalNumber(claims?.expiresAt);
     if (
-      claims.userId !== userId ||
-      typeof claims.key !== "string" ||
-      !claims.key ||
-      !Number.isSafeInteger(claims.expiresAt) ||
-      claims.expiresAt < now
+      parseExternalString(claims?.userId) !== userId ||
+      key === null ||
+      !key ||
+      expiresAt === null ||
+      !Number.isSafeInteger(expiresAt) ||
+      expiresAt < now
     )
       return null;
-    return { key: claims.key };
+    return { key };
   } catch {
     return null;
   }
