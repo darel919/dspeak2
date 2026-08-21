@@ -5,6 +5,8 @@ import {
   isExternalString,
   type ExternalObject,
 } from "./types/boundary.ts";
+import type { DesktopSessionResponseOrigin } from "./types/auth.ts";
+import { sanitizeResponseUrl } from "./desktop-http.ts";
 
 export type DesktopSessionDiagnostic = {
   diagnosticCategory: string;
@@ -20,6 +22,10 @@ export type DesktopSessionDiagnostic = {
   viaHeader: string;
   vercelRequestId: string;
   cloudflareRay: string;
+  contentType: string;
+  vercelMitigated: string;
+  responseOrigin: DesktopSessionResponseOrigin;
+  provider: string;
 };
 
 export type DesktopFailureDiagnostic = {
@@ -41,6 +47,10 @@ export type DesktopFailureDiagnostic = {
   viaHeader: string;
   vercelRequestId: string;
   cloudflareRay: string;
+  contentType: string;
+  vercelMitigated: string;
+  responseOrigin: DesktopSessionResponseOrigin;
+  provider: string;
 };
 
 type DesktopDiagnosticPayload = {
@@ -67,6 +77,42 @@ function diagnosticPayload<T>(value: T): DesktopDiagnosticPayload {
   return payload;
 }
 
+function isResponseOrigin(
+  value: string,
+): value is DesktopSessionResponseOrigin {
+  return (
+    value === "application" ||
+    value === "vercel-edge" ||
+    value === "upstream-edge" ||
+    value === "unknown"
+  );
+}
+
+export function classifyDesktopSessionResponse(input: {
+  httpStatus: number;
+  serverBuildCommit: string;
+  serverProjectRef: string;
+  serverHeader: string;
+  vercelRequestId: string;
+}): DesktopSessionResponseOrigin {
+  if (input.serverBuildCommit || input.serverProjectRef) return "application";
+  if (
+    input.vercelRequestId ||
+    input.serverHeader.toLowerCase().includes("vercel")
+  ) {
+    return "vercel-edge";
+  }
+  if (input.httpStatus > 0) return "upstream-edge";
+  return "unknown";
+}
+
+function providerForOrigin(origin: DesktopSessionResponseOrigin): string {
+  if (origin === "application") return "dSpeak";
+  if (origin === "vercel-edge") return "Vercel";
+  if (origin === "upstream-edge") return "upstream";
+  return "";
+}
+
 export function mapFailureDiagnostic<T>(
   error: T,
 ): DesktopFailureDiagnostic | null {
@@ -74,6 +120,21 @@ export function mapFailureDiagnostic<T>(
   if (!record && !(error instanceof Error)) return null;
   const serverDiagnostic = stringValue(record?.serverDiagnostic);
   const rawDiagnosticCategory = stringValue(record?.serverDiagnostic);
+  const rawHttpStatus = record?.httpStatus;
+  const httpStatus =
+    isExternalNumber(rawHttpStatus) && rawHttpStatus > 0 ? rawHttpStatus : null;
+  const rawResponseOrigin = stringValue(record?.responseOrigin);
+  const inferredResponseOrigin = classifyDesktopSessionResponse({
+    httpStatus: httpStatus || 0,
+    serverBuildCommit: stringValue(record?.serverBuildCommit),
+    serverProjectRef: stringValue(record?.serverProjectRef),
+    serverHeader: stringValue(record?.serverHeader),
+    vercelRequestId: stringValue(record?.vercelRequestId),
+  });
+  const responseOrigin =
+    isResponseOrigin(rawResponseOrigin) && rawResponseOrigin !== "unknown"
+      ? rawResponseOrigin
+      : inferredResponseOrigin;
   const code =
     serverDiagnostic ||
     stringValue(record?.code) ||
@@ -84,21 +145,25 @@ export function mapFailureDiagnostic<T>(
     code || stringValue(record?.message) || error instanceof Error;
   if (!hasCode) return null;
 
-  const rawHttpStatus = record?.httpStatus;
-  const httpStatus =
-    isExternalNumber(rawHttpStatus) && rawHttpStatus > 0 ? rawHttpStatus : null;
-
-  const diagnosticCode = rawDiagnosticCategory.startsWith("DESKTOP_")
-    ? rawDiagnosticCategory
-    : httpStatus === 429
-      ? "DESKTOP_API_SESSION_HTTP_429"
-      : httpStatus
-        ? `DESKTOP_API_SESSION_HTTP_${httpStatus}`
-        : code || "DESKTOP_AUTH_UNKNOWN_ERROR";
+  const diagnosticCode =
+    responseOrigin !== "application" && responseOrigin !== "unknown"
+      ? responseOrigin === "vercel-edge" && httpStatus === 429
+        ? "DESKTOP_EDGE_RATE_LIMITED"
+        : "DESKTOP_EDGE_REQUEST_REJECTED"
+      : rawDiagnosticCategory.startsWith("DESKTOP_")
+        ? rawDiagnosticCategory
+        : httpStatus === 429
+          ? "DESKTOP_API_SESSION_HTTP_429"
+          : httpStatus
+            ? `DESKTOP_API_SESSION_HTTP_${httpStatus}`
+            : code || "DESKTOP_AUTH_UNKNOWN_ERROR";
 
   return {
     code: diagnosticCode,
-    stage: stringValue(record?.stage) || "unknown",
+    stage:
+      responseOrigin !== "application" && responseOrigin !== "unknown"
+        ? "edge-gateway"
+        : stringValue(record?.stage) || "unknown",
     httpStatus,
     serverBuildCommit: stringValue(record?.serverBuildCommit),
     clientBuildCommit: stringValue(record?.clientBuildCommit),
@@ -110,7 +175,7 @@ export function mapFailureDiagnostic<T>(
         ? "tauri-http"
         : "webview-fetch",
     requestUrl: stringValue(record?.requestUrl),
-    responseUrl: stringValue(record?.responseUrl),
+    responseUrl: sanitizeResponseUrl(stringValue(record?.responseUrl)),
     redirected: isExternalBoolean(record?.redirected)
       ? record.redirected
       : false,
@@ -120,6 +185,11 @@ export function mapFailureDiagnostic<T>(
     viaHeader: stringValue(record?.viaHeader),
     vercelRequestId: stringValue(record?.vercelRequestId),
     cloudflareRay: stringValue(record?.cloudflareRay),
+    contentType: stringValue(record?.contentType),
+    vercelMitigated: stringValue(record?.vercelMitigated),
+    responseOrigin,
+    provider:
+      stringValue(record?.provider) || providerForOrigin(responseOrigin),
   };
 }
 
@@ -141,19 +211,35 @@ export async function readDesktopSessionDiagnostic(
     const category = payload.statusMessage || payload.message;
     if (category) diagnosticCategory = category;
   } catch {}
+  const serverBuildCommit = response.headers.get("X-dSpeak-Build-Commit") || "";
+  const serverProjectRef =
+    response.headers.get("X-dSpeak-Supabase-Project") || "";
+  const serverHeader = response.headers.get("server") || "";
+  const vercelRequestId = response.headers.get("x-vercel-id") || "";
+  const responseOrigin = classifyDesktopSessionResponse({
+    httpStatus: response.status,
+    serverBuildCommit,
+    serverProjectRef,
+    serverHeader,
+    vercelRequestId,
+  });
   return {
     diagnosticCategory,
-    serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",
+    serverBuildCommit,
     httpStatus: response.status,
-    serverProjectRef: response.headers.get("X-dSpeak-Supabase-Project") || "",
+    serverProjectRef,
     requestUrl,
-    responseUrl: response.url,
+    responseUrl: sanitizeResponseUrl(response.url),
     redirected: response.redirected,
     statusText: response.statusText,
     retryAfter: response.headers.get("retry-after") || "",
-    serverHeader: response.headers.get("server") || "",
+    serverHeader,
     viaHeader: response.headers.get("via") || "",
-    vercelRequestId: response.headers.get("x-vercel-id") || "",
+    vercelRequestId,
     cloudflareRay: response.headers.get("cf-ray") || "",
+    contentType: response.headers.get("content-type") || "",
+    vercelMitigated: response.headers.get("x-vercel-mitigated") || "",
+    responseOrigin,
+    provider: providerForOrigin(responseOrigin),
   };
 }

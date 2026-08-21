@@ -34,12 +34,109 @@ defaults:
     shell: bash
 
 jobs:
+  release-gate:
+    name: Verify production release gate
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run production auth edge smoke
+        env:
+          DSPEAK_PUBLIC_ORIGIN: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
+        run: node scripts/desktop-session-edge-smoke.mjs
+
+      - name: Check root formatting
+        run: bun run format:check
+
+      - name: Run root lint
+        run: bun run lint
+
+      - name: Run root typecheck
+        run: bun run typecheck
+
+      - name: Run root tests
+        run: bun run test
+
+  detect-desktop-session-e2e:
+    name: Detect authenticated desktop session E2E
+    environment: Production
+    needs: release-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      enabled: ${{ steps.detect.outputs.enabled }}
+    steps:
+      - name: Detect test token without printing it
+        id: detect
+        env:
+          DSPEAK_TEST_TOKEN: ${{ secrets.DSPEAK_TEST_TOKEN }}
+          REQUIRE_DESKTOP_SESSION_E2E: ${{ github.event_name == 'workflow_run' && startsWith(github.event.workflow_run.head_branch, 'v') }}
+        run: |
+          if [[ -n "$DSPEAK_TEST_TOKEN" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$REQUIRE_DESKTOP_SESSION_E2E" == "true" ]]; then
+            echo "::error::Tagged desktop releases require the Production DSPEAK_TEST_TOKEN secret for the authenticated session bridge smoke." >&2
+            exit 1
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  desktop-session-e2e:
+    name: Authenticated desktop session E2E
+    environment: Production
+    needs: detect-desktop-session-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: needs.detect-desktop-session-e2e.outputs.enabled == 'true'
+    env:
+      DSPEAK_TEST_SERVER_URL: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
+      DSPEAK_TEST_PROJECT_REF: ${{ vars.DSPEAK_TEST_PROJECT_REF || '' }}
+      DSPEAK_TEST_TOKEN: ${{ secrets.DSPEAK_TEST_TOKEN }}
+      DSPEAK_TEST_TOKEN_OTHER_PROJECT: ${{ secrets.DSPEAK_TEST_TOKEN_OTHER_PROJECT }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run authenticated desktop session smoke
+        run: node --test tests/desktop-session-bridge-e2e.test.ts
+
   desktop:
     name: Build dSpeak Desktop (${{ matrix.platform }})
     environment: Production
+    needs: [release-gate, detect-desktop-session-e2e, desktop-session-e2e]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      always() &&
+      needs.release-gate.result == 'success' &&
+      needs.detect-desktop-session-e2e.result == 'success' &&
+      (needs.desktop-session-e2e.result == 'success' || needs.desktop-session-e2e.result == 'skipped') &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     strategy:
       fail-fast: false
       matrix:

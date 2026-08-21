@@ -10,6 +10,7 @@ export interface DesktopHttpProvenance {
   serverHeader: string;
   viaHeader: string;
   vercelRequestId: string;
+  vercelMitigated: string;
   cloudflareRay: string;
   serverBuildCommit: string;
   serverProjectRef: string;
@@ -23,6 +24,16 @@ export interface NetworkProbeResult {
   redirected: boolean;
   durationMs: number;
   errorName: string;
+}
+
+export function sanitizeResponseUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return "";
+  }
 }
 
 export async function nativeHttpFetch(
@@ -47,7 +58,7 @@ export async function probeAuthTransport(
       transport: "webview-fetch",
       requestUrl: testUrl,
       status: response.status,
-      responseUrl: response.url,
+      responseUrl: sanitizeResponseUrl(response.url),
       redirected: response.redirected,
       durationMs: performance.now() - webviewStart,
       errorName: "",
@@ -72,7 +83,7 @@ export async function probeAuthTransport(
       transport: "tauri-http",
       requestUrl: testUrl,
       status: response.status,
-      responseUrl: response.url,
+      responseUrl: sanitizeResponseUrl(response.url),
       redirected: response.redirected,
       durationMs: performance.now() - tauriStart,
       errorName: "",
@@ -98,7 +109,7 @@ export function extractProvenance(
 ): DesktopHttpProvenance {
   return {
     requestUrl,
-    responseUrl: response.url,
+    responseUrl: sanitizeResponseUrl(response.url),
     status: response.status,
     statusText: response.statusText,
     redirected: response.redirected,
@@ -108,6 +119,7 @@ export function extractProvenance(
     serverHeader: response.headers.get("server") || "",
     viaHeader: response.headers.get("via") || "",
     vercelRequestId: response.headers.get("x-vercel-id") || "",
+    vercelMitigated: response.headers.get("x-vercel-mitigated") || "",
     cloudflareRay: response.headers.get("cf-ray") || "",
     serverBuildCommit: response.headers.get("x-dspeak-build-commit") || "",
     serverProjectRef: response.headers.get("x-dspeak-supabase-project") || "",

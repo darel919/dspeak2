@@ -10,6 +10,10 @@ const authPage = await readFile(
   new URL("../app/pages/auth.vue", import.meta.url),
   "utf8",
 );
+const initSource = await readFile(
+  new URL("../app/components/Init.vue", import.meta.url),
+  "utf8",
+);
 const desktopCallback = await readFile(
   new URL("../app/composables/useDeepLinkAuth.ts", import.meta.url),
   "utf8",
@@ -86,14 +90,12 @@ test("desktop sign-in provides a recoverable browser waiting state", () => {
   );
 });
 
-test("desktop sign-in polls for the native callback while waiting", () => {
-  assert.match(authPage, /function startSignInPolling\(\)/);
-  assert.match(
-    authPage,
-    /setInterval\(\(\) => void checkSignIn\(false\), 1000\)/,
-  );
+test("desktop sign-in uses the native event with one coarse fallback check", () => {
+  assert.match(authPage, /function schedulePendingCallbackFallback\(\)/);
+  assert.match(authPage, /signInFallbackTimeout = setTimeout\(\(\) => \{/);
+  assert.doesNotMatch(authPage, /setInterval\(/);
   assert.match(authPage, /if \(signInCheckInFlight\) return/);
-  assert.match(authPage, /clearSignInPolling\(\)/);
+  assert.match(authPage, /clearSignInFallback\(\)/);
 });
 
 test("desktop sign-in keeps PKCE and API bridge failures distinct", () => {
@@ -103,7 +105,31 @@ test("desktop sign-in keeps PKCE and API bridge failures distinct", () => {
   assert.match(authPage, /could not create your app session/);
   assert.match(authStore, /hasFlowId/);
   assert.match(authStore, /diagnosticCategory/);
+  assert.match(authStore, /DESKTOP_EDGE_RATE_LIMITED/);
+  assert.match(authStore, /responseOrigin/);
+  assert.match(authStore, /retryDesktopSessionBridge/);
+  assert.match(authPage, /Retry app session/);
+  assert.match(authPage, /Start sign-in over/);
   assert.doesNotMatch(authStore, /console\.(log|info|error)[^\n]*callbackCode/);
+});
+
+test("desktop session recovery preserves Supabase state after bridge failure", () => {
+  assert.match(authStore, /desktopAuthFailure\.value = error/);
+  assert.match(authStore, /hasDesktopSupabaseSession/);
+  assert.match(authPage, /if \(authStore\.desktopAuthFailure\)/);
+  assert.match(authPage, /Retry app session/);
+  assert.doesNotMatch(
+    authPage,
+    /authStore\.retryDesktopSessionBridge\(\)[\s\S]{0,300}beginExternalSignIn/,
+  );
+  assert.match(initSource, /authStore\.desktopAuthFailure/);
+  assert.match(initSource, /authStore\.hasDesktopSupabaseSession\(\)/);
+});
+
+test("desktop session bridge keeps its timeout active through body handling", () => {
+  assert.match(authStore, /const timeoutError = \(\) =>/);
+  assert.match(authStore, /if \(timedOut\) throw timeoutError\(\);/);
+  assert.match(authStore, /finally \{\n\s*clearTimeout\(timeout\);\n\s*\}/);
 });
 
 test("web sign-in finishes after exchanging the callback", () => {
@@ -155,7 +181,7 @@ test("stale promise error resets on clear and new attempts", () => {
   );
   assert.match(
     authStore,
-    /request\.then\(\s*\(\) => \{[\s\S]*?desktopCallbackPromiseError = null;\s*\},/,
+    /request\.then\(\s*\(\) => \{[\s\S]*?desktopCallbackPromiseError = null;[\s\S]*?desktopAuthFailure\.value = null;[\s\S]*?\},/,
   );
 });
 
@@ -209,7 +235,7 @@ test("restore failure surfaces diagnostic reason instead of truthy collapse", ()
   );
 });
 
-test("event and polling both converge on completeDesktopSignIn", () => {
+test("native event and one fallback check converge on completeDesktopSignIn", () => {
   assert.match(
     desktopCallback,
     /authStore\.completeDesktopSignIn\(code, payload\?\.state/,
