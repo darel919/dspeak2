@@ -23,6 +23,12 @@ interface StatsCollection {
   values: () => Iterable<ExternalValue>;
 }
 
+export interface RtpStatSelector {
+  trackId?: string;
+  mid?: string | null;
+  kind?: string;
+}
+
 function isStatsCollection<T>(value: T): value is T & StatsCollection {
   return isExternalRecord(value) && value.values instanceof Function;
 }
@@ -45,11 +51,7 @@ function isStatsRecord<T>(value: T): value is T & StatsRecord {
 export function findRtpStat<T>(
   report: T,
   type: string,
-  {
-    trackId,
-    mid,
-    kind,
-  }: { trackId?: string; mid?: string | null; kind?: string } = {},
+  { trackId, mid, kind }: RtpStatSelector = {},
 ) {
   const values = reportValues(report);
   const candidates = values.filter((stat) => {
@@ -123,10 +125,14 @@ export function collectRtpStats<T>(
   trackSettings: MediaTrackSettings | Record<string, unknown> = {},
   previous: RtpStatsSample | null = null,
   expectedKind: string | null = null,
+  selector: Omit<RtpStatSelector, "kind"> = {},
 ) {
   const type = direction === "outbound" ? "outbound-rtp" : "inbound-rtp";
   const values = reportValues(report);
-  const rtp = findRtpStat(report, type, { kind: expectedKind ?? undefined });
+  const rtp = findRtpStat(report, type, {
+    ...selector,
+    kind: expectedKind ?? undefined,
+  });
   if (!rtp) return { stats: null, sample: previous };
 
   const codec = values.find((stat) => stat.id === rtp.codecId);

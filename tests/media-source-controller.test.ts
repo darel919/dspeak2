@@ -225,7 +225,7 @@ test("a muted microphone source is published with its track disabled", async () 
   assert.equal(publishedTrack.enabled, false);
 });
 
-test("microphone start clears stale disabled transmission after capture", async () => {
+test("microphone start clears stale disabled transmission before capture", async () => {
   const calls = [];
   const entry = {
     source: "audio",
@@ -254,9 +254,9 @@ test("microphone start clears stale disabled transmission after capture", async 
   await harness.instance.startAudioProduction();
 
   assert.deepEqual(calls, [
-    ["capture"],
     ["p2p", "audio", true],
     ["sfu", "audio", true],
+    ["capture"],
   ]);
 });
 

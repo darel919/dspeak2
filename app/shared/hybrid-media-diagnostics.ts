@@ -306,16 +306,22 @@ export function createHybridMediaDiagnostics({
     const results: Array<Record<string, unknown>> = [];
     for (const entry of localSources.values()) {
       const settings = entry.track.getSettings?.() || {};
-      const producer = sfu?.producers?.get(entry.source)?.producer;
+      const producerEntry = sfu?.producers?.get(entry.source);
+      const producer = producerEntry?.producer;
       const key = `outbound:${entry.source}`;
-      const report =
-        activeProvider === "sfu" && producer
-          ? await producer.getStats().catch(() => null)
-          : p2pMesh?.getOutboundTrackStats
-            ? await p2pMesh
-                .getOutboundTrackStats(entry.source)
-                .catch(() => null)
-            : null;
+      const topologyIndicatesSfu =
+        topologyState.value.mode === "sfu" ||
+        topologyState.value.target === "sfu" ||
+        topologyState.value.targetTransport === "sfu";
+      const useSfuStats =
+        !!producer &&
+        (activeProvider === "sfu" ||
+          (activeProvider === null && topologyIndicatesSfu));
+      const report = useSfuStats
+        ? await producer.getStats().catch(() => null)
+        : p2pMesh?.getOutboundTrackStats
+          ? await p2pMesh.getOutboundTrackStats(entry.source).catch(() => null)
+          : null;
       const collected = report
         ? collectRtpStats(
             report,
@@ -323,6 +329,10 @@ export function createHybridMediaDiagnostics({
             settings,
             rtpStatsSamples.get(key),
             entry.track.kind,
+            {
+              trackId: producerEntry?.track?.id ?? entry.track.id,
+              mid: producerEntry?.mid,
+            },
           )
         : null;
       if (collected?.sample) rtpStatsSamples.set(key, collected.sample);

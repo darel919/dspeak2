@@ -180,3 +180,60 @@ test("matches RTP statistics to the requested media track", () => {
   );
   assert.equal(findRtpStat(report, "outbound-rtp", { kind: "audio" }), null);
 });
+
+test("collects the requested outbound RTP stream when media kinds are ambiguous", () => {
+  const report = new Map([
+    [
+      "audio-source",
+      {
+        id: "audio-source",
+        type: "media-source",
+        kind: "audio",
+        trackIdentifier: "microphone-track",
+      },
+    ],
+    [
+      "other-source",
+      {
+        id: "other-source",
+        type: "media-source",
+        kind: "audio",
+        trackIdentifier: "retired-microphone-track",
+      },
+    ],
+    [
+      "microphone-rtp",
+      {
+        id: "microphone-rtp",
+        type: "outbound-rtp",
+        kind: "audio",
+        trackId: "audio-source",
+        mid: "0",
+        timestamp: 2000,
+        packetsSent: 80,
+        bytesSent: 17_000,
+      },
+    ],
+    [
+      "retired-microphone-rtp",
+      {
+        id: "retired-microphone-rtp",
+        type: "outbound-rtp",
+        kind: "audio",
+        trackId: "other-source",
+        mid: "1",
+        timestamp: 2000,
+        packetsSent: 0,
+        bytesSent: 0,
+      },
+    ],
+  ]);
+
+  const { stats } = collectRtpStats(report, "outbound", {}, null, "audio", {
+    trackId: "microphone-track",
+    mid: "0",
+  });
+
+  assert.equal(stats?.bytesSent, 17_000);
+  assert.equal(stats?.packetsSent, 80);
+});

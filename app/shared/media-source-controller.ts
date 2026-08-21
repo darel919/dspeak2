@@ -1017,20 +1017,14 @@ export function createMediaSourceController({
   }
 
   async function startAudioProduction() {
+    await Promise.all(
+      [
+        asProvider(getP2pMesh())?.setSourceTransmission?.("audio", true),
+        asProvider(getSfu())?.setSourceTransmission?.("audio", true),
+      ].filter(Boolean),
+    );
     const entry = await capture.startMicrophone();
-    try {
-      await Promise.all(
-        [
-          asProvider(getP2pMesh())?.setSourceTransmission?.("audio", true),
-          asProvider(getSfu())?.setSourceTransmission?.("audio", true),
-        ].filter(Boolean),
-      );
-      return producerFacade(entry);
-    } catch (error) {
-      if (localSources.get("audio")?.track === entry.track)
-        await capture.stop("audio").catch(() => {});
-      throw error;
-    }
+    return producerFacade(entry);
   }
 
   function restartAudioProduction() {

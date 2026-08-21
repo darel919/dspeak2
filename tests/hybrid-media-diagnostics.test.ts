@@ -6,16 +6,15 @@ import { collectRtpStats } from "../app/shared/rtc-media-stats.ts";
 import { outboundSourceHasFlow } from "../app/shared/media-source-flow.ts";
 import { FakeMediaStreamTrack } from "./helpers/fake-media.ts";
 
-test("staged SFU outbound audio remains visible before provider commit", async () => {
-  const track = new FakeMediaStreamTrack("audio", "microphone-track");
-  const report = new Map([
+function createReport(trackId: string, bytesSent: number) {
+  return new Map([
     [
       "audio-source",
       {
         id: "audio-source",
         type: "media-source",
         kind: "audio",
-        trackIdentifier: track.id,
+        trackIdentifier: trackId,
       },
     ],
     [
@@ -26,36 +25,59 @@ test("staged SFU outbound audio remains visible before provider commit", async (
         kind: "audio",
         trackId: "audio-source",
         mid: "0",
-        bytesSent: 480,
+        bytesSent,
         packetsSent: 12,
         timestamp: 2_000,
       },
     ],
   ]);
-  const localSources = new Map([["audio", { source: "audio", track }]]);
+}
+
+function createDiagnostics({
+  activeProvider,
+  mode,
+  targetTransport,
+  sfuReport,
+  p2pReport,
+}: {
+  activeProvider: string | null;
+  mode: string;
+  targetTransport?: "p2p" | "sfu" | null;
+  sfuReport?: Map<string, Record<string, unknown>>;
+  p2pReport?: Map<string, Record<string, unknown>>;
+}) {
+  const track = new FakeMediaStreamTrack("audio", "microphone-track");
   const diagnostics = createHybridMediaDiagnostics({
     collectRtpStats,
-    getActiveProvider: () => null,
+    getActiveProvider: () => activeProvider,
     getActiveRouteProvider: () => "cloudflare-realtime",
     getAudioLatencySnapshot: () => ({}),
-    getP2pMesh: () => null,
+    getP2pMesh: () =>
+      p2pReport
+        ? {
+            getOutboundTrackStats: async () => p2pReport,
+          }
+        : null,
     getRequestedVideoSettings: () => ({ frameRate: 30 }),
     getLifecycle: () => null,
     getProtocolState: () => null,
     getReadiness: () => null,
-    getSfu: () => ({
-      producers: new Map([
-        [
-          "audio",
-          {
-            producer: { getStats: async () => report },
-            track,
-            mid: "0",
-          },
-        ],
-      ]),
-    }),
-    localSources,
+    getSfu: () =>
+      sfuReport
+        ? {
+            producers: new Map([
+              [
+                "audio",
+                {
+                  producer: { getStats: async () => sfuReport },
+                  track,
+                  mid: "0",
+                },
+              ],
+            ]),
+          }
+        : null,
+    localSources: new Map([["audio", { source: "audio", track }]]),
     playbackState: ref("ready"),
     peerRoundTripTimes: ref({}),
     remoteAudioFeeds: ref(new Map()),
@@ -64,9 +86,20 @@ test("staged SFU outbound audio remains visible before provider commit", async (
     send: () => undefined,
     sfuRoundTripTime: ref(null),
     topologyGraph: ref({ topology: {}, nodes: [], edges: [] }),
-    topologyState: ref({ epoch: 1 }),
+    topologyState: ref({ mode, epoch: 1, targetTransport, peers: [] }),
     updateP2pStats: () => undefined,
     rtpStatsSamples: new Map(),
+  });
+
+  return { diagnostics, track };
+}
+
+test("staged SFU outbound audio remains visible before provider commit", async () => {
+  const { diagnostics } = createDiagnostics({
+    activeProvider: null,
+    mode: "switching",
+    targetTransport: "sfu",
+    sfuReport: createReport("microphone-track", 480),
   });
 
   const stats = await diagnostics.getOutboundRtpStats();
@@ -74,4 +107,31 @@ test("staged SFU outbound audio remains visible before provider commit", async (
   assert.equal(outboundSourceHasFlow(stats, "audio"), true);
   assert.equal(stats[0]?.source, "audio");
   assert.equal(stats[0]?.bytesSent, 480);
+});
+
+test("committed P2P outbound audio remains authoritative over staged SFU stats", async () => {
+  const { diagnostics } = createDiagnostics({
+    activeProvider: "p2p",
+    mode: "switching",
+    targetTransport: "sfu",
+    sfuReport: createReport("microphone-track", 480),
+    p2pReport: createReport("microphone-track", 240),
+  });
+
+  const stats = await diagnostics.getOutboundRtpStats();
+
+  assert.equal(stats[0]?.bytesSent, 240);
+});
+
+test("idle does not accept stale SFU producer stats", async () => {
+  const { diagnostics } = createDiagnostics({
+    activeProvider: null,
+    mode: "idle",
+    sfuReport: createReport("microphone-track", 480),
+  });
+
+  const stats = await diagnostics.getOutboundRtpStats();
+
+  assert.equal(outboundSourceHasFlow(stats, "audio"), false);
+  assert.equal(stats[0]?.bytesSent, undefined);
 });

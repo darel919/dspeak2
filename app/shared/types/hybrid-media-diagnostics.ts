@@ -5,6 +5,7 @@ import type { MediaCommandResult } from "./boundary.ts";
 import type { Ref } from "vue";
 import type { SignalingMessage } from "./media-signaling.ts";
 import type { RtpStatsSample } from "../rtc-media-stats.ts";
+import type { TopologyState } from "./topology-controller.ts";
 
 export interface DiagnosticSourceEntry {
   source: string;
@@ -16,7 +17,7 @@ export interface DiagnosticSourceEntry {
 }
 
 export interface DiagnosticProvider {
-  producers?: ReadonlyMap<string, { producer?: DiagnosticProducer }>;
+  producers?: ReadonlyMap<string, DiagnosticProducerEntry>;
   stats?: () => Promise<MediaCommandResult>;
   diagnosticStats?: () => Promise<MediaCommandResult>;
   getSnapshot?: () => Promise<MediaCommandResult>;
@@ -26,6 +27,12 @@ export interface DiagnosticProvider {
     track: MediaStreamTrack,
   ) => Promise<MediaCommandResult>;
   getOutboundTrackParameters?: (source: string) => MediaCommandResult;
+}
+
+export interface DiagnosticProducerEntry {
+  producer?: DiagnosticProducer;
+  track?: MediaStreamTrack;
+  mid?: string | null;
 }
 
 export interface DiagnosticProducer {
@@ -52,6 +59,7 @@ export interface HybridMediaDiagnosticsContext {
     settings: MediaTrackSettings | Record<string, unknown>,
     previous?: RtpStatsSample | null,
     kind?: string | null,
+    selector?: { trackId?: string; mid?: string | null },
   ) => {
     sample?: RtpStatsSample | null;
     stats?: Record<string, unknown> | null;
@@ -74,7 +82,9 @@ export interface HybridMediaDiagnosticsContext {
   send: (message: SignalingMessage) => MediaCommandResult;
   sfuRoundTripTime: Ref<number | null>;
   topologyGraph: Ref<DiagnosticTopologyGraph>;
-  topologyState: Ref<{ epoch?: number }>;
+  topologyState: Ref<
+    Pick<TopologyState, "epoch" | "mode" | "target" | "targetTransport">
+  >;
   updateP2pStats: (edges: unknown[]) => MediaCommandResult;
   rtpStatsSamples: Map<string, RtpStatsSample>;
 }
