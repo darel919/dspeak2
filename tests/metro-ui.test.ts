@@ -579,9 +579,21 @@ test("voice video removes the competing Stage and Tiles state machine", async ()
   assert.match(source, /'voice-room-grid-focused'/);
   assert.match(source, /const isSoloAudioOverview = computed/);
   assert.match(source, /voice-room-grid-solo-audio/);
-  assert.match(source, /position: relative/);
-  assert.match(source, /voice-command-bar absolute inset-x-0 bottom-0/);
-  assert.match(source, /--voice-control-safe-area: 5rem/);
+  assert.match(source, /class="voice-command-bar shrink-0 border-t/);
+  assert.doesNotMatch(source, /voice-command-bar absolute inset-x-0 bottom-0/);
+  assert.doesNotMatch(source, /--voice-control-safe-area/);
+});
+
+test("voice media reserves space for the full command footer", async () => {
+  const source = await readFile("app/components/VoiceChannel.vue", "utf8");
+  const screenFeedArea = source.match(
+    /\.screen-feed-area\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+
+  assert.ok(screenFeedArea);
+  assert.match(source, /class="voice-command-bar shrink-0 border-t/);
+  assert.doesNotMatch(source, /class="voice-command-bar absolute/);
+  assert.doesNotMatch(screenFeedArea, /padding-bottom/);
 });
 
 test("voice stage keeps a connected local participant beside local media", async () => {

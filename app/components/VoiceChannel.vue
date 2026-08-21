@@ -627,7 +627,7 @@
           voiceStore.connected &&
           voiceStore.currentChannelId === props.channel.id
         "
-        class="voice-command-bar absolute inset-x-0 bottom-0 z-20 border-t border-white/10 bg-black/90 px-3 py-3 text-white shadow-2xl"
+        class="voice-command-bar shrink-0 border-t border-white/10 bg-black/90 px-3 py-3 text-white shadow-2xl"
       >
         <div class="voice-command-dock mx-auto">
           <div class="voice-command-group">
@@ -1426,12 +1426,10 @@ onUnmounted(() => {
 .voice-stage {
   position: relative;
   background: #050505;
-  --voice-control-safe-area: 5rem;
 }
 
 .screen-feed-area {
   container-type: size;
-  padding-bottom: calc(var(--voice-control-safe-area) + 1.5rem);
 }
 
 .voice-room-grid-overview {
