@@ -121,22 +121,33 @@ test("native participant snapshots hydrate profiles before membership rendering"
   assert.match(snapshot, /if \(authenticatedUser\?\.id\)\s*active\.add/);
 });
 
-test("desktop uses one visible startup loader before the app shell mounts", async () => {
+test("desktop reports startup phases to the separate init window", async () => {
   const source = await readFile("app/components/Init.vue", "utf8");
 
-  assert.match(source, /<StartupLoader[\s\S]*:visible="true"/);
-  assert.match(source, /Starting dSpeak…/);
+  assert.doesNotMatch(source, /<StartupLoader/);
+  assert.match(source, /createTauriDesktopStartupReporter\(\)/);
+  assert.match(
+    source,
+    /reportStartupPhase\(\s*startupReporter,\s*"runtime",\s*"Preparing desktop runtime…"/,
+  );
   assert.match(source, /<div v-show="startupComplete \|\| isAuthPage">/);
 });
 
-test("desktop uses a tray-owned window that is created on demand", async () => {
+test("desktop keeps main hidden until desktop_ready closes the init window", async () => {
   const config = await readFile("desktop/src-tauri/tauri.conf.json", "utf8");
-  const initSource = await readFile("app/components/Init.vue", "utf8");
+  const windowSource = await readFile(
+    "desktop/src-tauri/src/desktop/window.rs",
+    "utf8",
+  );
 
   assert.match(config, /"windows": \[\]/);
   assert.doesNotMatch(config, /"label": "init"/);
-  assert.match(initSource, /<StartupLoader[\s\S]*:visible="true"/);
-  assert.match(initSource, /invoke\("desktop_ready"\)/);
+  assert.match(windowSource, /visible\(false\)/);
+  assert.match(windowSource, /fn desktop_ready/);
+  assert.match(
+    windowSource,
+    /close_startup_window\(&app\);\s*\n\s*show_main_window\(&app\)/,
+  );
 });
 
 test("desktop notifications honor the local enabled preference", async () => {
@@ -243,6 +254,8 @@ test("active calls keep signaling alive until the media state disconnects", asyn
   assert.doesNotMatch(windowSource, /media::clear_video_surfaces/);
   assert.match(windowSource, /window_clone\.hide\(\)/);
   assert.match(desktopSource, /app\.listen\(media::MEDIA_EVENT_STATE/);
-  assert.match(desktopSource, /!window\.is_visible\(\)\.unwrap_or\(true\)/);
-  assert.match(desktopSource, /window\.destroy\(\)/);
+  assert.match(
+    desktopSource,
+    /hidden && !startup_pending[\s\S]*window\.destroy\(\)/,
+  );
 });

@@ -109,7 +109,10 @@ pub(crate) fn run() {
                     media_app.state::<media_popups::MediaPopupState>().inner(),
                 );
                 if let Some(window) = media_app.get_webview_window("main") {
-                    if !window.is_visible().unwrap_or(true) {
+                    let startup_pending =
+                        media_app.get_webview_window(window::STARTUP_WINDOW_LABEL).is_some();
+                    let hidden = window.is_visible().map(|value| !value).unwrap_or(false);
+                    if hidden && !startup_pending {
                         let _ = window.destroy();
                     }
                 }
@@ -128,8 +131,11 @@ pub(crate) fn run() {
             let show_on_start = explicitly_show
                 || (!launched_minimized && environment_show_override.unwrap_or(true));
             if show_on_start {
-                window::open_main_window(app.handle())?;
+                if let Err(error) = window::open_startup_window(app.handle()) {
+                    eprintln!("[dspeak] startup window unavailable: {error}");
+                }
             }
+            window::ensure_main_window(app.handle())?;
 
             Ok(())
         })

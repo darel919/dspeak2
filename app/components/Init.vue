@@ -1,12 +1,7 @@
 <template>
   <div>
-    <StartupLoader
-      v-if="desktopRuntime && !startupComplete && !isAuthPage"
-      :visible="true"
-      :status="startupStatus"
-    />
     <div
-      v-else-if="!desktopRuntime && !startupComplete && !isAuthPage"
+      v-if="!desktopRuntime && !startupComplete && !isAuthPage"
       class="metro-standalone flex min-h-screen items-center bg-base-100 px-6 py-12 sm:px-12"
     >
       <div class="w-full max-w-3xl">
@@ -57,6 +52,7 @@ import {
   STARTUP_READINESS_KEY,
 } from "../shared/startup-readiness";
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
+import { createTauriDesktopStartupReporter } from "../shared/desktop-startup";
 
 const authStore = useAuthStore();
 const roomsStore = useRoomsStore();
@@ -113,21 +109,33 @@ const { init: initIdle, destroy: destroyIdle } = useIdleDetection();
 const { init: initKeyboardShortcuts, destroy: destroyKeyboardShortcuts } =
   useGlobalKeyboardShortcuts();
 
+function reportStartupPhase(reporter, phase, message) {
+  startupStatus.value = message;
+  reporter?.begin(phase, message);
+}
+
 onMounted(async () => {
   let startupTimeoutId;
   let startupPhase = "runtime detection";
+  const startupReporter = createTauriDesktopStartupReporter();
   try {
     await Promise.race([
       (async () => {
-        startupStatus.value = "Preparing desktop runtime…";
+        reportStartupPhase(
+          startupReporter,
+          "runtime",
+          "Preparing desktop runtime…",
+        );
         await runtimeStore.initialize();
         startupPhase = desktopRuntime.value
-          ? "desktop update check"
+          ? "desktop update"
           : "authentication";
-        startupStatus.value = desktopRuntime.value
-          ? "Looking for desktop updates…"
-          : "Restoring your session…";
         if (desktopRuntime.value) {
+          reportStartupPhase(
+            startupReporter,
+            "desktop-update",
+            "Looking for desktop updates…",
+          );
           await Promise.all([
             runDesktopStartupUpdate(),
             checkRepositoryUpdate(),
@@ -137,7 +145,11 @@ onMounted(async () => {
         }
         if (!isAuthPage.value) {
           startupPhase = "authentication";
-          startupStatus.value = "Restoring your session…";
+          reportStartupPhase(
+            startupReporter,
+            "authentication",
+            "Restoring your session…",
+          );
           await checkAuth();
           if (authChecked.value) {
             const presenceStatusStore = usePresenceStatusStore();
@@ -149,7 +161,11 @@ onMounted(async () => {
           authChecked.value = true;
         }
         startupPhase = "page readiness";
-        startupStatus.value = "Loading your workspace…";
+        reportStartupPhase(
+          startupReporter,
+          "workspace",
+          "Loading your workspace…",
+        );
         await startupReadiness.waitForIdle(nextTick);
       })(),
       new Promise((_, reject) => {
@@ -158,10 +174,15 @@ onMounted(async () => {
         }, STARTUP_TIMEOUT_MS);
       }),
     ]);
+    startupReporter?.finish();
   } catch (error) {
     debugLog("[Init] Startup did not complete:", error);
     startupStatus.value = "Continuing without optional startup tasks…";
     authChecked.value = true;
+    startupReporter?.fail(
+      "STARTUP_TIMEOUT",
+      error?.message || "Startup timeout",
+    );
   } finally {
     window.clearTimeout(startupTimeoutId);
     startupReadiness.seal();
@@ -170,6 +191,7 @@ onMounted(async () => {
     if (desktopRuntime.value)
       stopDesktopUpdateMonitoring = startDesktopUpdateMonitoring();
     else void runStartupUpdate();
+    await startupReporter?.flush();
     void signalDesktopReady();
   }
 });
