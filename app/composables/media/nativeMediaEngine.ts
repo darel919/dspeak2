@@ -82,6 +82,7 @@ import type { MediaVideoFeed } from "../../shared/types/media-source-controller.
 import type { RemoteMediaEntry } from "../../shared/types/hybrid-media-registry.ts";
 import type { RtcStatsSnapshot } from "../../shared/types/rtc-stats.ts";
 import type { MediaCaptureStartOptions } from "../../shared/types/media-capture.ts";
+import type { WebRtcLatencyProfile } from "../../shared/types/web-rtc-latency.ts";
 import { buildNativeTopologyGraph } from "../../shared/native-mediasoup-diagnostics.ts";
 import { normalizeRtcTransport } from "../../shared/hybrid-media-diagnostics.ts";
 import { getSharedStatsSnapshot } from "../../shared/rtc-stats-sampler.ts";
@@ -131,6 +132,10 @@ export function createNativeSessionBoundary(): BrowserMediaEngineSession {
   const sfuRoundTripTime = shallowRef<number | null>(null);
   const participantSfuRoundTripTimes = shallowRef<Record<string, unknown>>({});
   const activeProviderState = shallowRef<string | null>(null);
+  const requestedLatencyProfile = shallowRef<WebRtcLatencyProfile>("standard");
+  const webMediaLatencyTier = shallowRef<
+    "standard-webrtc" | "latency-tuned-webrtc"
+  >("standard-webrtc");
   const remoteProducersCount = shallowRef(0);
   const lastInRoom = shallowRef<string[]>([]);
   const topologyState = shallowRef<unknown>(null);
@@ -139,6 +144,8 @@ export function createNativeSessionBoundary(): BrowserMediaEngineSession {
   const joinReady = computed(() => false);
   const api = createHybridMediaSessionApi({
     activeProviderState,
+    requestedLatencyProfile,
+    webMediaLatencyTier,
     areTransportsIceConnected: () => Promise.resolve(false),
     connect: () => unavailableAsync("connect"),
     connected,

@@ -13,6 +13,7 @@ import {
   isExternalRecord,
   isExternalString,
 } from "../../shared/types/boundary.ts";
+import { normalizeAudioLatencyCapabilities } from "../../shared/types/audio-latency.ts";
 import type { NativeMediaEngine } from "./nativeMediaEngine.ts";
 import type {
   MediaDeviceInfo,
@@ -179,6 +180,10 @@ export function parseNativeCapabilities<T>(value: T): NativeCapabilities {
   if (isExternalRecord(value.mediaCapabilities))
     capabilities.mediaCapabilities = normalizeParticipantMediaCapabilities(
       value.mediaCapabilities,
+    );
+  if (isExternalRecord(value.audioLatency))
+    capabilities.audioLatency = normalizeAudioLatencyCapabilities(
+      value.audioLatency,
     );
   return capabilities;
 }

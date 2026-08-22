@@ -1082,5 +1082,33 @@ export class CloudflareSourcesMethods {
     return true;
   }
 
-  setJitterBufferConfig() {}
+  setJitterBufferConfig(
+    this: CloudflareSessionLike,
+    {
+      minDelayMs = 0,
+      targetDelayMs = 20,
+    }: {
+      minDelayMs?: number;
+      targetDelayMs?: number;
+    } = {},
+  ) {
+    this.jitterBufferMinimumDelay = minDelayMs >= 0 ? minDelayMs / 1000 : 0;
+    this.jitterBufferTargetDelay = targetDelayMs >= 0 ? targetDelayMs : 20;
+    const minimumDelaySeconds = this.jitterBufferMinimumDelay;
+    for (const entry of this.consumers.values()) {
+      const receiver = entry?.receiver;
+      if (!receiver) continue;
+      try {
+        /* SAFETY: This browser-compatible receiver exposes the optional jitter buffer properties checked below. */
+        const configurableReceiver = receiver as RTCRtpReceiver &
+          Record<string, unknown>;
+        if (configurableReceiver.jitterBufferMinimumDelay != null)
+          configurableReceiver.jitterBufferMinimumDelay = minimumDelaySeconds;
+        if (configurableReceiver.jitterBufferTarget != null)
+          configurableReceiver.jitterBufferTarget =
+            this.jitterBufferTargetDelay;
+      } catch {}
+    }
+    return { ok: true as const };
+  }
 }

@@ -22,6 +22,8 @@ import type {
 import type { MediaCommandResult } from "../../shared/types/boundary.ts";
 import { resolveMediaProviderIdentity } from "../../shared/media-provider-identity.ts";
 import { normalizeParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
+import type { ParticipantMediaCapabilities } from "../../shared/types/video-codec-capabilities.ts";
+import type { AudioLatencyCapabilitiesV1 } from "../../shared/types/audio-latency.ts";
 import {
   parseExternalValue,
   parseThrownError,
@@ -392,6 +394,12 @@ export async function shutdown(engine: NativeMediaEngine) {
   triggerRef(engine.remoteAudioFeedsRef);
 }
 
+type MediaCapabilitiesAnnouncementData = {
+  mediaCapabilities: ParticipantMediaCapabilities;
+  capabilityProtocol: "video-codec-matrix-v1";
+  audioLatency?: AudioLatencyCapabilitiesV1;
+};
+
 export function mergeNativeCapabilities(
   engine: NativeMediaEngine,
   capabilities: NativeCapabilities = {},
@@ -421,12 +429,15 @@ export function mergeNativeCapabilities(
       engine.mediaCapabilities;
   if (engine.nativeP2pSession)
     engine.nativeP2pSession.mediaCapabilities = engine.mediaCapabilities;
+  const capabilityData: MediaCapabilitiesAnnouncementData = {
+    mediaCapabilities: engine.mediaCapabilities,
+    capabilityProtocol: "video-codec-matrix-v1",
+  };
+  if (engine.mediaCapabilities?.audioLatency)
+    capabilityData.audioLatency = engine.mediaCapabilities.audioLatency;
   const capabilityMessage = {
     type: "media-capabilities",
-    data: {
-      mediaCapabilities: engine.mediaCapabilities,
-      capabilityProtocol: "video-codec-matrix-v1",
-    },
+    data: capabilityData,
   };
   engine.nativeSession?.signaling?.send?.(capabilityMessage);
   engine.nativeSession?.providerSignaling?.send?.(capabilityMessage);

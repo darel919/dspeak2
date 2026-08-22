@@ -27,7 +27,6 @@ export interface AdaptiveVideoSettings {
   maxBitrate?: number | null;
   minimumBitrate?: number | null;
   minimumFrameRate?: number;
-  frameRateFirst?: boolean;
   adaptBitrate?: boolean;
 }
 export interface AdaptiveVideoReport {

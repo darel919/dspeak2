@@ -4,6 +4,15 @@ import {
   type ExternalField,
 } from "./types/external.ts";
 import type { MediaPolicyInput, PolicyLimits } from "./types/media.ts";
+import type { AudioLatencyProfile as AudioLatencyProfileValue } from "./types/media.ts";
+
+export const AudioLatencyProfile = Object.freeze({
+  STANDARD: "standard",
+  ULTRA_LOW: "ultra-low",
+} as const);
+
+export const DEFAULT_AUDIO_LATENCY_PROFILE: AudioLatencyProfileValue =
+  AudioLatencyProfile.STANDARD;
 
 const MEDIA_POLICY_KEYS = [
   "microphoneKbps",
@@ -36,6 +45,21 @@ export const VIDEO_POLICY_QUALITY_STEPS = Object.freeze({
     Object.freeze({ label: "Maximum", value: 6000 }),
   ]),
 });
+
+export function normalizeAudioLatencyProfile(
+  value: ExternalField,
+): AudioLatencyProfileValue {
+  if (value === AudioLatencyProfile.ULTRA_LOW)
+    return AudioLatencyProfile.ULTRA_LOW;
+  return DEFAULT_AUDIO_LATENCY_PROFILE;
+}
+
+export function validateAudioLatencyProfile(value: ExternalField): boolean {
+  return (
+    value === AudioLatencyProfile.STANDARD ||
+    value === AudioLatencyProfile.ULTRA_LOW
+  );
+}
 
 export function normalizeMediaPolicy(value: ExternalField = {}) {
   const record = parseExternalRecord(value) ?? {};
@@ -72,6 +96,9 @@ export function normalizeMediaPolicy(value: ExternalField = {}) {
       MEDIA_POLICY_LIMITS.sharedAudioKbps,
     ),
     connectionMode: normalizeConnectionMode(record.connectionMode),
+    audioLatencyProfile: normalizeAudioLatencyProfile(
+      record.audioLatencyProfile,
+    ),
     revision: Math.max(1, Math.floor(Number(record.revision) || 1)),
     updatedAt: record.updatedAt || null,
   };
@@ -82,6 +109,11 @@ export function validateMediaPolicy(value: MediaPolicyInput = {}) {
   const errors: string[] = [];
   if (parseExternalBoolean(record.hdAudio) === null)
     errors.push("hdAudio must be a boolean");
+  if (
+    record.audioLatencyProfile != null &&
+    !validateAudioLatencyProfile(record.audioLatencyProfile)
+  )
+    errors.push("audioLatencyProfile must be either standard or ultra-low");
   for (const key of MEDIA_POLICY_KEYS) {
     const limits: PolicyLimits = MEDIA_POLICY_LIMITS[key];
     const number = Number(record[key]);

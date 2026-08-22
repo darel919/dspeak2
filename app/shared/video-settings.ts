@@ -28,7 +28,7 @@ export function isVideoResolution<T>(
 
 export const VIDEO_FRAME_RATE_MIN = 25;
 export const LOW_SPEC_VIDEO_FRAME_RATE_MIN = 15;
-export const VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN = 24;
+export const VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN = 25;
 export const VIDEO_FRAME_RATE_MAX = 60;
 export const VIDEO_FRAME_RATE_PRESETS = Object.freeze([25, 30, 50, 60]);
 export const SFU_VIDEO_MAX_BITRATE = 4_500_000;
@@ -292,6 +292,10 @@ export function buildP2pVideoSenderOptions(options: VideoSenderOptions = {}) {
       maxBitrate,
       scaleResolutionDownBy: 1,
     })),
+    degradationPreference:
+      options.qualityPriority === "resolution"
+        ? "maintain-resolution"
+        : "maintain-framerate",
   };
 }
 

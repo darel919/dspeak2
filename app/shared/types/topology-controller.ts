@@ -165,6 +165,7 @@ export interface TopologyState {
   canonicalMode?: "idle" | "probing" | "switching" | "p2p" | "sfu";
   activeTransport?: "p2p" | "sfu" | null;
   targetTransport?: "p2p" | "sfu" | null;
+  requestedAudioLatencyProfile?: "standard" | "ultra-low";
   [key: string]: unknown;
 }
 export interface TopologySourceEntry extends Record<string, unknown> {

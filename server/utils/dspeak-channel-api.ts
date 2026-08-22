@@ -13,7 +13,12 @@ import {
   normalizeChannelPolicy,
   normalizeSlowMode,
 } from "../../shared/channel-policy.ts";
-import { validateMediaPolicy } from "../../shared/media-policy.ts";
+import {
+  normalizeMediaPolicy,
+  validateMediaPolicy,
+} from "../../shared/media-policy.ts";
+import { parseExternalRecord } from "../../shared/types/external.ts";
+import { pushMediaPolicy } from "../utils/media-control-admin.ts";
 import type { H3Event } from "h3";
 import type { RoomRole } from "../../shared/types/room.ts";
 import type { ChannelApiDependencies } from "../types/channel-api.ts";
@@ -309,7 +314,14 @@ export function createChannelApiHandler(dependencies: ChannelApiDependencies) {
             statusMessage:
               validation.errors?.join("; ") || "Invalid media policy",
           });
-        update.mediaPolicy = validation.value;
+        const currentPolicy = normalizeMediaPolicy(
+          parseExternalRecord(channel.mediaPolicy) ?? {},
+        );
+        update.mediaPolicy = {
+          ...validation.value,
+          revision: Math.max(1, currentPolicy.revision) + 1,
+          updatedAt: new Date().toISOString(),
+        };
       }
       const result = await db
         .update(channels)
@@ -327,11 +339,23 @@ export function createChannelApiHandler(dependencies: ChannelApiDependencies) {
         type: "channel_updated",
         data: presented,
       });
-      if (update.mediaPolicy)
+      if (update.mediaPolicy) {
         broadcastToChannel(channel.id, {
           type: "channel_policy_updated",
           data: { channelId: channel.id, mediaPolicy: update.mediaPolicy },
         });
+        try {
+          await pushMediaPolicy(
+            String(channel.id),
+            update.mediaPolicy as Record<string, unknown>,
+          );
+        } catch (policyError) {
+          console.error(
+            "[ChannelApi] Media control policy sync failed",
+            policyError,
+          );
+        }
+      }
       return presented;
     }
 

@@ -52,9 +52,12 @@ export type MediaPolicyInput = {
   sharedAudioKbps?: unknown;
   hdAudio?: unknown;
   connectionMode?: unknown;
+  audioLatencyProfile?: unknown;
   revision?: unknown;
   updatedAt?: unknown;
 };
+
+export type AudioLatencyProfile = "standard" | "ultra-low";
 
 export type ConnectionMode = "auto" | "direct";
 export type MediaRouteKind = "local" | "p2p" | "sfu";

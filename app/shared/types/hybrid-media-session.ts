@@ -26,6 +26,8 @@ import type { RemoteMediaEntry } from "./hybrid-media-registry.ts";
 import type { RtcStatsSnapshot } from "./rtc-stats.ts";
 import type { MediaCaptureStartOptions } from "./media-capture.ts";
 import type { RemotePresentationObservationMode } from "../remote-source-convergence.ts";
+import type { WebRtcLatencyProfile } from "./web-rtc-latency.ts";
+import type { WebMediaLatencyTier } from "./web-rtc-latency.ts";
 
 export type HybridSessionDynamicFunction = (
   ...args: unknown[]
@@ -68,6 +70,8 @@ export interface HybridMediaSessionApiContext {
   producers: Ref<unknown>;
   protocolState: Ref<unknown>;
   protocolUpdateRequired: Ref<unknown>;
+  requestedLatencyProfile: Ref<WebRtcLatencyProfile>;
+  webMediaLatencyTier: Ref<WebMediaLatencyTier>;
   remoteAudioFeeds: Ref<Map<string, RemoteMediaEntry>>;
   remoteProducersCount: Ref<unknown>;
   remoteVideoFeeds: Ref<Map<string, RemoteMediaEntry>>;

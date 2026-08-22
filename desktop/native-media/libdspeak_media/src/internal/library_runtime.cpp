@@ -32,6 +32,8 @@
 #include <json.hpp>
 #include "runtime_health.hpp"
 #include "platform_video_codec_factories.hpp"
+#include "audio_codec_factories.hpp"
+#include "audio_quantum.hpp"
 
 #if defined(__APPLE__) || defined(_WIN32)
 #include "PlatformCapture.h"
@@ -133,8 +135,8 @@ std::shared_ptr<SharedTrackFactory> get_shared_track_factory() {
         worker_thread.get(),
         signaling_thread.get(),
         null_adm,
-        webrtc::CreateBuiltinAudioEncoderFactory(),
-        webrtc::CreateBuiltinAudioDecoderFactory(),
+        dspeak_native::create_dspeak_audio_encoder_factory(),
+        dspeak_native::create_dspeak_audio_decoder_factory(),
         create_video_encoder_factory(),
         create_video_decoder_factory(),
         nullptr,
@@ -182,8 +184,8 @@ static bool probe_core_runtime() {
             worker_thread,
             signaling_thread,
             null_adm,
-            webrtc::CreateBuiltinAudioEncoderFactory(),
-            webrtc::CreateBuiltinAudioDecoderFactory(),
+            dspeak_native::create_dspeak_audio_encoder_factory(),
+            dspeak_native::create_dspeak_audio_decoder_factory(),
             nullptr,
             nullptr,
             nullptr,
@@ -507,6 +509,39 @@ extern "C" char* lib_dspeak_media_get_capabilities(void)
     caps["videoCodecDiagnostics"] = codec_diagnostics;
     caps["videoCodecCapabilities"] = codec_diagnostics["capabilities"];
     caps["concurrentEncode"] = codec_diagnostics["concurrentEncode"];
+    caps["audioLatency"] = {
+        {"version", 1},
+        {"nativeAudioEngine", core_ready},
+        {"restrictedLowDelayOpus", false},
+        {"captureQuantaUs", json::array({10000})},
+        {"encodeFrameDurationsUs", json::array({10000})},
+        {"decodeFrameDurationsUs", json::array({10000})},
+        {"renderQuantaUs", json::array({10000})},
+        {"requestedCaptureProfile",
+            dspeak_native::capture_quantum_profile() ==
+                    dspeak_native::AudioQuantumProfile::kUltraLow2_5Ms
+                ? "ultra-low-2_5ms"
+                : dspeak_native::capture_quantum_profile() ==
+                        dspeak_native::AudioQuantumProfile::kUltraLow5Ms
+                    ? "ultra-low-5ms"
+                    : "standard"},
+        {"activeCaptureQuantumFrames",
+            static_cast<uint32_t>(
+                dspeak_native::active_capture_quantum_frames())},
+    };
+    caps["audioCodecDiagnostics"] = {
+        {"codec", "opus"},
+        {"implementation", "libwebrtc-builtin-opus (pinned m140)"},
+        {"opusRevision", "bundled-with-pinned-libwebrtc"},
+        {"frameDurationUs", 10000},
+        {"applicationMode", "voip"},
+        {"fec", true},
+        {"dtx", false},
+        {"complexity", nullptr},
+        {"lookaheadUs", nullptr},
+        {"effectiveProfile", "standard-10ms"},
+        {"factorySource", "dspeak_audio_codec_factories (single canonical Opus)"},
+    };
     caps["health"] = {
         {"nativeRtc", runtime_health_record(core_ready,
             "libwebrtc initialized and peer-connection factory probe passed",

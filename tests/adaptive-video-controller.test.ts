@@ -148,7 +148,6 @@ test("native adaptation lowers bitrate after frame rate and scale limits", () =>
     maxBitrate: 900_000,
     minimumBitrate: 200_000,
     minimumFrameRate: 15,
-    frameRateFirst: true,
     adaptBitrate: true,
   };
   const state = advance(
@@ -164,4 +163,44 @@ test("native adaptation lowers bitrate after frame rate and scale limits", () =>
   assert.equal(state.scale, 2.5);
   assert.equal(state.frameRate, 15);
   assert.equal(state.maxBitrate, 675_000);
+});
+
+test("framerate-priority pressure adapts resolution and never retargets FPS", () => {
+  const settings = {
+    frameRate: 60,
+    qualityPriority: "framerate",
+    minimumFrameRate: 25,
+  };
+  const state = advance(
+    { scale: 2.5, frameRate: 60 },
+    {
+      encodeUtilization: 95,
+      framesPerSecond: 20,
+      qualityLimitationReason: "cpu",
+    },
+    settings,
+    9,
+  );
+  assert.equal(state.frameRate, 60);
+  assert.equal(state.scale, 2.5);
+});
+
+test("resolution priority never targets below the 25 FPS floor", () => {
+  const settings = {
+    frameRate: 25,
+    qualityPriority: "resolution",
+    minimumFrameRate: 25,
+  };
+  const state = advance(
+    { scale: 1, frameRate: 25 },
+    {
+      encodeUtilization: 95,
+      framesPerSecond: 12,
+      qualityLimitationReason: "bandwidth",
+    },
+    settings,
+    9,
+  );
+  assert.equal(state.frameRate, 25);
+  assert.equal(state.scale, 1);
 });

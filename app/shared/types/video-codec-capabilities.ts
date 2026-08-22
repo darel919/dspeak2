@@ -4,6 +4,10 @@ import {
   type ExternalObject,
   type ExternalValue,
 } from "./boundary.ts";
+import {
+  normalizeAudioLatencyCapabilities,
+  type AudioLatencyCapabilitiesV1,
+} from "./audio-latency.ts";
 
 export const VIDEO_CODEC_NAMES = ["H264", "H265", "VP8", "VP9", "AV1"] as const;
 
@@ -74,6 +78,7 @@ export interface ParticipantMediaCapabilities {
   concurrentEncode: ConcurrentEncodeCapability;
   source?: "native-runtime-probe" | "browser-probe" | "fallback";
   probeVersion?: string;
+  audioLatency?: AudioLatencyCapabilitiesV1;
 }
 
 const EFFICIENCY_RANK = {
@@ -369,6 +374,10 @@ export function normalizeParticipantMediaCapabilities<T>(
   };
   if (isExternalString(record.probeVersion))
     result.probeVersion = record.probeVersion;
+  if (isExternalRecord(record.audioLatency))
+    result.audioLatency = normalizeAudioLatencyCapabilities(
+      record.audioLatency,
+    );
   return result;
 }
 

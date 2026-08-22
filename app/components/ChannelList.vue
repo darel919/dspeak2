@@ -917,6 +917,28 @@
                 />
               </label>
 
+              <label
+                class="metro-transition mt-4 flex min-h-16 cursor-pointer items-center justify-between gap-5 border-y border-base-300 py-3"
+              >
+                <span>
+                  <span class="block font-semibold">Audio latency</span>
+                  <small class="mt-1 block text-base-content/65">
+                    Ultra-Low Latency aggressively minimizes delay and prefers
+                    direct peer connections where the network qualifies. It may
+                    use more CPU and network. Clients that cannot support it
+                    fall back to compatibility mode automatically.
+                  </small>
+                </span>
+                <select
+                  v-model="editingChannelPolicy.audioLatencyProfile"
+                  class="metro-select w-44 shrink-0 bg-base-100"
+                  aria-label="Audio latency profile"
+                >
+                  <option value="standard">Standard</option>
+                  <option value="ultra-low">Ultra-Low Latency</option>
+                </select>
+              </label>
+
               <div class="divide-y divide-base-300">
                 <section
                   v-for="field in channelPolicyFields"
@@ -1572,7 +1594,13 @@ async function handleCreateChannel() {
 async function editChannel(channel) {
   editReturnFocus = document.activeElement;
   editingChannel.value = { ...channel };
-  editingChannelPolicy.value = { ...channel.mediaPolicy };
+  editingChannelPolicy.value = {
+    ...channel.mediaPolicy,
+    audioLatencyProfile:
+      channel.mediaPolicy?.audioLatencyProfile === "ultra-low"
+        ? "ultra-low"
+        : "standard",
+  };
   originalEditingChannelPolicy.value = { ...editingChannelPolicy.value };
   editingMessagePolicy.value = normalizeChannelPolicy(channel.policy);
   editingSlowMode.value = normalizeSlowMode(channel.slow_mode);

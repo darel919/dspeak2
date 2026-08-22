@@ -4,6 +4,7 @@
 #include "runtime_health.hpp"
 #include "event_bridge.hpp"
 #include "platform_video_codec_factories.hpp"
+#include "audio_codec_factories.hpp"
 
 #include <cstring>
 #include <cstdlib>
@@ -310,8 +311,8 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
             d->worker_thread,
             d->signaling_thread,
             null_adm,
-            webrtc::CreateBuiltinAudioEncoderFactory(),
-            webrtc::CreateBuiltinAudioDecoderFactory(),
+            dspeak_native::create_dspeak_audio_encoder_factory(),
+            dspeak_native::create_dspeak_audio_decoder_factory(),
             dspeak_native::create_video_encoder_factory(),
             dspeak_native::create_video_decoder_factory(),
             /*audio_mixer=*/nullptr,
