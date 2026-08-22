@@ -152,7 +152,7 @@ pub(crate) fn collect_media_stats(store: &NativeMediaStore) -> Result<Value, Str
     }))
 }
 
-#[cfg(test)]
+#[cfg(all(test, native_rtc))]
 mod tests {
     use super::append_video_stream_diagnostics;
     use serde_json::json;

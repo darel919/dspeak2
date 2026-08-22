@@ -89,10 +89,10 @@ find_native_shim_library() {
   local directory="$1"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
-      find "$directory" -type f \( -name "dspeak_media.lib" -o -name "libdspeak_media.lib" \) -print -quit
+      find "$directory" -type f \( -name "dspeak_media.lib" -o -name "libdspeak_media.lib" \) -print -quit 2>/dev/null || true
       ;;
     *)
-      find "$directory" -type f -name "libdspeak_media.a" -print -quit
+      find "$directory" -type f -name "libdspeak_media.a" -print -quit 2>/dev/null || true
       ;;
   esac
 }

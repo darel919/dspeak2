@@ -196,6 +196,11 @@ fn read_worker_output(
         if let Ok(mut current) = state.lock() {
             *current = disconnected.clone();
         }
+        crate::desktop::activity_log::record_call_activity(
+            &app,
+            "call-worker-crash",
+            error.clone(),
+        );
         let _ = app.emit(MEDIA_EVENT_STATE, &disconnected);
         if connection.claim_fatal_event() {
             let _ = app.emit("media:error", error);

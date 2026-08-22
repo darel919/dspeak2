@@ -38,6 +38,7 @@ const authStore = isMediaPopupWindow ? null : useAuthStore();
 
 if (!isMediaPopupWindow) {
   useDesktopMediaPopouts();
+  useDesktopTray();
   useAppearance();
   useContextualTitle();
   useCallWakeLock();
