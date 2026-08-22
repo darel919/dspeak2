@@ -1,6 +1,6 @@
 import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 import {
-  isDesktopApiRequest,
+  requiresNativeTransport,
   withDesktopAuthorization,
 } from "../shared/desktop-api-fetch.ts";
 import {
@@ -146,7 +146,12 @@ export default defineNuxtPlugin(() => {
     const method = String(
       init.method || request?.method || "GET",
     ).toUpperCase();
-    const desktop = isDesktopApiRequest(desktopRuntime, url, apiTarget);
+    const desktop = requiresNativeTransport(
+      desktopRuntime,
+      url,
+      apiTarget,
+      window.location.origin,
+    );
     let options: RequestInit = { ...init };
     const configuredApiRequest = isConfiguredApiRequest(url, apiTarget);
 

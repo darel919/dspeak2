@@ -11,6 +11,17 @@ export function isDesktopApiRequest(
   return isTauri && isConfiguredApiRequest(url, target);
 }
 
+export function requiresNativeTransport(
+  isTauri: boolean,
+  url: URL,
+  target: ApiRequestTarget | null,
+  webviewOrigin: string,
+): boolean {
+  if (!isTauri) return false;
+  if (url.origin === webviewOrigin) return false;
+  return isConfiguredApiRequest(url, target);
+}
+
 export function withDesktopAuthorization(
   input: RequestInfo | URL,
   options: RequestInit,
