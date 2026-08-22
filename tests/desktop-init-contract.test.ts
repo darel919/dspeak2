@@ -113,7 +113,7 @@ describe("desktop initialization contract", () => {
     assert.match(windowModule, /fn desktop_ready/);
     assert.match(
       windowModule,
-      /close_startup_window\(&app\);\s*\n\s*show_main_window\(&app\)/,
+      /reveal_main_window\(&app\)\?;\s*\n\s*close_startup_window\(&app\)/,
     );
     assert.match(
       await read("desktop/public/desktop-startup.html"),

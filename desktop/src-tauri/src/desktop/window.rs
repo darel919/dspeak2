@@ -82,8 +82,9 @@ pub fn desktop_close_devtools(window: WebviewWindow) {
 
 #[tauri::command]
 pub fn desktop_ready(app: tauri::AppHandle) -> Result<(), String> {
+    reveal_main_window(&app)?;
     close_startup_window(&app);
-    show_main_window(&app)
+    Ok(())
 }
 
 pub(crate) fn load_preferences(app: &tauri::AppHandle) {
@@ -153,6 +154,8 @@ fn save_window_state_sync(window: &tauri::WebviewWindow) -> Result<(), String> {
 }
 
 /// Create or reuse the compact `init` startup window. Never runs Nuxt.
+/// The splash is not user-closable; only `desktop_ready` tears it down
+/// through `close_startup_window`.
 pub(crate) fn open_startup_window(
     app: &tauri::AppHandle,
 ) -> Result<WebviewWindow, String> {
@@ -160,7 +163,7 @@ pub(crate) fn open_startup_window(
         return Ok(window);
     }
 
-    tauri::WebviewWindowBuilder::new(
+    let window = tauri::WebviewWindowBuilder::new(
         app,
         STARTUP_WINDOW_LABEL,
         WebviewUrl::App("desktop-startup.html".into()),
@@ -170,17 +173,26 @@ pub(crate) fn open_startup_window(
     .resizable(false)
     .maximizable(false)
     .minimizable(false)
-    .decorations(true)
+    .closable(false)
+    .decorations(false)
     .center()
     .visible(true)
     .build()
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    window.on_window_event(|event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+        }
+    });
+    Ok(window)
 }
 
-/// Close the `init` startup window if present. Missing is success.
+/// Tear down the `init` startup window if present. Missing is success.
+/// Uses `destroy` because `close` emits `CloseRequested`, which the splash
+/// always prevents.
 pub(crate) fn close_startup_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(STARTUP_WINDOW_LABEL) {
-        let _ = window.close();
+        let _ = window.destroy();
     }
 }
 
@@ -209,16 +221,25 @@ pub(crate) fn ensure_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Reveal `main`. Refuses while the `init` splash exists; `desktop_ready` owns
-/// the handoff.
+/// Reveal `main`. Refuses while the `init` splash exists; `desktop_ready`
+/// owns the handoff through `reveal_main_window`.
 pub(crate) fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     ensure_main_window(app)?;
     if app.get_webview_window(STARTUP_WINDOW_LABEL).is_some() {
         return Ok(());
     }
+    reveal_main_window(app)
+}
+
+/// Show and focus `main`, restoring it first when minimized. Independent of
+/// splash teardown timing so the reveal cannot be lost to a pending close.
+fn reveal_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
         return Err("main window is unavailable".to_string());
     };
+    if window.is_minimized().map_err(|error| error.to_string())? {
+        window.unminimize().map_err(|error| error.to_string())?;
+    }
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
     Ok(())

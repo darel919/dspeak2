@@ -146,7 +146,7 @@ test("desktop keeps main hidden until desktop_ready closes the init window", asy
   assert.match(windowSource, /fn desktop_ready/);
   assert.match(
     windowSource,
-    /close_startup_window\(&app\);\s*\n\s*show_main_window\(&app\)/,
+    /reveal_main_window\(&app\)\?;\s*\n\s*close_startup_window\(&app\)/,
   );
 });
 
