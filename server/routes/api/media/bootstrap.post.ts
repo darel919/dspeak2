@@ -14,6 +14,7 @@ import {
   parseExternalRecord,
   parseExternalString,
 } from "../../../../shared/types/external.ts";
+import { pushMediaPolicy } from "../../../utils/media-control-admin.ts";
 
 let privateKeyCache: MediaSigningKey | null = null;
 
@@ -78,6 +79,7 @@ export default defineEventHandler(async (event) => {
 
   const mediaControlUrl =
     process.env.CF_MEDIA_CONTROL_URL || "https://media-control.example.com";
+  await pushMediaPolicy(validatedChannelId, channel.mediaPolicy);
   const websocketUrl = new URL(mediaControlUrl);
   websocketUrl.searchParams.set("channelId", validatedChannelId);
   if (websocketUrl.protocol === "http:") websocketUrl.protocol = "ws:";

@@ -377,6 +377,59 @@ try {
   const restoredAfter = await second.evaluate(() => window.mediaState());
   assert.equal(restoredAfter.failures.length, 0);
   assert.equal(restoredAfter.signalErrors.length, 0);
+
+  const ultraLowContext = await first.evaluate(() =>
+    window.webRtcLatencyTestHooks.tuningContext("ultra-low"),
+  );
+  const receiverResults = [];
+  const senderResults = [];
+  for (const page of pages) {
+    const receivers = await page.evaluate(() =>
+      [...window.mesh.connections.values()].flatMap((state) => [
+        ...state.pc.getReceivers(),
+      ]),
+    );
+    for (const _ of receivers) {
+      const result = await page.evaluate(async (context) => {
+        const receiver = [...window.mesh.connections.values()].flatMap(
+          (state) => state.pc.getReceivers(),
+        )[0];
+        return window.webRtcLatencyTestHooks.applyReceiverPolicy(
+          receiver,
+          context,
+        );
+      }, ultraLowContext);
+      receiverResults.push(result);
+    }
+    const senders = await page.evaluate(() =>
+      [...window.mesh.connections.values()].flatMap((state) => [
+        ...state.pc.getSenders(),
+      ]),
+    );
+    for (const _ of senders) {
+      const result = await page.evaluate(async (context) => {
+        const sender = [...window.mesh.connections.values()].flatMap((state) =>
+          state.pc.getSenders(),
+        )[0];
+        return window.webRtcLatencyTestHooks.applySenderPolicy(sender, context);
+      }, ultraLowContext);
+      senderResults.push(result);
+    }
+  }
+  const latencyEvents = await first.evaluate(() =>
+    window.webRtcLatencyTestHooks.latencyEvents(),
+  );
+  console.log(
+    JSON.stringify({
+      latencyStage: {
+        receiverResults,
+        senderResults,
+        eventKinds: latencyEvents.map((event) => event.kind),
+      },
+    }),
+  );
+  assert.ok(receiverResults.length > 0);
+  assert.ok(senderResults.length > 0);
   console.log(
     JSON.stringify({
       status: "passed",

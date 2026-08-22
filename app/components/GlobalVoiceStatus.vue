@@ -50,6 +50,19 @@
         ><strong>{{ lastPing }}</strong>
         <span class="text-base-content/55">Packet loss</span
         ><strong>{{ packetLoss }}</strong>
+        <span
+          class="text-base-content/55"
+          title="Requested audio latency profile for this channel"
+          >Latency requested</span
+        ><strong>{{ latencyProfileLabel }}</strong>
+        <span
+          class="text-base-content/55"
+          title="Effective media latency level after browser WebRTC tuning"
+          >Latency effective</span
+        ><strong :class="{ 'text-warning': warningActive }">
+          {{ effectiveLevelLabel
+          }}<template v-if="warningActive"> · high RTT</template>
+        </strong>
       </div>
 
       <p class="mt-3 text-xs leading-relaxed text-base-content/55">
@@ -80,6 +93,7 @@ import { useVoiceStore } from "~/stores/voice";
 import { useChannelsStore } from "~/stores/channels";
 import { useRtcStatsStore } from "~/stores/rtc-stats";
 import { getActiveConnectionLabel } from "~/shared/connection-quality";
+import { useWebLatencyStatus } from "~/composables/useWebLatencyStatus";
 
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
@@ -87,6 +101,19 @@ const rtcStats = useRtcStatsStore();
 const router = useRouter();
 const route = useRoute();
 const visible = useState("rtc-summary-visible", () => false);
+const { requestedProfile, tier, effectiveLevel, warningActive } =
+  useWebLatencyStatus(() => voiceStore.sfuComposable, rtcStats);
+
+const latencyProfileLabel = computed(() =>
+  requestedProfile.value === "ultra-low" ? "Ultra low" : "Standard",
+);
+const effectiveLevelLabel = computed(() =>
+  tier.value === "latency-tuned-webrtc"
+    ? effectiveLevel.value === "inactive"
+      ? "Tuned (idle)"
+      : "Ultra-low tuned"
+    : "Compatibility",
+);
 
 const channelName = computed(
   () =>

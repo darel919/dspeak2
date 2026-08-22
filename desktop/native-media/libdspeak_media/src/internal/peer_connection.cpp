@@ -3,6 +3,7 @@
 #include "media_handles.hpp"
 #include "runtime_health.hpp"
 #include "platform_video_codec_factories.hpp"
+#include "audio_codec_factories.hpp"
 
 #include <cstring>
 #include <cstdlib>
@@ -491,8 +492,8 @@ extern "C" lib_dspeak_media_p2p_handle_t* lib_dspeak_media_p2p_create(
             h->worker_thread,
             h->signaling_thread,
             /*default_adm=*/null_adm,
-            /*audio_encoder_factory=*/webrtc::CreateBuiltinAudioEncoderFactory(),
-            /*audio_decoder_factory=*/webrtc::CreateBuiltinAudioDecoderFactory(),
+            /*audio_encoder_factory=*/dspeak_native::create_dspeak_audio_encoder_factory(),
+            /*audio_decoder_factory=*/dspeak_native::create_dspeak_audio_decoder_factory(),
             dspeak_native::create_video_encoder_factory(),
             dspeak_native::create_video_decoder_factory(),
             /*audio_mixer=*/nullptr,

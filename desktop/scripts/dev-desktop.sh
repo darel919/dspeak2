@@ -152,6 +152,21 @@ if [[ -n "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]]; then
 fi
 NATIVE_MEDIA_WORKER_BUILD=1 cargo "${WORKER_CARGO_ARGS[@]}"
 
+WORKER_TARGET_TRIPLE="${NATIVE_MEDIA_TARGET_TRIPLE:-$(rustc -vV | awk '/^host: /{print $2}' | tr -d '\r')}"
+WORKER_EXTENSION=""
+case "$WORKER_TARGET_TRIPLE" in
+  *windows*) WORKER_EXTENSION=".exe" ;;
+esac
+WORKER_SIDECAR_DIR="$ROOT_DIR/src-tauri/binaries"
+WORKER_SIDECAR="$WORKER_SIDECAR_DIR/dspeak-media-$WORKER_TARGET_TRIPLE$WORKER_EXTENSION"
+WORKER_BUILD_DIR="$ROOT_DIR/src-tauri/target"
+if [[ -n "${NATIVE_MEDIA_TARGET_TRIPLE:-}" ]]; then
+  WORKER_BUILD_DIR="$WORKER_BUILD_DIR/$NATIVE_MEDIA_TARGET_TRIPLE"
+fi
+WORKER_BUILD_DIR="$WORKER_BUILD_DIR/debug"
+mkdir -p "$WORKER_SIDECAR_DIR"
+cp "$WORKER_BUILD_DIR/dspeak-media$WORKER_EXTENSION" "$WORKER_SIDECAR"
+
 node "$PROJECT_ROOT/scripts/generate-tauri-capabilities.mjs"
 cd "$ROOT_DIR"
 exec npx tauri dev "$@"

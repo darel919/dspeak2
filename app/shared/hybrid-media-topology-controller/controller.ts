@@ -548,6 +548,12 @@ export function createHybridMediaTopologyController({
         : null,
       peers: Array.isArray(data.peers) ? data.peers : [],
       activatedAt: data.activatedAt || Date.now(),
+      mediaPolicy: isExternalRecord(data.mediaPolicy) ? data.mediaPolicy : null,
+      requestedAudioLatencyProfile:
+        data.audioLatencyProfile === "ultra-low" ||
+        data.audioLatencyProfile === "standard"
+          ? data.audioLatencyProfile
+          : "standard",
       displayMode:
         data.mode === "probing" && previousProvider ? "switching" : null,
     };
@@ -953,8 +959,17 @@ export function createHybridMediaTopologyController({
     reportedSfuFailureState.value = null;
   }
 
+  function activeJitterObjective(): "standard" | "ultra-low" {
+    const policy = topologyState.value.mediaPolicy;
+    return isExternalRecord(policy) &&
+      policy.audioLatencyProfile === "ultra-low"
+      ? "ultra-low"
+      : "standard";
+  }
+
   function applyAdaptiveJitterBuffer() {
     const provider = getActiveProvider();
+    const objective = activeJitterObjective();
     if (provider === "p2p" && getP2pMesh()) {
       const values = Object.values(peerConnectionMetrics.value).filter(
         (metric): metric is Record<string, unknown> =>
@@ -973,28 +988,36 @@ export function createHybridMediaTopologyController({
         0,
       );
       const mesh = getP2pMesh();
-      const raw = computeJitterBufferConfig({
-        jitterMs,
-        rttMs,
-        lossPercent,
-      });
+      const raw = computeJitterBufferConfig(
+        {
+          jitterMs,
+          rttMs,
+          lossPercent,
+        },
+        objective,
+      );
       if (raw) {
         const smoothed = smoothJitterBufferConfig(
           currentJitterBufferConfig.value,
           raw,
+          objective,
         );
         currentJitterBufferConfig.value = smoothed;
         mesh?.setJitterBufferConfig(smoothed);
       }
     } else if (provider === "sfu" && getSfu()) {
       const sfu = getSfu();
-      const raw = computeSfuJitterBufferConfig({
-        rttMs: sfuRoundTripTime.value,
-      });
+      const raw = computeSfuJitterBufferConfig(
+        {
+          rttMs: sfuRoundTripTime.value,
+        },
+        objective,
+      );
       if (raw) {
         const smoothed = smoothJitterBufferConfig(
           currentJitterBufferConfig.value,
           raw,
+          objective,
         );
         currentJitterBufferConfig.value = smoothed;
         sfu?.setJitterBufferConfig(smoothed);

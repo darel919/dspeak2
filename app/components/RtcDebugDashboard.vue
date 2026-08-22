@@ -83,6 +83,73 @@
           </article>
         </section>
 
+        <section v-if="section === 'latency'" class="rtc-panel">
+          <div class="rtc-panel-heading">
+            <div>
+              <h2>Web latency tuning</h2>
+              <p>Requested vs effective profile and live capability</p>
+            </div>
+            <span :class="['rtc-health', warningActive ? 'fair' : 'good']">{{
+              warningActive ? "High RTT" : "Nominal"
+            }}</span>
+          </div>
+          <div class="rtc-metric-table">
+            <div class="rtc-metric-row">
+              <span>Requested profile</span
+              ><strong>{{
+                requestedProfile === "ultra-low" ? "Ultra low" : "Standard"
+              }}</strong>
+            </div>
+            <div class="rtc-metric-row">
+              <span>Effective tier</span
+              ><strong>{{
+                latencyTier === "latency-tuned-webrtc"
+                  ? "Latency-tuned WebRTC"
+                  : "Standard WebRTC"
+              }}</strong>
+            </div>
+            <div class="rtc-metric-row">
+              <span>Effective level</span><strong>{{ effectiveLevel }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section v-if="section === 'latency'" class="rtc-panel">
+          <div class="rtc-panel-heading">
+            <div>
+              <h2>Capability report</h2>
+              <p>Browser environment probe for latency controls</p>
+            </div>
+          </div>
+          <div class="rtc-metric-table">
+            <div
+              v-for="[label, state] in capabilityRows"
+              :key="label"
+              class="rtc-metric-row"
+            >
+              <span>{{ label }}</span
+              ><strong>{{ state }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section
+          v-if="section === 'latency' && recentLatencyEvents.length"
+          class="rtc-panel"
+        >
+          <div class="rtc-panel-heading">
+            <div>
+              <h2>Recent tuning events</h2>
+              <p>Receiver and sender policy outcomes this session</p>
+            </div>
+          </div>
+          <ul class="rtc-event-list">
+            <li v-for="(event, index) in recentLatencyEvents" :key="index">
+              {{ event.kind }}
+            </li>
+          </ul>
+        </section>
+
         <section v-if="section === 'overview'" class="rtc-panel">
           <div class="rtc-panel-heading">
             <div>
@@ -534,6 +601,7 @@ import { storeToRefs } from "pinia";
 import { getActiveConnectionLabel } from "~/shared/connection-quality";
 import { copyTextToClipboard } from "~/shared/copy-to-clipboard";
 import { formatTopologyReason } from "~/shared/rtc-topology";
+import { useRtcLatencyDebugPanel } from "~/composables/useRtcLatencyDebugPanel";
 
 const voiceStore = useVoiceStore();
 const channelsStore = useChannelsStore();
@@ -541,12 +609,21 @@ const rtcStats = useRtcStatsStore();
 const { snapshot, outbound, inbound, polling, lastError, history, metrics } =
   storeToRefs(rtcStats);
 const section = ref("overview");
+const {
+  requestedProfile,
+  latencyTier,
+  effectiveLevel,
+  warningActive,
+  capabilityRows,
+  recentLatencyEvents,
+} = useRtcLatencyDebugPanel(section);
 const copied = ref(false);
 const copyError = ref("");
 let copiedTimer = null;
 
 const navigation = [
   { id: "overview", label: "Overview", icon: "lucide:layout-dashboard" },
+  { id: "latency", label: "Latency", icon: "lucide:zap" },
   { id: "transport", label: "Transport", icon: "lucide:network" },
   { id: "outbound", label: "Outbound", icon: "lucide:arrow-up-right" },
   { id: "inbound", label: "Inbound", icon: "lucide:arrow-down-left" },
@@ -620,6 +697,15 @@ const summaryMetrics = computed(() => [
     value: String(outbound.value.length + inbound.value.length),
     hint: `${outbound.value.length} out · ${inbound.value.length} in`,
     icon: "lucide:radio",
+  },
+  {
+    label: "Latency tier",
+    value: latencyTier.value === "latency-tuned-webrtc" ? "Tuned" : "Standard",
+    hint:
+      requestedProfile.value === "ultra-low"
+        ? "Ultra-low requested"
+        : "Standard requested",
+    icon: "lucide:zap",
   },
 ]);
 

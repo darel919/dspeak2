@@ -7,6 +7,7 @@ import {
 } from "../app/shared/api-request-target.ts";
 import {
   isDesktopApiRequest,
+  requiresNativeTransport,
   withDesktopAuthorization,
 } from "../app/shared/desktop-api-fetch.ts";
 import { buildPublicUrl } from "../app/shared/desktop-external-url.ts";
@@ -71,10 +72,8 @@ describe("desktop first-run URL and transport boundaries", () => {
       securityFetch,
       /const transport = desktop \? await getDesktopHttpFetch\(\) : browserFetch/,
     );
-    assert.match(
-      securityFetch,
-      /isDesktopApiRequest\(desktopRuntime, url, apiTarget\)/,
-    );
+    assert.match(securityFetch, /requiresNativeTransport\(/);
+    assert.match(securityFetch, /window\.location\.origin/);
   });
 
   it("scopes native presigned uploads to the configured R2 account", async () => {
@@ -87,6 +86,49 @@ describe("desktop first-run URL and transport boundaries", () => {
     assert.match(generator, /CF_R2_ACCOUNT_ID/);
     assert.match(generator, /r2\.cloudflarestorage\.com/);
     assert.match(generator, /\$\{r2Origin\}\/\*\*/);
+  });
+
+  it("uses the WebView fetch for same-origin API requests to avoid the native round-trip", () => {
+    const devTarget = resolveApiRequestTarget("/api", "http://localhost:3000");
+    const devApiRequest = new URL("http://localhost:3000/api/rooms");
+
+    assert.equal(
+      requiresNativeTransport(
+        true,
+        devApiRequest,
+        devTarget,
+        "http://localhost:3000",
+      ),
+      false,
+    );
+  });
+
+  it("keeps the native transport for cross-origin production API requests", () => {
+    const prodTarget = resolveApiRequestTarget(
+      "https://dspeak.darelisme.my.id/api",
+      "tauri://localhost",
+    );
+    const prodApiRequest = new URL("https://dspeak.darelisme.my.id/api/rooms");
+    const sameOriginRequest = new URL("tauri://localhost/api/rooms");
+
+    assert.equal(
+      requiresNativeTransport(
+        true,
+        prodApiRequest,
+        prodTarget,
+        "tauri://localhost",
+      ),
+      true,
+    );
+    assert.equal(
+      requiresNativeTransport(
+        true,
+        sameOriginRequest,
+        prodTarget,
+        "tauri://localhost",
+      ),
+      false,
+    );
   });
 
   it("attaches the Supabase bearer to native API requests", () => {

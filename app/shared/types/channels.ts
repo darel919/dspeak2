@@ -3,6 +3,7 @@ export interface ChannelMediaPolicy {
   sharedAudioKbps?: number | string | null;
   microphoneKbps?: number | string | null;
   hdAudio?: boolean;
+  audioLatencyProfile?: "standard" | "ultra-low";
   [key: string]: unknown;
 }
 

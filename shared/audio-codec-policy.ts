@@ -180,3 +180,24 @@ export function getCaptureConstraints(
 
   return constraints;
 }
+
+export interface MicrophoneProcessingSettings {
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+}
+
+export function resolveMicrophoneProcessingConstraints(
+  settings: MicrophoneProcessingSettings | null | undefined,
+): Required<MicrophoneProcessingSettings> {
+  const defaults: MicrophoneProcessingSettings =
+    getCaptureConstraints("microphone").audio ?? {};
+  return {
+    echoCancellation:
+      settings?.echoCancellation ?? defaults.echoCancellation === true,
+    noiseSuppression:
+      settings?.noiseSuppression ?? defaults.noiseSuppression === true,
+    autoGainControl:
+      settings?.autoGainControl ?? defaults.autoGainControl === true,
+  };
+}

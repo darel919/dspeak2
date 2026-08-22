@@ -14,6 +14,7 @@ test("missing media policy fields receive current defaults", () => {
     screenKbps: 4000,
     sharedAudioKbps: 128,
     connectionMode: "auto",
+    audioLatencyProfile: "standard",
     revision: 1,
     updatedAt: null,
   });

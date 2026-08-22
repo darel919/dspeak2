@@ -6,8 +6,8 @@ import {
   waitForVoiceTransportReady,
 } from "../app/shared/voice-join-readiness.ts";
 
-test("voice joins use a ten-second connection deadline", () => {
-  assert.equal(VOICE_JOIN_TIMEOUT_MS, 10_000);
+test("voice joins use a twenty-second connection deadline", () => {
+  assert.equal(VOICE_JOIN_TIMEOUT_MS, 20_000);
 });
 
 function createClock() {

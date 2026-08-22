@@ -38,6 +38,8 @@ export function createHybridMediaSessionApi({
   consumers: consumerState,
   protocolState,
   protocolUpdateRequired,
+  requestedLatencyProfile,
+  webMediaLatencyTier,
   remoteAudioFeeds,
   remoteProducersCount,
   remoteVideoFeeds,
@@ -103,6 +105,8 @@ export function createHybridMediaSessionApi({
     topologyState: readonly(topologyState),
     topologyGraph: readonly(topologyGraph),
     activeProvider: readonly(activeProviderState),
+    requestedLatencyProfile: readonly(requestedLatencyProfile),
+    webMediaLatencyTier: readonly(webMediaLatencyTier),
     lastSentClientRtpCapabilities: computed(() =>
       lastSentClientRtpCapabilities(),
     ),

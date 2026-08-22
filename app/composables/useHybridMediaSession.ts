@@ -109,6 +109,7 @@ import type {
   TopologyState,
 } from "~/shared/types/topology-controller.ts";
 import type { VideoSettings } from "~/shared/types/video-settings.ts";
+import type { WebRtcLatencyProfile } from "~/shared/types/web-rtc-latency.ts";
 import type { ParticipantMediaCapabilities } from "~/shared/types/video-codec-capabilities.ts";
 import {
   normalizeReceiverStats,
@@ -118,6 +119,8 @@ import {
   roomAttenuation,
   TopologyMediasoupProviderSocket,
   videoPolicy,
+  audioLatencyPolicy,
+  deriveWebMediaLatencyTier,
   type MediaMessageHandler,
 } from "~/shared/hybrid-media-session-boundaries.ts";
 import { isExternalRecord, isExternalString } from "~/shared/types/boundary.ts";
@@ -356,6 +359,16 @@ export function useHybridMediaSession() {
     settingsStore,
     voiceStore,
   });
+  function activeLatencyProfile(): WebRtcLatencyProfile {
+    return (
+      audioLatencyPolicy(
+        parseExternalValue(
+          channelsStore.getChannelById(voiceStore.currentChannelId)
+            ?.mediaPolicy,
+        ),
+      ) ?? "standard"
+    );
+  }
   const sessionOperations = createHybridMediaSessionOperations({
     getSignaling: () => signaling,
     getTopologyController: () => topologyController,
@@ -529,12 +542,17 @@ export function useHybridMediaSession() {
   const handoff = new RemoteMediaHandoff(registry);
   function setActiveProvider(provider: "sfu" | "p2p" | null) {
     if (provider !== activeProvider) {
+      const profile = activeLatencyProfile();
+      const resetConfig =
+        profile === "ultra-low"
+          ? { minDelayMs: 0, targetDelayMs: 10 }
+          : { minDelayMs: 0, targetDelayMs: 20 };
       if (activeProvider === "sfu" && sfu) {
-        sfu.setJitterBufferConfig({ minDelayMs: 0, targetDelayMs: 20 });
+        sfu.setJitterBufferConfig(resetConfig);
       } else if (activeProvider === "p2p" && p2pMesh) {
-        p2pMesh.setJitterBufferConfig({ minDelayMs: 0, targetDelayMs: 20 });
+        p2pMesh.setJitterBufferConfig(resetConfig);
       }
-      currentJitterBufferConfig.value = { minDelayMs: 0, targetDelayMs: 20 };
+      currentJitterBufferConfig.value = resetConfig;
     }
     activeProvider = provider;
     activeProviderState.value = provider;
@@ -629,6 +647,21 @@ export function useHybridMediaSession() {
     { immediate: true },
   );
   registerEchoWarning(echoDetected);
+  watch(
+    () => activeLatencyProfile(),
+    () => {
+      if (!connected.value) return;
+      const profile = activeLatencyProfile();
+      const resetConfig =
+        profile === "ultra-low"
+          ? { minDelayMs: 0, targetDelayMs: 10 }
+          : { minDelayMs: 0, targetDelayMs: 20 };
+      currentJitterBufferConfig.value = resetConfig;
+      sfu?.setJitterBufferConfig(resetConfig);
+      p2pMesh?.setJitterBufferConfig(resetConfig);
+      topologyController?.applyAdaptiveJitterBuffer();
+    },
+  );
   watch(
     () =>
       isExternalRecord(
@@ -1207,8 +1240,30 @@ export function useHybridMediaSession() {
     },
     { deep: true, immediate: false },
   );
+  const requestedLatencyProfile = ref<WebRtcLatencyProfile>("standard");
+  watch(
+    () => activeLatencyProfile(),
+    (profile) => {
+      requestedLatencyProfile.value = profile;
+    },
+    { immediate: true },
+  );
+  const webMediaLatencyTier = computed(() =>
+    deriveWebMediaLatencyTier({
+      receiverTuningApplied: requestedLatencyProfile.value === "ultra-low",
+      receiverTargetObserved:
+        currentJitterBufferConfig.value.targetDelayMs <= 10 ? 10 : null,
+      senderPolicyVerified: false,
+      observedTargetDelayLowered:
+        currentJitterBufferConfig.value.minDelayMs > 0 &&
+        currentJitterBufferConfig.value.targetDelayMs <
+          currentJitterBufferConfig.value.minDelayMs + 40,
+    }),
+  );
   return createHybridMediaSessionApi({
     activeProviderState,
+    requestedLatencyProfile,
+    webMediaLatencyTier,
     areTransportsIceConnected: () => Promise.resolve(iceConnectedBoth.value),
     connect,
     connected,

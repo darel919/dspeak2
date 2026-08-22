@@ -2,6 +2,7 @@
 #include "capture_state.hpp"
 #include "media_handles.hpp"
 #include "runtime_health.hpp"
+#include "audio_quantum.hpp"
 
 #include <algorithm>
 #include <array>
@@ -159,8 +160,9 @@ void on_audio_frame(void* user_data,
         }
     }
 
-    constexpr size_t frames_per_webrtc_audio_frame = 480;
-    std::array<float, frames_per_webrtc_audio_frame * 2> chunk{};
+    const size_t frames_per_webrtc_audio_frame =
+        dspeak_native::active_capture_quantum_frames();
+    std::array<float, 480 * 2> chunk{};
     const int64_t timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     size_t emitted_frames = 0;

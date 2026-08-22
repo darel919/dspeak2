@@ -3,6 +3,7 @@ import type { RemoteReceiverStats } from "./remote-source-convergence.ts";
 import type { CloudflarePublication } from "./types/cloudflare-media.ts";
 import type { MediaMessage } from "./types/media-message-handlers.ts";
 import type { VideoPolicy } from "./types/video-settings.ts";
+import type { WebRtcLatencyProfile } from "./types/web-rtc-latency.ts";
 import {
   isExternalRecord,
   isExternalString,
@@ -112,6 +113,19 @@ export function videoPolicy(value: ExternalValue): VideoPolicy | null {
     screenKbps: parseExternalNumber(parseExternalValue(value.screenKbps)),
   };
 }
+
+export function audioLatencyPolicy(
+  value: ExternalValue,
+): WebRtcLatencyProfile | null {
+  if (!isExternalRecord(value)) return null;
+  return value.audioLatencyProfile === "ultra-low"
+    ? "ultra-low"
+    : value.audioLatencyProfile === "standard"
+      ? "standard"
+      : null;
+}
+
+export { deriveWebMediaLatencyTier } from "./web-rtc-latency-status.ts";
 
 export function parseCloudflarePublication(
   value: ExternalValue,

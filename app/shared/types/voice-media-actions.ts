@@ -61,6 +61,12 @@ export interface VoiceProducerLike {
 
 export interface VoiceMediaSessionLike {
   activeProvider?: Ref<string | null> | string | null;
+  requestedLatencyProfile?:
+    Ref<"standard" | "ultra-low"> | "standard" | "ultra-low";
+  webMediaLatencyTier?:
+    | Ref<"standard-webrtc" | "latency-tuned-webrtc">
+    | "standard-webrtc"
+    | "latency-tuned-webrtc";
   error?: Ref<string | null> | string | null;
   joinReady?: Ref<boolean> | boolean;
   localVideoFeeds?: VoiceMediaFeedState;

@@ -35,7 +35,6 @@ export function updateAdaptiveVideoState(
     1,
     Number(settings.minimumFrameRate) || VIDEO_FRAME_RATE_MIN,
   );
-  const frameRateFirst = settings.frameRateFirst === true;
   const currentScale = state?.scale;
   const scale =
     currentScale !== undefined && VIDEO_SCALE_STEPS.includes(currentScale)
@@ -79,19 +78,11 @@ export function updateAdaptiveVideoState(
   let nextBitrate = bitrate;
 
   if (pressureSamples >= 3) {
-    if (priority === "resolution" || frameRateFirst) {
+    if (priority === "resolution") {
       const lowerRates = ADAPTIVE_FRAME_RATES.filter(
         (candidate) => candidate < frameRate && candidate >= minimumFrameRate,
       );
       if (lowerRates.length > 0) nextFrameRate = lowerRates.at(-1) || frameRate;
-      else if (frameRateFirst)
-        nextScale =
-          VIDEO_SCALE_STEPS[
-            Math.min(
-              VIDEO_SCALE_STEPS.length - 1,
-              VIDEO_SCALE_STEPS.indexOf(scale) + 1,
-            )
-          ] ?? scale;
     } else {
       nextScale =
         VIDEO_SCALE_STEPS[
@@ -110,16 +101,11 @@ export function updateAdaptiveVideoState(
     )
       nextBitrate = Math.max(minimumBitrate, Math.floor(bitrate * 0.75));
   } else if (healthySamples >= 6) {
-    if (priority === "resolution" || frameRateFirst) {
+    if (priority === "resolution") {
       const higherRates = ADAPTIVE_FRAME_RATES.filter(
         (candidate) => candidate > frameRate && candidate <= targetFrameRate,
       );
       if (higherRates.length > 0) nextFrameRate = higherRates[0] || frameRate;
-      else if (frameRateFirst)
-        nextScale =
-          VIDEO_SCALE_STEPS[
-            Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)
-          ] ?? scale;
     } else {
       nextScale =
         VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)] ??

@@ -2,6 +2,7 @@ import type { DesktopCaptureSelection } from "../desktop-capture.ts";
 import type { ExternalObject } from "./boundary.ts";
 import type { VideoSettingsInput } from "../types/video-settings.ts";
 import type { TopologySourceEntry } from "./topology-controller.ts";
+import type { MicrophoneProcessingSettings } from "../../../shared/audio-codec-policy.ts";
 
 export interface MediaCaptureSettings {
   audio?: MediaTrackConstraints;
@@ -9,6 +10,7 @@ export interface MediaCaptureSettings {
   cameraDeviceId?: string | null;
   cameraVideo?: VideoSettingsInput;
   screenVideo?: VideoSettingsInput;
+  processing?: MicrophoneProcessingSettings | null;
 }
 
 export interface MediaCapturePublication {

@@ -81,7 +81,6 @@ function videoSettingsForAdaptation(
     minimumBitrate:
       settings.lowSpec === true ? (isScreen ? 300_000 : 200_000) : 500_000,
     minimumFrameRate: settings.lowSpec === true ? 15 : 25,
-    frameRateFirst: true,
     adaptBitrate: true,
   };
   if (Number.isFinite(maxBitrate) && maxBitrate > 0)

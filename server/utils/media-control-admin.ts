@@ -64,6 +64,30 @@ export async function moderateVoiceParticipant(
   return parseExternalNumber(result?.affected) || 0;
 }
 
+export async function pushMediaPolicy(
+  channelId: string,
+  mediaPolicy: ExternalField,
+): Promise<boolean> {
+  const record = parseExternalRecord(mediaPolicy);
+  if (!record) return false;
+  try {
+    const result = parseExternalRecord(
+      await request(channelId, "media-policy", {
+        method: "POST",
+        body: JSON.stringify({
+          audioLatencyProfile: record.audioLatencyProfile,
+          revision: record.revision,
+          updatedAt: record.updatedAt ?? null,
+        }),
+      }),
+    );
+    return result?.accepted === true;
+  } catch (error) {
+    console.error("[MediaControlAdmin] Media policy push failed:", error);
+    return false;
+  }
+}
+
 export function disconnectVoiceParticipant(
   channelId: string,
   userId: string,

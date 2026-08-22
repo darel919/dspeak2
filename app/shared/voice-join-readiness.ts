@@ -4,7 +4,7 @@ import type {
 } from "./types/shared-utilities.ts";
 import { isExternalString } from "./types/boundary.ts";
 
-export const VOICE_JOIN_TIMEOUT_MS = 10_000;
+export const VOICE_JOIN_TIMEOUT_MS = 20_000;
 
 export function hasUsableVoiceRoute({
   activeProvider,

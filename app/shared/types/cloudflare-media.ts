@@ -134,6 +134,8 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   sessionGeneration: number;
   connectionEpoch: number;
   controlConnectionEpoch: number;
+  jitterBufferMinimumDelay: number;
+  jitterBufferTargetDelay: number;
   getControlConnectionEpoch: () => number;
   localPeerId: string | null;
   lastSentClientRtpCapabilities: unknown;

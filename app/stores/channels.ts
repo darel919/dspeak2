@@ -62,7 +62,9 @@ function parseChannelMediaPolicy(
   const revision = isExternalString(value.revision)
     ? value.revision
     : (parseExternalNumber(value.revision) ?? undefined);
-  return { ...value, revision };
+  const audioLatencyProfile =
+    value.audioLatencyProfile === "ultra-low" ? "ultra-low" : "standard";
+  return { ...value, revision, audioLatencyProfile };
 }
 
 export const useChannelsStore = defineStore("channels", () => {

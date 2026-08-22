@@ -210,7 +210,7 @@ test("display capture does not use constraints forbidden by getDisplayMedia", ()
   assert.equal(constraints.deviceId, undefined);
 });
 
-test("resolution priority permits capture cadence down to 24 FPS", () => {
+test("resolution priority permits capture cadence down to the 25 FPS floor", () => {
   const constraints = buildVideoConstraints({
     resolution: "1080p",
     frameRate: 60,
@@ -559,5 +559,53 @@ test("codec content type includes negotiated RTP parameters", () => {
       parameters: { "profile-level-id": "42e01f" },
     }),
     "video/H264;profile-level-id=42e01f",
+  );
+});
+
+test("resolution-priority frame-rate floor is the product-mandated 25 FPS", () => {
+  assert.equal(VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN, 25);
+});
+
+test("framerate priority never clamps the requested target frame rate", () => {
+  for (const requestedFrameRate of [25, 30, 50, 60]) {
+    const sfu = buildVideoProduceOptions({
+      width: 1920,
+      height: 1080,
+      frameRate: requestedFrameRate,
+      qualityPriority: "framerate",
+    });
+    assert.equal(sfu.encodings[0].maxFramerate, requestedFrameRate);
+    assert.equal(sfu.degradationPreference, "maintain-framerate");
+    const p2p = buildP2pVideoSenderOptions({
+      width: 1920,
+      height: 1080,
+      frameRate: requestedFrameRate,
+      qualityPriority: "framerate",
+    });
+    assert.equal(p2p.encodings[0].maxFramerate, requestedFrameRate);
+    assert.equal(p2p.degradationPreference, "maintain-framerate");
+  }
+});
+
+test("resolution priority locks scaleResolutionDownBy at 1 and keeps a 25 FPS floor", () => {
+  const options = buildVideoProduceOptions({
+    width: 3840,
+    height: 2160,
+    frameRate: 60,
+    qualityPriority: "resolution",
+  });
+  assert.equal(options.degradationPreference, "maintain-resolution");
+  assert.equal(options.encodings[0].maxFramerate, 60);
+  const constrained = buildVideoConstraints({
+    resolution: "2160p",
+    frameRate: 60,
+    qualityPriority: "resolution",
+  });
+  type ConstrainedFrameRate = { min?: number };
+  /* SAFETY: buildVideoConstraints returns a ConstrainULong range whose numeric form carries min. */
+  const frameRateConstraint = constrained.frameRate as ConstrainedFrameRate;
+  assert.equal(
+    frameRateConstraint.min,
+    VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN,
   );
 });

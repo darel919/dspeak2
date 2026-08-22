@@ -3,6 +3,7 @@ import type { ChannelRoomRecord } from "./channel-room.ts";
 import type { MicrophoneGateSettings } from "./microphone-gate.ts";
 import type { VideoSettings } from "./video-settings.ts";
 import type { ParticipantMediaCapabilities } from "./video-codec-capabilities.ts";
+import type { AudioLatencyCapabilitiesV1 } from "./audio-latency.ts";
 import type {
   NativeTauriLike,
   NativeVoiceStoreLike,
@@ -55,6 +56,7 @@ export type NativeCapabilities = Partial<NativeMediaFlags> & {
   videoCodecCapabilities?: Record<string, unknown>;
   concurrentEncode?: Record<string, unknown>;
   mediaCapabilities?: ParticipantMediaCapabilities;
+  audioLatency?: AudioLatencyCapabilitiesV1;
 };
 export interface NativeFeed {
   key?: string;

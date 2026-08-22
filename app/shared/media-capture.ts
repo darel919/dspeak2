@@ -1,6 +1,7 @@
 import { buildVideoConstraints } from "./video-settings.ts";
 import {
   getCaptureConstraints,
+  resolveMicrophoneProcessingConstraints,
   AudioCodecPolicy,
 } from "#shared/audio-codec-policy.ts";
 import {
@@ -34,8 +35,14 @@ export function audioConstraints(
     "microphone",
     AudioCodecPolicy.CaptureProcessingMode.DEFAULT,
   );
+  const resolvedProcessing = resolveMicrophoneProcessingConstraints(
+    settings.processing,
+  );
   const processing: MediaTrackConstraints = {
     ...captureConstraints.audio,
+    echoCancellation: resolvedProcessing.echoCancellation,
+    noiseSuppression: resolvedProcessing.noiseSuppression,
+    autoGainControl: resolvedProcessing.autoGainControl,
     channelCount: { ideal: stereo ? 2 : 1 },
     sampleRate: { ideal: 48000 },
   };
