@@ -182,6 +182,13 @@ test("only the application-owned service worker registrar is enabled", () => {
   assert.match(installPrompt, /beforeinstallprompt/);
 });
 
+test("service workers never register and stale ones are purged on desktop", () => {
+  assert.match(nuxtConfig, /pwa: isDesktop\s*\?\s*false/);
+  assert.match(serviceWorkerRegistration, /hasTauriRuntimeMarker\(\)\) return/);
+  assert.match(serviceWorkerRegistration, /unregisterDesktopServiceWorker/);
+  assert.match(serviceWorkerRegistration, /await isDesktopClient\(\)/);
+});
+
 test("tabs already controlled by an activated update require one reload", () => {
   assert.match(updateCoordinator, /reloadRequired\.value = true/);
   assert.match(
