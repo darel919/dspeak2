@@ -1,4 +1,4 @@
-import { hasTauriRuntimeMarker } from "./desktop-capture.ts";
+import { hasTauriRuntimeMarker, isDesktopClient } from "./desktop-capture.ts";
 import { isExternalRecord } from "./types/boundary.ts";
 
 export const SERVICE_WORKER_OPTIONS = Object.freeze({
@@ -50,6 +50,19 @@ function serviceWorkerScriptUrl() {
   return policy
     ? String(policy.createScriptURL(SERVICE_WORKER_URL))
     : SERVICE_WORKER_URL;
+}
+
+export async function unregisterDesktopServiceWorker(): Promise<void> {
+  if (!(await isDesktopClient())) return;
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      registrations.map((registration) => registration.unregister()),
+    );
+  } catch (error) {
+    console.warn("[ServiceWorker] Desktop unregister failed:", error);
+  }
 }
 
 export function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {

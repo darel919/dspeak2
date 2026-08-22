@@ -38,9 +38,9 @@
           <div class="flex items-start gap-3">
             <div class="chat-image avatar flex-shrink-0">
               <div class="w-10 rounded-full">
-                <img
-                  :src="getAvatarUrl(threadParent.sender?.avatar)"
-                  :alt="threadParent.sender?.name || 'User'"
+                <ProfileImage
+                  :src="threadParent.sender?.avatar"
+                  :name="threadParent.sender?.name"
                 />
               </div>
             </div>
@@ -91,9 +91,9 @@
           >
             <div class="chat-image avatar flex-shrink-0">
               <div class="w-9 rounded-full">
-                <img
-                  :src="getAvatarUrl(reply.sender?.avatar)"
-                  :alt="reply.sender?.name || 'User'"
+                <ProfileImage
+                  :src="reply.sender?.avatar"
+                  :name="reply.sender?.name"
                 />
               </div>
             </div>
@@ -171,7 +171,6 @@
 import { useChatStore } from "../../stores/chat";
 import { useRuntimeConfig } from "#app";
 import { stripMarkdown } from "../../shared/markdown-parser";
-import { profileAssetUrl } from "../../shared/profile-assets";
 import MessageActions from "./MessageActions.vue";
 import { isExternalString } from "../../shared/types/boundary.ts";
 
@@ -266,10 +265,6 @@ watch(
     }
   },
 );
-
-function getAvatarUrl(avatar) {
-  return profileAssetUrl(avatar) || "";
-}
 
 function formatTime(iso) {
   try {

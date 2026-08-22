@@ -36,11 +36,11 @@
               ]"
               :title="identityStore.displayName(u)"
             >
-              <img
+              <ProfileImage
                 v-if="profileAssetUrl(u.avatar)"
-                :src="profileAssetUrl(u.avatar)"
-                :alt="identityStore.displayName(u)"
-                class="w-full h-full object-cover"
+                :src="u.avatar"
+                :name="identityStore.displayName(u)"
+                class-name="w-full h-full object-cover"
               />
               <span v-else class="select-none">{{
                 identityStore

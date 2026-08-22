@@ -1,5 +1,8 @@
 import { watch } from "vue";
-import { registerServiceWorker } from "../shared/service-worker-registration.ts";
+import {
+  registerServiceWorker,
+  unregisterDesktopServiceWorker,
+} from "../shared/service-worker-registration.ts";
 import { isDesktopClient } from "../shared/desktop-capture.ts";
 
 export default defineNuxtPlugin({
@@ -7,7 +10,11 @@ export default defineNuxtPlugin({
   dependsOn: ["pinia"],
   async setup(nuxtApp) {
     if (!("serviceWorker" in navigator)) return;
-    if (await isDesktopClient()) return;
+
+    if (await isDesktopClient()) {
+      void unregisterDesktopServiceWorker();
+      return;
+    }
 
     try {
       await registerServiceWorker();

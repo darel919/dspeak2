@@ -139,7 +139,7 @@ export const useAuthStore = defineStore("auths", () => {
     if (!client || supabaseAuthSubscription) return;
     const result = client.auth.onAuthStateChange((event, session) => {
       if (!session?.access_token) return;
-      if (event !== "TOKEN_REFRESHED") return;
+      if (event !== "TOKEN_REFRESHED" && event !== "INITIAL_SESSION") return;
       void bridgeDesktopSession(session.access_token).catch((error) => {
         console.warn("[DesktopAuth] TOKEN_REFRESH_BRIDGE_FAILED", {
           code: isDesktopAuthError(error) ? error.code : "unknown",
@@ -476,7 +476,7 @@ export const useAuthStore = defineStore("auths", () => {
     try {
       const init: RequestInit = {
         method: "POST",
-        credentials: "omit",
+        credentials: runtimeStore.isTauri ? "omit" : "include",
         signal: controller.signal,
         headers: deviceHeaders({
           Authorization: `Bearer ${accessToken}`,

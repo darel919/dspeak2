@@ -178,14 +178,6 @@ test("service worker queue replay uses the current auth and chat APIs", () => {
 
 test("only the application-owned service worker registrar is enabled", () => {
   assert.match(nuxtConfig, /registerPlugin: false/);
-  assert.doesNotMatch(
-    serviceWorkerRegistration,
-    /navigator\.serviceWorker\.getRegistrations\(\)/,
-  );
-  assert.doesNotMatch(
-    serviceWorkerRegistration,
-    /registration\.unregister\(\)/,
-  );
   assert.doesNotMatch(installPrompt, /\$pwa/);
   assert.match(installPrompt, /beforeinstallprompt/);
 });

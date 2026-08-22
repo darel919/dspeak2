@@ -146,21 +146,33 @@ export default defineNuxtPlugin(() => {
     const method = String(
       init.method || request?.method || "GET",
     ).toUpperCase();
-    const desktop = requiresNativeTransport(
+    const nativeTransport = requiresNativeTransport(
       desktopRuntime,
       url,
       apiTarget,
       window.location.origin,
     );
-    let options: RequestInit = { ...init };
     const configuredApiRequest = isConfiguredApiRequest(url, apiTarget);
+    const desktopApiRequest =
+      desktopRuntime && configuredApiRequest && !nativeTransport;
+    let options: RequestInit = { ...init };
 
     if (configuredApiRequest && mutatingMethods.has(method)) {
       const headers = requestHeaders(input, init);
-      if (!desktop && csrfToken) headers.set("X-dSpeak-CSRF-Token", csrfToken);
+      if (!desktopApiRequest && !nativeTransport && csrfToken)
+        headers.set("X-dSpeak-CSRF-Token", csrfToken);
       options.headers = headers;
     }
-    if (desktop) {
+    if (desktopApiRequest) {
+      const accessToken = await getDesktopAccessToken();
+      if (accessToken) {
+        const headers = requestHeaders(input, options);
+        headers.set("Authorization", `Bearer ${accessToken}`);
+        options.headers = headers;
+        options.credentials = "omit";
+      }
+    }
+    if (nativeTransport) {
       const accessToken = await getDesktopAccessToken();
       options = withDesktopAuthorization(input, options, accessToken);
       options.credentials = "omit";
@@ -170,7 +182,9 @@ export default defineNuxtPlugin(() => {
       }
     }
 
-    const transport = desktop ? await getDesktopHttpFetch() : browserFetch;
+    const transport = nativeTransport
+      ? await getDesktopHttpFetch()
+      : browserFetch;
     let response = await transport(input, options);
     response = await retryWithSupabaseBearer(
       transport,
@@ -180,10 +194,11 @@ export default defineNuxtPlugin(() => {
       url,
       method,
       apiTarget,
-      desktop,
+      nativeTransport,
     );
     const nextToken = response.headers.get("X-dSpeak-CSRF-Token");
-    if (!desktop && nextToken) csrfToken = nextToken;
+    if (!nativeTransport && !desktopApiRequest && nextToken)
+      csrfToken = nextToken;
     return response;
   };
 });
