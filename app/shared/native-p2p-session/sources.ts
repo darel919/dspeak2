@@ -27,6 +27,12 @@ import {
   normalizeVideoCodecName,
 } from "../types/video-codec-capabilities.ts";
 import { candidateFrameCount } from "../video-codec-migration.ts";
+import {
+  PENDING_SIGNAL_MAX_AGE_MS,
+  enqueuePendingSignal,
+  expirePendingSignals,
+  takePendingSignals,
+} from "../pending-signal-queue.ts";
 
 import { asPeerId } from "./helpers.ts";
 import { asError } from "../native-mediasoup-utils.ts";
@@ -649,18 +655,24 @@ export const nativeP2pSessionSourcesMethods: Partial<NativeP2pSessionSurface> &
   ) {
     const epoch = Number(data?.epoch);
     if (!Number.isSafeInteger(epoch) || epoch < this.epoch) return false;
-    const pending = this.pendingSignals.get(epoch) || [];
-    if (pending.length >= this.pendingSignalLimit) pending.shift();
-    pending.push(data);
-    this.pendingSignals.set(epoch, pending);
+    enqueuePendingSignal(
+      this.pendingSignals,
+      epoch,
+      data,
+      this.pendingSignalLimit,
+      Date.now(),
+    );
     return true;
   },
 
   async _flushPendingSignals(this: NativeP2pSessionSurface) {
-    const pending = this.pendingSignals.get(this.epoch);
-    if (!pending?.length) return;
-    this.pendingSignals.delete(this.epoch);
-    for (const data of pending)
+    expirePendingSignals(
+      this.pendingSignals,
+      PENDING_SIGNAL_MAX_AGE_MS,
+      Date.now(),
+    );
+    const pending = takePendingSignals(this.pendingSignals, this.epoch);
+    for (const { payload: data } of pending)
       if (this.peers.has(asPeerId(data.fromPeerId)))
         await this.handleSignalInternal(data);
   },

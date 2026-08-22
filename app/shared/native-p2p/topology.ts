@@ -3,6 +3,12 @@ import {
   p2pRemoteFeedKey,
 } from "../native-p2p-common.ts";
 import {
+  PENDING_SIGNAL_MAX_AGE_MS,
+  enqueuePendingSignal,
+  expirePendingSignals,
+  takePendingSignals,
+} from "../pending-signal-queue.ts";
+import {
   applyPeerSignal,
   enqueuePeerSignaling,
   receiveSignal,
@@ -111,18 +117,25 @@ export class NativeP2pTopologyMethods {
   ) {
     const epoch = Number(payload?.epoch);
     if (!Number.isSafeInteger(epoch) || epoch < this.epoch) return false;
-    const pending = this.pendingSignals.get(epoch) || [];
-    if (pending.length >= this.pendingSignalLimit) pending.shift();
-    pending.push(payload);
-    this.pendingSignals.set(epoch, pending);
+    enqueuePendingSignal(
+      this.pendingSignals,
+      epoch,
+      payload,
+      this.pendingSignalLimit,
+      Date.now(),
+    );
     return true;
   }
 
   async flushPendingSignals(this: NativeP2pMeshSurface) {
-    const pending = this.pendingSignals.get(this.epoch);
-    if (!pending?.length) return;
-    this.pendingSignals.delete(this.epoch);
-    for (const payload of pending) {
+    expirePendingSignals(
+      this.pendingSignals,
+      PENDING_SIGNAL_MAX_AGE_MS,
+      Date.now(),
+    );
+    const pending = takePendingSignals(this.pendingSignals, this.epoch);
+    if (!pending.length) return;
+    for (const { payload } of pending) {
       if (this.mode !== "probing" && this.mode !== "p2p") continue;
       try {
         await this.receiveSignal(payload);

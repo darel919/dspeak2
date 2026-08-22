@@ -3,8 +3,9 @@ import {
   P2P_DISCONNECT_GRACE_MS,
   P2P_ICE_RESTART_TIMEOUT_MS,
   P2P_STABILITY_LIVENESS_TIMEOUT_MS,
+  classifyP2pPath,
+  isAllowedP2pPair,
   isP2pLivenessExpired,
-  isViableP2pPair,
   mediaFlowSnapshot,
   p2pActiveLivenessTimeoutMs,
   requiresP2pLiveness,
@@ -254,8 +255,11 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
             countsReady && outboundProgressing && inboundProgressing;
           state.lastOutboundBytes = flow.outboundBytes;
           state.lastInboundBytes = flow.inboundBytes;
-          if (state.selectedPair && !isViableP2pPair(state.selectedPair))
-            mesh.fail("relay-candidate-selected");
+          if (
+            state.selectedPair &&
+            !isAllowedP2pPair(state.selectedPair, mesh.p2pIcePolicy)
+          )
+            mesh.fail("relay-candidate-not-allowed");
         } catch {
           state.selectedPair = null;
           state.mediaReady = false;
@@ -298,7 +302,7 @@ export function checkQualification(mesh: NativeP2pHealthMesh) {
       state.channel?.readyState === "open" &&
       state.healthReceived >= 3 &&
       state.mediaReady &&
-      isViableP2pPair(state.selectedPair),
+      isAllowedP2pPair(state.selectedPair, mesh.p2pIcePolicy),
   );
   if (qualified.length !== mesh.connections.size) return;
   mesh.readyReported = true;
@@ -317,6 +321,7 @@ export function checkQualification(mesh: NativeP2pHealthMesh) {
           : null;
         return {
           peerId: state.peerId,
+          path: classifyP2pPath(state.selectedPair) || "direct",
           localCandidateType: String(local?.candidateType || "") || null,
           remoteCandidateType: String(remote?.candidateType || "") || null,
           rttMs:

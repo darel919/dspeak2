@@ -154,7 +154,9 @@ const routeLabel = computed(
   () =>
     ({
       "p2p-direct": "Direct P2P",
+      "p2p-relay": "P2P via TURN",
       "p2p-mesh": "Mesh P2P",
+      "p2p-mesh-relay": "Mesh (TURN-assisted)",
       sfu: "SFU",
       "sfu-ipv4": "SFU IPv4",
     })[rtcStats.snapshot?.topology?.mode] || "Connecting",

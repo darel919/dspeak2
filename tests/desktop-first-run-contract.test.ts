@@ -70,10 +70,22 @@ describe("desktop first-run URL and transport boundaries", () => {
     assert.match(securityFetch, /withDesktopAuthorization/);
     assert.match(
       securityFetch,
-      /const transport = desktop \? await getDesktopHttpFetch\(\) : browserFetch/,
+      /const transport = nativeTransport\s*\?[\s\S]*?await getDesktopHttpFetch\(\)\s*:\s*browserFetch/,
     );
     assert.match(securityFetch, /requiresNativeTransport\(/);
     assert.match(securityFetch, /window\.location\.origin/);
+  });
+
+  it("authorizes same-origin API requests with the desktop bearer in the Tauri webview", () => {
+    assert.match(securityFetch, /const desktopApiRequest =/);
+    assert.match(
+      securityFetch,
+      /desktopRuntime && configuredApiRequest && !nativeTransport/,
+    );
+    assert.match(
+      securityFetch,
+      /headers\.set\("Authorization", `Bearer \$\{accessToken\}`\)/,
+    );
   });
 
   it("scopes native presigned uploads to the configured R2 account", async () => {

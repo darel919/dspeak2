@@ -575,9 +575,9 @@ const signalLevel = computed(() =>
 );
 const activeRouteLabel = computed(() => {
   const mode = rtcStatsStore.snapshot?.topology?.mode;
-  return mode === "p2p-direct"
+  return mode === "p2p-direct" || mode === "p2p-relay"
     ? "P2P"
-    : mode === "p2p-mesh"
+    : mode === "p2p-mesh" || mode === "p2p-mesh-relay"
       ? "Mesh"
       : mode === "sfu-ipv4"
         ? "SFU IPv4"

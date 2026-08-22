@@ -21,6 +21,7 @@ import type {
   TopologySfuSession,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
+import type { P2pIcePolicy } from "../types/native-p2p.ts";
 import {
   isExternalRecord,
   isExternalString,
@@ -134,6 +135,7 @@ export function createHybridMediaTopologyController({
   let highestQueuedEpoch = 0;
   let highestQueuedSourceRevision = 0;
   let activeTopologyAbort: AbortController | null = null;
+  let latestP2pPolicy: P2pIcePolicy = "direct-only";
   const {
     closeP2pSafely,
     closeSfuSafely,
@@ -159,6 +161,7 @@ export function createHybridMediaTopologyController({
     iceConnectedBoth,
     mediaConnectionState,
     onP2pQualification,
+    requestedP2pPolicy: () => latestP2pPolicy,
     send,
     setActiveProvider,
     setP2pMesh,
@@ -530,6 +533,10 @@ export function createHybridMediaTopologyController({
       activeTransport,
       targetTransport,
       epoch: Number(data.epoch),
+      p2pPath:
+        data.p2pPath === "direct" || data.p2pPath === "relay"
+          ? data.p2pPath
+          : null,
       provider: data.provider || data.targetProvider || null,
       providerId:
         data.providerId ||
@@ -597,10 +604,12 @@ export function createHybridMediaTopologyController({
       return;
     }
     if (data.mode === "probing") {
+      latestP2pPolicy =
+        data.relayAllowed === true ? "direct-or-relay" : "direct-only";
       void ensureQualificationFallback(data, generation)
         .then(async () => {
           mediaGeneration.assert(generation);
-          const mesh = ensureP2p();
+          const mesh = ensureP2p(latestP2pPolicy);
           if (!mesh) {
             send({
               type: "p2p-failed",

@@ -54,11 +54,11 @@
         @click.prevent="openRoom(room)"
         @contextmenu.prevent.stop="openRoomMenu(room, $event)"
       >
-        <img
+        <ProfileImage
           v-if="room.picture"
           :src="assetUrl(room.picture)"
-          :alt="room.name"
-          class="size-full object-cover"
+          :name="room.name"
+          class-name="size-full object-cover"
         />
         <span v-else>{{ room.name?.slice(0, 2).toUpperCase() }}</span>
         <span
@@ -106,11 +106,11 @@
                 <div
                   class="size-7 overflow-hidden rounded-full border-2 border-base-100 bg-base-300 text-[9px] text-base-content"
                 >
-                  <img
+                  <ProfileImage
                     v-if="participant.avatar"
                     :src="participant.avatar"
-                    :alt="participant.name"
-                    class="size-full object-cover"
+                    :name="participant.name"
+                    class-name="size-full object-cover"
                   />
                   <span v-else>{{ participant.initials }}</span>
                 </div>

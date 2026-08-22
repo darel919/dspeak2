@@ -8,6 +8,7 @@ import type {
   PresentableVideoFrame,
   VideoCodecRuntimeTelemetry,
 } from "../video-codec-migration.ts";
+import type { PendingSignalEntry } from "../pending-signal-queue.ts";
 
 export interface NativeP2pSource extends Record<string, unknown> {
   source: string;
@@ -180,7 +181,7 @@ export interface NativeP2pSessionSurface {
   localPeerId: string;
   closed: boolean;
   operation: Promise<NativeP2pOperationResult>;
-  pendingSignals: Map<number, Array<Record<string, unknown>>>;
+  pendingSignals: Map<number, PendingSignalEntry[]>;
   pendingSignalLimit: number;
   _enqueue: (
     operation: () => Promise<NativeP2pOperationResult>,

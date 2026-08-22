@@ -5,7 +5,9 @@ import type {
   TopologyResourceHelpersContext,
   TopologySourceEntry,
 } from "../types/topology-controller.ts";
+import type { P2pIcePolicy } from "../types/native-p2p.ts";
 import { isExternalString } from "../types/boundary.ts";
+import { normalizeP2pIcePolicy } from "../native-p2p-common.ts";
 
 function isTopologySourceEntry(
   value: Record<string, unknown>,
@@ -35,6 +37,7 @@ export function createTopologyResourceHelpers({
   iceConnectedBoth,
   mediaConnectionState,
   onP2pQualification,
+  requestedP2pPolicy,
   send,
   setActiveProvider,
   setP2pMesh,
@@ -46,12 +49,18 @@ export function createTopologyResourceHelpers({
   updateP2pStats,
   getConnectionEpoch,
 }: TopologyResourceHelpersContext) {
-  function ensureP2p() {
+  function ensureP2p(policy?: P2pIcePolicy) {
+    const requested = normalizeP2pIcePolicy(policy ?? requestedP2pPolicy());
     const existing = getP2pMesh();
-    if (existing || !(globalThis.RTCPeerConnection instanceof Function))
+    if (
+      (existing && existing.p2pIcePolicy === requested) ||
+      !(globalThis.RTCPeerConnection instanceof Function)
+    )
       return existing;
+    if (existing) void closeP2pSafely();
     const mesh = new NativeP2pMesh({
       iceServers: getIceServers(),
+      p2pIcePolicy: requested,
       sendSignal: (payload) =>
         payload.type === "ready"
           ? send({ type: "p2p-qualified", data: payload })

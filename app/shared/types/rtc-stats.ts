@@ -2,6 +2,7 @@ import type { MediaCommandResult } from "./boundary.ts";
 
 import type { Ref } from "vue";
 import type { RtpStatsSample } from "./rtc-media-stats.ts";
+import type { PendingSignalQueueSample } from "../pending-signal-queue.ts";
 import type { PeerMetric } from "../../../shared/types/media.ts";
 
 export interface RtcTransportPair {
@@ -57,6 +58,7 @@ export interface RtcStatsSnapshot {
   protocol?: unknown;
   lifecycle?: unknown[];
   readiness?: unknown;
+  signalQueue?: PendingSignalQueueSample;
   [key: string]: unknown;
 }
 

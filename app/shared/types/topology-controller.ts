@@ -14,6 +14,7 @@ import type { RemoteMediaHandoff } from "../remote-media-handoff.ts";
 import type {
   NativeP2pMeshOptions,
   NativeP2pMeshSurface,
+  P2pIcePolicy,
 } from "./native-p2p.ts";
 
 export interface TopologyPeer {
@@ -132,6 +133,7 @@ export interface TopologyResourceHelpersContext {
   iceConnectedBoth: Ref<boolean>;
   mediaConnectionState: Ref<string>;
   onP2pQualification?: (data: Record<string, unknown>) => MediaCommandResult;
+  requestedP2pPolicy: () => P2pIcePolicy;
   send: (message: Record<string, unknown>) => MediaCommandResult;
   setActiveProvider: (provider: "p2p" | "sfu" | null) => MediaCommandResult;
   setP2pMesh: (mesh: TopologyP2pMesh | null) => MediaCommandResult;
@@ -160,6 +162,7 @@ export interface TopologyState {
   targetProviderId?: string | null;
   transitionFailure?: unknown;
   preparedEpoch?: number | null;
+  p2pPath?: "direct" | "relay" | null;
   peers: TopologyPeer[];
   activatedAt?: number | null;
   canonicalMode?: "idle" | "probing" | "switching" | "p2p" | "sfu";
@@ -318,7 +321,7 @@ export interface TopologyControllerOptions {
 
 export interface TopologyController {
   applyAdaptiveJitterBuffer: () => MediaCommandResult;
-  ensureP2p: () => {
+  ensureP2p: (policy?: P2pIcePolicy) => {
     receiveSignal: (
       data: Record<string, unknown>,
     ) => Promise<MediaCommandResult>;

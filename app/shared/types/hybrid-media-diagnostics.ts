@@ -5,6 +5,7 @@ import type { MediaCommandResult } from "./boundary.ts";
 import type { Ref } from "vue";
 import type { SignalingMessage } from "./media-signaling.ts";
 import type { RtpStatsSample } from "../rtc-media-stats.ts";
+import type { PendingSignalEntry } from "../pending-signal-queue.ts";
 import type { TopologyState } from "./topology-controller.ts";
 
 export interface DiagnosticSourceEntry {
@@ -67,7 +68,11 @@ export interface HybridMediaDiagnosticsContext {
   getActiveProvider: () => string | null;
   getActiveRouteProvider?: () => string | null;
   getAudioLatencySnapshot?: () => Record<string, unknown>;
-  getP2pMesh: () => DiagnosticProvider | null;
+  getP2pMesh: () =>
+    | (DiagnosticProvider & {
+        pendingSignals?: Map<number, PendingSignalEntry[]>;
+      })
+    | null;
   getRequestedVideoSettings: (source: string) => { frameRate?: number };
   getLifecycle: () => MediaCommandResult;
   getProtocolState: () => MediaCommandResult;

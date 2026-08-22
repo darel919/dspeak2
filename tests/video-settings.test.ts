@@ -75,6 +75,16 @@ test("low-spec native profile caps camera and screen-share workload", () => {
   );
 });
 
+test("low-spec profile keeps resolution priority at the 25 FPS floor", () => {
+  const constrained = applyLowSpecNativeVideoProfile(
+    { resolution: "1080p", frameRate: 60, qualityPriority: "resolution" },
+    "camera",
+    true,
+  );
+  assert.equal(constrained.lowSpec, true);
+  assert.equal(constrained.frameRate, VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN);
+});
+
 test("low-spec production options use a 15 FPS bounded bitrate profile", () => {
   const camera = buildVideoProduceOptions({
     width: 640,

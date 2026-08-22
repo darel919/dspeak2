@@ -265,6 +265,15 @@
               <p>{{ snapshot.topology?.mode || "RTC route" }}</p>
             </div>
           </div>
+          <div v-if="snapshot.signalQueue" class="rtc-metric-row">
+            <span>Signaling queue</span
+            ><strong
+              >{{ snapshot.signalQueue.queued }} queued · oldest
+              {{
+                formatMs(snapshot.signalQueue.oldestQueuedAgeMs ?? undefined)
+              }}</strong
+            >
+          </div>
           <div
             v-for="transport in snapshot.transports"
             :key="transport.kind"
@@ -737,7 +746,9 @@ function formatRoute(value) {
   return (
     {
       "p2p-direct": "Direct P2P",
+      "p2p-relay": "P2P via TURN",
       "p2p-mesh": "Mesh P2P",
+      "p2p-mesh-relay": "Mesh (TURN-assisted)",
       sfu: "SFU",
       "sfu-ipv4": "SFU IPv4",
     }[value] ||

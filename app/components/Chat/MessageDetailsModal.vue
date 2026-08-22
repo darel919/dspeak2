@@ -44,9 +44,9 @@
                   >
                     <div v-if="user.avatar" class="avatar">
                       <div class="w-8 h-8 rounded-full">
-                        <img
-                          :src="getAvatarUrl(user.avatar)"
-                          :alt="user.name || user.email || user.id"
+                        <ProfileImage
+                          :src="user.avatar"
+                          :name="user.name || user.email"
                         />
                       </div>
                     </div>
@@ -168,10 +168,6 @@ function formatFullDate(dateString) {
     second: "2-digit",
     timeZoneName: "short",
   });
-}
-
-function getAvatarUrl(avatarPath) {
-  return profileAssetUrl(avatarPath) || "";
 }
 
 async function copyDetails() {

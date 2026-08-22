@@ -60,11 +60,11 @@
             <div
               class="size-8 overflow-hidden rounded-full bg-base-300 text-xs text-base-content"
             >
-              <img
+              <ProfileImage
                 v-if="req.requester?.avatar"
-                :src="profileAssetUrl(req.requester.avatar)"
-                alt=""
-                class="size-full object-cover"
+                :src="req.requester.avatar"
+                :name="req.requester?.name"
+                class-name="size-full object-cover"
               />
               <span v-else>{{ initials(req.requester?.name || "?") }}</span>
             </div>
@@ -107,11 +107,11 @@
               <div
                 class="size-9 overflow-hidden rounded-full bg-base-300 text-xs text-base-content"
               >
-                <img
+                <ProfileImage
                   v-if="friend.avatar"
-                  :src="profileAssetUrl(friend.avatar)"
-                  alt=""
-                  class="size-full object-cover"
+                  :src="friend.avatar"
+                  :name="friend.display_name || friend.name"
+                  class-name="size-full object-cover"
                 />
                 <span v-else>{{
                   initials(friend.display_name || friend.name || "?")
@@ -170,7 +170,6 @@
 import { useFriendsStore } from "../stores/friends";
 import { useRoomsStore } from "../stores/rooms";
 import { PRESENCE_LABELS } from "~~/shared/presence-status.ts";
-import { profileAssetUrl } from "../shared/profile-assets.ts";
 
 const friendsStore = useFriendsStore();
 const roomsStore = useRoomsStore();

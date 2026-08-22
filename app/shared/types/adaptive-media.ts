@@ -7,6 +7,14 @@ export interface JitterBufferConfig {
   minDelayMs: number;
   targetDelayMs: number;
 }
+export type VideoAdaptationReason =
+  | "none"
+  | "congestion-resolution"
+  | "congestion-framerate"
+  | "congestion-bitrate"
+  | "recovery"
+  | "route-change"
+  | "capability-change";
 export interface AdaptiveVideoState {
   scale: number;
   frameRate: number;
@@ -14,11 +22,14 @@ export interface AdaptiveVideoState {
   pressureSamples?: number;
   healthySamples?: number;
   changed?: boolean;
+  adaptationReason?: VideoAdaptationReason;
+  lastFpsTargetChangeAt?: number | null;
 }
 export interface AdaptiveVideoSample {
   encodeUtilization?: number | null;
   framesPerSecond?: number | null;
   qualityLimitationReason?: string;
+  sampledAt?: number | null;
 }
 export interface AdaptiveVideoSettings {
   qualityPriority: string;

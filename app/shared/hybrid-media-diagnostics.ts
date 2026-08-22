@@ -9,6 +9,7 @@ import {
   isExternalString,
 } from "./types/boundary.ts";
 import { getSharedStatsSnapshot } from "./rtc-stats-sampler.ts";
+import { samplePendingSignalQueue } from "./pending-signal-queue.ts";
 import type {
   RtcStatsSnapshot,
   RtcTransportSnapshot,
@@ -272,6 +273,10 @@ export function createHybridMediaDiagnostics({
       protocol: getProtocolState?.() || null,
       lifecycle: Array.isArray(lifecycleValue) ? lifecycleValue : [],
       readiness: getReadiness?.() || null,
+      signalQueue: samplePendingSignalQueue(
+        getP2pMesh()?.pendingSignals ?? new Map(),
+        Date.now(),
+      ),
       media: {
         localAudioTracks: [...localSources.values()].filter(
           (entry) => entry.track.kind === "audio",

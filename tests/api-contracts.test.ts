@@ -181,7 +181,7 @@ test("push jobs include their required recipient and current soundboards are pro
 });
 
 test("thread avatars use the current profile asset route", () => {
-  assert.match(threadSidebar, /profileAssetUrl/);
+  assert.match(threadSidebar, /ProfileImage/);
   assert.doesNotMatch(threadSidebar, /pbUrl|_pb_users_auth_/);
 });
 

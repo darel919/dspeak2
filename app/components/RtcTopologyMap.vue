@@ -125,7 +125,9 @@ const summary = computed(() => {
 const badgeClass = computed(() => {
   if (
     props.topology.mode === "p2p-direct" ||
-    props.topology.mode === "p2p-mesh"
+    props.topology.mode === "p2p-relay" ||
+    props.topology.mode === "p2p-mesh" ||
+    props.topology.mode === "p2p-mesh-relay"
   )
     return "metro-badge--success";
   if (props.topology.mode === "sfu") return "metro-badge--info";

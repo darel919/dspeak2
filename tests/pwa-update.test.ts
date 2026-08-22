@@ -178,16 +178,15 @@ test("service worker queue replay uses the current auth and chat APIs", () => {
 
 test("only the application-owned service worker registrar is enabled", () => {
   assert.match(nuxtConfig, /registerPlugin: false/);
-  assert.doesNotMatch(
-    serviceWorkerRegistration,
-    /navigator\.serviceWorker\.getRegistrations\(\)/,
-  );
-  assert.doesNotMatch(
-    serviceWorkerRegistration,
-    /registration\.unregister\(\)/,
-  );
   assert.doesNotMatch(installPrompt, /\$pwa/);
   assert.match(installPrompt, /beforeinstallprompt/);
+});
+
+test("service workers never register and stale ones are purged on desktop", () => {
+  assert.match(nuxtConfig, /pwa: isDesktop\s*\?\s*false/);
+  assert.match(serviceWorkerRegistration, /hasTauriRuntimeMarker\(\)\) return/);
+  assert.match(serviceWorkerRegistration, /unregisterDesktopServiceWorker/);
+  assert.match(serviceWorkerRegistration, /await isDesktopClient\(\)/);
 });
 
 test("tabs already controlled by an activated update require one reload", () => {

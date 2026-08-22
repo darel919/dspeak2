@@ -1,4 +1,5 @@
 import { normalizeMediaPathMetrics } from "#shared/media-route.ts";
+import { classifyP2pPath } from "./native-p2p-common.ts";
 import {
   isExternalBoolean,
   isExternalNumber,
@@ -221,6 +222,10 @@ export function createMediaTopologyView({
     const details: Record<string, Record<string, unknown>> = {};
     const p2pMesh = asProvider(getP2pMesh());
     const localPeerId = getLocalPeerId();
+    let p2pPath: "direct" | "relay" | null =
+      topologyState.value.mode === "p2p"
+        ? (topologyState.value.p2pPath ?? null)
+        : null;
     for (const connection of p2pMesh?.connections?.values() || []) {
       const edge =
         getP2pEdges()
@@ -228,6 +233,13 @@ export function createMediaTopologyView({
           .find((candidate) => candidate.peerId === connection.peerId) || {};
       const key = [localPeerId, connection.peerId].sort().join(":");
       const pair = asCandidatePair(edge.candidatePair);
+      const edgePath = classifyP2pPath({
+        local: pair?.local ? { candidateType: pair.local.candidateType } : null,
+        remote: pair?.remote
+          ? { candidateType: pair.remote.candidateType }
+          : null,
+      });
+      if (edgePath) p2pPath = p2pPath === "relay" ? "relay" : edgePath;
       details[key] = {
         state:
           edge.state ||
@@ -237,6 +249,8 @@ export function createMediaTopologyView({
         rtt: edge.rtt ?? null,
         network: edge.network || null,
         candidateType: pair?.local?.candidateType || null,
+        remoteCandidateType: pair?.remote?.candidateType || null,
+        path: edgePath,
         addressFamily: addressFamily(pair?.remote?.address),
         bitrate: edge.bitrate ?? null,
         packetLoss: edge.packetLoss ?? null,
@@ -252,6 +266,7 @@ export function createMediaTopologyView({
       target: topologyState.value.target ?? undefined,
       epoch: topologyState.value.epoch,
       reason: topologyState.value.reason ?? undefined,
+      p2pPath,
       activatedAt:
         topologyState.value.activatedAt == null
           ? null
