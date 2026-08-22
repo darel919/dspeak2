@@ -921,7 +921,7 @@ test("join room dialog keeps its panel and backdrop geometry isolated", async ()
   const dialog = await readFile("app/components/JoinRoomDialog.vue", "utf8");
   assert.match(
     dialog,
-    /class="metro-flyout[^\"]*\bw-full\b[^\"]*\bmax-w-lg\b[^\"]*\bp-5\b/,
+    /class="metro-flyout[^"\\]*\bw-full\b[^"\\]*\bmax-w-lg\b[^"\\]*\bp-5\b/,
   );
   assert.match(dialog, /class="mt-6 flex justify-end gap-3"/);
   assert.match(dialog, /class="fixed inset-0 z-0 border-0 bg-black\/50 p-0"/);

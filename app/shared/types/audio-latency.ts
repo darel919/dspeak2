@@ -70,7 +70,7 @@ export function effectiveAudioQuantumUs(
     capabilities.decodeFrameDurationsUs,
     capabilities.renderQuantaUs,
   ]) {
-    for (const quantum of [...common])
+    for (const quantum of AUDIO_QUANTUM_US_VALUES)
       if (!stage.includes(quantum)) common.delete(quantum);
   }
   if (!common.size) return COMPATIBILITY_AUDIO_QUANTUM_US;
