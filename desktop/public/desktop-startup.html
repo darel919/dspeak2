@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Preparing dSpeak</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #09091b;
+        color: #ffffff;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .panel {
+        width: 100%;
+        max-width: 260px;
+        padding: 24px 28px;
+        text-align: center;
+      }
+      .logo {
+        width: 56px;
+        height: 56px;
+        object-fit: contain;
+      }
+      .brand {
+        margin-top: 14px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.24em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.55);
+      }
+      .message {
+        min-height: 3em;
+        margin: 10px auto 0;
+        max-width: 240px;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.35;
+        letter-spacing: -0.01em;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .elapsed {
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+      .bar {
+        position: relative;
+        overflow: hidden;
+        width: 200px;
+        height: 4px;
+        margin: 16px auto 0;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.15);
+      }
+      .bar__fill {
+        height: 100%;
+        border-radius: inherit;
+        background: #ffffff;
+        transition: width 0.3s ease;
+      }
+      .bar--indeterminate .bar__fill {
+        width: 40%;
+        animation: slide 1.2s ease-in-out infinite;
+      }
+      @keyframes slide {
+        0% {
+          transform: translateX(-100%);
+        }
+        100% {
+          transform: translateX(350%);
+        }
+      }
+      .hidden {
+        display: none;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bar--indeterminate .bar__fill {
+          animation: none;
+          transform: translateX(130%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <img class="logo" src="/desktop-startup-logo.png" alt="" />
+      <p class="brand">dSpeak</p>
+      <div
+        id="status"
+        class="message"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        Preparing dSpeak…
+      </div>
+      <div id="elapsed" class="elapsed hidden"></div>
+      <div
+        id="progress"
+        class="bar bar--indeterminate"
+        role="progressbar"
+        aria-label="Startup progress"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div class="bar__fill"></div>
+      </div>
+    </main>
+    <script>
+      (function () {
+        var statusEl = document.getElementById("status");
+        var elapsedEl = document.getElementById("elapsed");
+        var progressEl = document.getElementById("progress");
+        var fillEl = progressEl.querySelector(".bar__fill");
+        var startedAt = Date.now();
+        var lastElapsedMs = 0;
+
+        function formatElapsed(ms) {
+          var totalSeconds = Math.floor(ms / 1000);
+          var minutes = Math.floor(totalSeconds / 60);
+          var seconds = totalSeconds % 60;
+          return minutes > 0 ? minutes + "m " + seconds + "s" : seconds + "s";
+        }
+
+        setInterval(function () {
+          if (lastElapsedMs >= 8000) {
+            elapsedEl.textContent =
+              formatElapsed(Math.max(lastElapsedMs, Date.now() - startedAt)) +
+              " elapsed";
+            elapsedEl.classList.remove("hidden");
+          }
+        }, 1000);
+
+        if (window.__TAURI__ && window.__TAURI__.event) {
+          window.__TAURI__.event
+            .listen("desktop-startup-status", function (event) {
+              var payload = event && event.payload;
+              if (!payload || typeof payload !== "object") return;
+              if (
+                typeof payload.elapsedMs === "number" &&
+                payload.elapsedMs >= lastElapsedMs
+              ) {
+                lastElapsedMs = payload.elapsedMs;
+              }
+              if (typeof payload.message === "string" && payload.message) {
+                statusEl.textContent = payload.message;
+              }
+              var progress =
+                typeof payload.progress === "number" &&
+                isFinite(payload.progress)
+                  ? Math.min(100, Math.max(0, payload.progress))
+                  : null;
+              if (progress === null) {
+                progressEl.classList.add("bar--indeterminate");
+                fillEl.style.width = "";
+                progressEl.removeAttribute("aria-valuenow");
+              } else {
+                progressEl.classList.remove("bar--indeterminate");
+                fillEl.style.width = progress + "%";
+                progressEl.setAttribute("aria-valuenow", String(progress));
+              }
+              if (payload.phase === "error") {
+                document.title = "dSpeak";
+              }
+            })
+            .catch(function () {});
+        }
+      })();
+    </script>
+  </body>
+</html>

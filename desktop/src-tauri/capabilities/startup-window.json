@@ -1,0 +1,6 @@
+{
+  "identifier": "startup-window",
+  "description": "Minimal permissions for the dSpeak startup splash window",
+  "windows": ["init"],
+  "permissions": ["core:default"]
+}

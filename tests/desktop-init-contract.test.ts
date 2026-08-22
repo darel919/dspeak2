@@ -97,8 +97,36 @@ describe("desktop initialization contract", () => {
     }
     assert.match(initComponent, /STARTUP_TIMEOUT_MS = 15000/);
     assert.match(initComponent, /Promise\.race\(\[/);
-    assert.match(initComponent, /<StartupLoader[\s\S]*:visible="true"/);
-    assert.match(initComponent, /Starting dSpeak…/);
+    assert.doesNotMatch(initComponent, /<StartupLoader/);
+    assert.doesNotMatch(tauriConfig, /"label": "startup"/);
+    assert.match(
+      await read("desktop/src-tauri/src/desktop/mod.rs"),
+      /open_startup_window\(app\.handle\(\)\)/,
+    );
+    assert.match(
+      await read("desktop/src-tauri/src/desktop/mod.rs"),
+      /ensure_main_window\(app\.handle\(\)\)\?/,
+    );
+    const windowModule = await read("desktop/src-tauri/src/desktop/window.rs");
+    assert.match(windowModule, /desktop-startup\.html/);
+    assert.match(windowModule, /visible\(true\)/);
+    assert.match(windowModule, /fn desktop_ready/);
+    assert.match(
+      windowModule,
+      /close_startup_window\(&app\);\s*\n\s*show_main_window\(&app\)/,
+    );
+    assert.match(
+      await read("desktop/public/desktop-startup.html"),
+      /desktop-startup-status/,
+    );
+    assert.match(
+      await read("desktop/src-tauri/capabilities/startup-window.json"),
+      /"windows": \["init"\]/,
+    );
+    await assert.rejects(
+      () => read("app/components/StartupLoader.vue"),
+      (error) => error?.code === "ENOENT",
+    );
     await assert.rejects(
       () => read("desktop/.output/public/sw.js"),
       (error) => error?.code === "ENOENT",
