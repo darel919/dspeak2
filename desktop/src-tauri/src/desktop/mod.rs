@@ -81,6 +81,13 @@ pub(crate) fn run() {
         .manage(media_popups::MediaPopupState::default())
         .manage(media::NativeMediaStore::default())
         .setup(|app| {
+            activity_log::log_activity(
+                app.handle(),
+                activity_log::LogCategory::AppLifecycle,
+                activity_log::ActivityLevel::Info,
+                "app-start",
+                serde_json::json!({ "version": app.package_info().version.to_string() }),
+            );
             activity_log::trim_activity_log(app.handle());
             window::load_preferences(app.handle());
 

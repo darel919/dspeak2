@@ -111,11 +111,28 @@ pub(crate) async fn run_background_notification_poller(
                         }
                     }
                     for item in pending {
+                        crate::desktop::activity_log::log_activity(
+                            &app,
+                            crate::desktop::activity_log::LogCategory::Notifications,
+                            crate::desktop::activity_log::ActivityLevel::Debug,
+                            "notification-shown",
+                            serde_json::json!({
+                                "id": item.id,
+                                "title": item.title,
+                            }),
+                        );
                         show_clickable_notification(&app, &state, &item);
                     }
                 }
                 Err(error) => {
                     eprintln!("[dspeak] background notification sync failed: {error}");
+                    crate::desktop::activity_log::log_activity(
+                        &app,
+                        crate::desktop::activity_log::LogCategory::Notifications,
+                        crate::desktop::activity_log::ActivityLevel::Warning,
+                        "notification-sync-failed",
+                        serde_json::json!({ "error": error }),
+                    );
                     backoff_secs = (backoff_secs.saturating_mul(2)).min(POLL_MAX_BACKOFF_SECS);
                 }
             }

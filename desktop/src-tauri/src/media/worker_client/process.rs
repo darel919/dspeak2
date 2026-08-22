@@ -196,8 +196,10 @@ fn read_worker_output(
         if let Ok(mut current) = state.lock() {
             *current = disconnected.clone();
         }
-        crate::desktop::activity_log::record_call_activity(
+        crate::desktop::activity_log::log_activity(
             &app,
+            crate::desktop::activity_log::LogCategory::VoiceChannels,
+            crate::desktop::activity_log::ActivityLevel::Error,
             "call-worker-crash",
             error.clone(),
         );
@@ -228,7 +230,16 @@ fn emit_worker_event(app: &AppHandle, value: &Value) {
         "native-action" => super::MEDIA_EVENT_NATIVE_ACTION,
         "native-receive-event" => super::MEDIA_EVENT_NATIVE_RECEIVE,
         "state" => super::MEDIA_EVENT_STATE,
-        "error" => "media:error",
+        "error" => {
+            crate::desktop::activity_log::log_activity(
+                app,
+                crate::desktop::activity_log::LogCategory::VoiceChannels,
+                crate::desktop::activity_log::ActivityLevel::Error,
+                "media-error",
+                payload.clone(),
+            );
+            "media:error"
+        }
         _ => return,
     };
     let _ = app.emit(name, payload);
