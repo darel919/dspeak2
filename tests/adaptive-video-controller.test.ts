@@ -4,6 +4,7 @@ import {
   adaptiveTrackConstraints,
   updateAdaptiveVideoState,
 } from "../app/shared/adaptive-video-controller.ts";
+import type { AdaptiveVideoState } from "../app/shared/types/adaptive-media.ts";
 
 function advance(state, sample, settings, count) {
   let current = state;
@@ -75,6 +76,7 @@ test("resolution priority never adapts below 25 frames per second", () => {
         encodeUtilization: 90,
         framesPerSecond: 10,
         qualityLimitationReason: "cpu",
+        sampledAt: (step + 1) * 2000,
       },
       settings,
     );
@@ -203,4 +205,101 @@ test("resolution priority never targets below the 25 FPS floor", () => {
   );
   assert.equal(state.frameRate, 25);
   assert.equal(state.scale, 1);
+});
+
+test("FPS target changes carry a typed reason and dwell timestamp", () => {
+  const settings = {
+    frameRate: 60,
+    resolution: "1080p",
+    qualityPriority: "resolution",
+  };
+  let state: AdaptiveVideoState = { scale: 1, frameRate: 60 };
+  for (let step = 0; step < 3; step += 1)
+    state = updateAdaptiveVideoState(
+      state,
+      {
+        encodeUtilization: 90,
+        framesPerSecond: 20,
+        qualityLimitationReason: "cpu",
+        sampledAt: (step + 1) * 2000,
+      },
+      settings,
+    );
+  assert.equal(state.frameRate, 50);
+  assert.equal(state.adaptationReason, "congestion-framerate");
+  assert.equal(state.lastFpsTargetChangeAt, 6000);
+});
+
+test("FPS target respects the adaptation dwell between changes", () => {
+  const settings = {
+    frameRate: 60,
+    resolution: "1080p",
+    qualityPriority: "resolution",
+  };
+  let state = { scale: 1, frameRate: 60 };
+  const sample = {
+    encodeUtilization: 90,
+    framesPerSecond: 20,
+    qualityLimitationReason: "cpu",
+  };
+  for (const sampledAt of [1000, 2000, 3000])
+    state = updateAdaptiveVideoState(state, { ...sample, sampledAt }, settings);
+  assert.equal(state.frameRate, 50);
+  for (const sampledAt of [4000, 5000, 6000, 7000])
+    state = updateAdaptiveVideoState(state, { ...sample, sampledAt }, settings);
+  assert.equal(state.frameRate, 50, "dwell blocks retargeting within 5s");
+  state = updateAdaptiveVideoState(
+    state,
+    { ...sample, sampledAt: 8000 },
+    settings,
+  );
+  assert.equal(state.frameRate, 30, "next step lands after dwell elapses");
+});
+
+test("recovery raises the FPS target with a typed reason", () => {
+  const settings = {
+    frameRate: 60,
+    resolution: "1080p",
+    qualityPriority: "resolution",
+  };
+  let state: AdaptiveVideoState = {
+    scale: 1,
+    frameRate: 40,
+    lastFpsTargetChangeAt: 0,
+  };
+  for (let step = 0; step < 6; step += 1)
+    state = updateAdaptiveVideoState(
+      state,
+      {
+        encodeUtilization: 10,
+        framesPerSecond: 40,
+        qualityLimitationReason: "none",
+        sampledAt: 20000 + step * 2000,
+      },
+      settings,
+    );
+  assert.equal(state.frameRate, 50);
+  assert.equal(state.adaptationReason, "recovery");
+  assert.equal(state.lastFpsTargetChangeAt, 30000);
+});
+
+test("framerate priority reports congestion-resolution without retargeting FPS", () => {
+  const settings = {
+    frameRate: 60,
+    resolution: "1080p",
+    qualityPriority: "framerate",
+    minimumFrameRate: 25,
+  };
+  const state = advance(
+    { scale: 1, frameRate: 60 },
+    {
+      encodeUtilization: 95,
+      framesPerSecond: 20,
+      qualityLimitationReason: "cpu",
+    },
+    settings,
+    3,
+  );
+  assert.equal(state.frameRate, 60);
+  assert.equal(state.adaptationReason, "congestion-resolution");
 });

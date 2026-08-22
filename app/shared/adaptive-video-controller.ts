@@ -1,6 +1,7 @@
 import {
   calculateFrameTimeMs,
   VIDEO_FRAME_RATE_MIN,
+  VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN,
   VIDEO_RESOLUTIONS,
   VIDEO_SCALE_STEPS,
   isVideoResolution,
@@ -13,6 +14,7 @@ import type {
   AdaptiveVideoSample,
   AdaptiveVideoSettings,
   AdaptiveVideoState,
+  VideoAdaptationReason,
 } from "./types/adaptive-media.ts";
 import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 import {
@@ -23,6 +25,7 @@ import {
 } from "./types/boundary.ts";
 
 const ADAPTIVE_FRAME_RATES = Object.freeze([15, 25, 30, 50, 60]);
+const ADAPTATION_DWELL_MS = 5000;
 
 export function updateAdaptiveVideoState(
   state: AdaptiveVideoState | null,
@@ -33,7 +36,10 @@ export function updateAdaptiveVideoState(
   const targetFrameRate = Number(settings.frameRate) || 30;
   const minimumFrameRate = Math.max(
     1,
-    Number(settings.minimumFrameRate) || VIDEO_FRAME_RATE_MIN,
+    Number(settings.minimumFrameRate) ||
+      (priority === "resolution"
+        ? VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN
+        : VIDEO_FRAME_RATE_MIN),
   );
   const currentScale = state?.scale;
   const scale =
@@ -76,13 +82,25 @@ export function updateAdaptiveVideoState(
   let nextScale = scale;
   let nextFrameRate = frameRate;
   let nextBitrate = bitrate;
+  let adaptationReason: VideoAdaptationReason = "none";
+  let lastFpsTargetChangeAt = state?.lastFpsTargetChangeAt ?? null;
+  const now = sample?.sampledAt ?? Date.now();
+
+  function canChangeFpsTarget() {
+    if (lastFpsTargetChangeAt == null) return true;
+    return now - lastFpsTargetChangeAt >= ADAPTATION_DWELL_MS;
+  }
 
   if (pressureSamples >= 3) {
     if (priority === "resolution") {
       const lowerRates = ADAPTIVE_FRAME_RATES.filter(
         (candidate) => candidate < frameRate && candidate >= minimumFrameRate,
       );
-      if (lowerRates.length > 0) nextFrameRate = lowerRates.at(-1) || frameRate;
+      if (lowerRates.length > 0 && canChangeFpsTarget()) {
+        nextFrameRate = lowerRates.at(-1) || frameRate;
+        adaptationReason = "congestion-framerate";
+        lastFpsTargetChangeAt = now;
+      }
     } else {
       nextScale =
         VIDEO_SCALE_STEPS[
@@ -91,6 +109,7 @@ export function updateAdaptiveVideoState(
             VIDEO_SCALE_STEPS.indexOf(scale) + 1,
           )
         ] ?? scale;
+      adaptationReason = "congestion-resolution";
     }
     if (
       hasBitrateCeiling &&
@@ -105,11 +124,16 @@ export function updateAdaptiveVideoState(
       const higherRates = ADAPTIVE_FRAME_RATES.filter(
         (candidate) => candidate > frameRate && candidate <= targetFrameRate,
       );
-      if (higherRates.length > 0) nextFrameRate = higherRates[0] || frameRate;
+      if (higherRates.length > 0 && canChangeFpsTarget()) {
+        nextFrameRate = higherRates[0] || frameRate;
+        adaptationReason = "recovery";
+        lastFpsTargetChangeAt = now;
+      }
     } else {
       nextScale =
         VIDEO_SCALE_STEPS[Math.max(0, VIDEO_SCALE_STEPS.indexOf(scale) - 1)] ??
         scale;
+      adaptationReason = "recovery";
     }
     if (
       hasBitrateCeiling &&
@@ -124,12 +148,16 @@ export function updateAdaptiveVideoState(
     nextScale !== scale ||
     nextFrameRate !== frameRate ||
     nextBitrate !== bitrate;
-  const result = {
+  const result: AdaptiveVideoState = {
     scale: nextScale,
     frameRate: nextFrameRate,
     pressureSamples: changed ? 0 : pressureSamples,
     healthySamples: changed ? 0 : healthySamples,
     changed,
+    adaptationReason: changed ? adaptationReason : "none",
+    lastFpsTargetChangeAt: changed
+      ? lastFpsTargetChangeAt
+      : (state?.lastFpsTargetChangeAt ?? null),
   };
   if (nextBitrate !== null) Object.assign(result, { maxBitrate: nextBitrate });
   return result;

@@ -2,10 +2,23 @@ import type { OwnedErrorValue } from "./shared-utilities.ts";
 
 import type { MediaCommandResult } from "./boundary.ts";
 
+import type { PendingSignalEntry } from "../pending-signal-queue.ts";
+
 import type {
   ParticipantMediaCapabilities,
   VideoCodecName,
 } from "./video-codec-capabilities.ts";
+
+export type P2pIcePolicy = "direct-only" | "direct-or-relay";
+
+export interface NativeP2pCandidateReport {
+  peerId: string;
+  path: "direct" | "relay";
+  localCandidateType: string | null;
+  remoteCandidateType: string | null;
+  rttMs: number | null;
+  protocol: string | null;
+}
 
 export interface NativeP2pFlowEntry {
   key: string;
@@ -89,6 +102,7 @@ export interface NativeP2pHealthMesh {
   localSources: Map<string, NativeP2pLocalSourceEntry>;
   sourceTransmission: Map<string, boolean>;
   epoch: number;
+  p2pIcePolicy: "direct-only" | "direct-or-relay";
   fail: (reason: string, error?: OwnedErrorValue) => MediaCommandResult;
   emitSnapshot: () => MediaCommandResult;
   sendControl: (data: Record<string, unknown>) => boolean;
@@ -96,6 +110,7 @@ export interface NativeP2pHealthMesh {
 
 export interface NativeP2pMeshOptions {
   iceServers: unknown[];
+  p2pIcePolicy?: P2pIcePolicy;
   sendSignal: (payload: Record<string, unknown>) => MediaCommandResult;
   onRemoteTrack: (entry: Record<string, unknown>) => MediaCommandResult;
   onRemoteTrackEnded: (entry: Record<string, unknown>) => MediaCommandResult;
@@ -112,7 +127,7 @@ export interface NativeP2pMeshOptions {
 
 export interface NativeP2pSignalingMesh {
   connections: Map<string, NativeP2pConnectionState>;
-  pendingSignals: Map<number, Array<Record<string, unknown>>>;
+  pendingSignals: Map<number, PendingSignalEntry[]>;
   pendingSignalLimit: number;
   sendSignal: (payload: Record<string, unknown>) => MediaCommandResult;
   mode: string;

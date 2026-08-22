@@ -17,6 +17,10 @@ import {
   requiresP2pLiveness,
 } from "../app/shared/native-p2p.ts";
 import {
+  isAllowedP2pPair,
+  isDirectP2pPair,
+} from "../app/shared/native-p2p-common.ts";
+import {
   collectPeerConnectionDiagnosticStats,
   collectPeerConnectionStats,
   collectVideoRtpStats,
@@ -50,6 +54,32 @@ test("topology classification distinguishes direct, mesh, and IPv4 SFU", () => {
   assert.equal(
     classifyTopology({ mode: "p2p", participantCount: 4 }).label,
     "Mesh (P2P)",
+  );
+  assert.equal(
+    classifyTopology({
+      mode: "p2p",
+      participantCount: 2,
+      p2pPath: "relay",
+    }).label,
+    "P2P via TURN",
+  );
+  assert.equal(
+    classifyTopology({
+      mode: "p2p",
+      participantCount: 4,
+      p2pPath: "relay",
+    }).label,
+    "Mesh (TURN-assisted)",
+  );
+  assert.equal(
+    classifyTopology({ mode: "p2p", participantCount: 2, p2pPath: "relay" })
+      .mode,
+    "p2p-relay",
+  );
+  assert.equal(
+    classifyTopology({ mode: "p2p", participantCount: 4, p2pPath: "relay" })
+      .mode,
+    "p2p-mesh-relay",
   );
   assert.equal(
     classifyTopology({
@@ -189,7 +219,7 @@ test("direct P2P configuration gathers STUN candidates without TURN allocations"
   );
 });
 
-test("P2P pair accepts direct candidates and rejects relayed paths", () => {
+test("P2P pair viability no longer equates direct-only with usable", () => {
   const hostPair = {
     state: "succeeded",
     local: { candidateType: "host" },
@@ -198,7 +228,29 @@ test("P2P pair accepts direct candidates and rejects relayed paths", () => {
   assert.equal(isViableP2pPair(hostPair), true);
   assert.equal(
     isViableP2pPair({ ...hostPair, remote: { candidateType: "relay" } }),
+    true,
+    "viability must accept a relayed pair; policy decides allowance",
+  );
+  assert.equal(isDirectP2pPair(hostPair), true);
+  assert.equal(
+    isDirectP2pPair({ ...hostPair, remote: { candidateType: "relay" } }),
     false,
+  );
+  assert.equal(
+    isAllowedP2pPair(
+      { ...hostPair, remote: { candidateType: "relay" } },
+      "direct-only",
+    ),
+    false,
+    "direct-only policy must reject a relayed pair",
+  );
+  assert.equal(
+    isAllowedP2pPair(
+      { ...hostPair, remote: { candidateType: "relay" } },
+      "direct-or-relay",
+    ),
+    true,
+    "direct-or-relay policy must allow a relayed pair",
   );
 });
 

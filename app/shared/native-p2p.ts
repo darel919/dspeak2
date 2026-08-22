@@ -11,7 +11,10 @@ import {
   isP2pLivenessExpired,
   isViableP2pPair,
   mediaFlowSnapshot,
+  normalizeIceServers,
+  normalizeP2pIcePolicy,
   p2pActiveLivenessTimeoutMs,
+  p2pIcePolicyAllowsRelay,
   p2pRemoteFeedKey,
   requiresP2pLiveness,
   selectedPairSnapshot,
@@ -22,6 +25,7 @@ import { NativeP2pLifecycleMethods } from "./native-p2p/lifecycle.ts";
 import type {
   NativeP2pMeshOptions,
   NativeP2pMeshSurface,
+  P2pIcePolicy,
 } from "./types/native-p2p.ts";
 export class NativeP2pMesh {
   declare configuration: NativeP2pMeshSurface["configuration"];
@@ -57,6 +61,7 @@ export class NativeP2pMesh {
   declare pendingSignalLimit: number;
   declare jitterBufferMinimumDelay: number;
   declare jitterBufferTargetDelay: number;
+  declare p2pIcePolicy: P2pIcePolicy;
   declare fail: NativeP2pMeshSurface["fail"];
   declare emitSnapshot: NativeP2pMeshSurface["emitSnapshot"];
   declare sendControl: NativeP2pMeshSurface["sendControl"];
@@ -116,9 +121,13 @@ export class NativeP2pMesh {
     getAudioStereo,
     mediaCapabilities,
     getControlConnectionEpoch,
+    p2pIcePolicy,
   }: NativeP2pMeshOptions) {
+    const icePolicy = normalizeP2pIcePolicy(p2pIcePolicy);
     this.configuration = {
-      iceServers: directIceServers(iceServers),
+      iceServers: p2pIcePolicyAllowsRelay(icePolicy)
+        ? normalizeIceServers(iceServers)
+        : directIceServers(iceServers),
       bundlePolicy: "max-bundle",
       rtcpMuxPolicy: "require",
       iceCandidatePoolSize: 2,
@@ -155,6 +164,7 @@ export class NativeP2pMesh {
     this.pendingSignalLimit = 256;
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
+    this.p2pIcePolicy = icePolicy;
   }
 }
 

@@ -39,18 +39,27 @@ export function classifyTopology({
   participantCount,
   candidatePair,
   healthy = true,
+  p2pPath,
 }: {
   mode: string;
   participantCount: number;
   candidatePair?: { remote?: { address?: string | null } } | null;
   healthy?: boolean;
+  p2pPath?: string | null;
 }) {
   if (mode === "probing") return { mode: "probing", label: "Connecting" };
   if (mode === "switching") return { mode: "switching", label: "Switching" };
   if (mode === "p2p") {
+    const relay = p2pPath === "relay";
     return participantCount === 2
-      ? { mode: "p2p-direct", label: "Direct (P2P)" }
-      : { mode: "p2p-mesh", label: "Mesh (P2P)" };
+      ? {
+          mode: relay ? "p2p-relay" : "p2p-direct",
+          label: relay ? "P2P via TURN" : "Direct (P2P)",
+        }
+      : {
+          mode: relay ? "p2p-mesh-relay" : "p2p-mesh",
+          label: relay ? "Mesh (TURN-assisted)" : "Mesh (P2P)",
+        };
   }
   if (mode === "sfu") {
     const family = addressFamily(candidatePair?.remote?.address);
@@ -98,6 +107,7 @@ interface TopologySnapshot {
   healthy?: boolean;
   epoch?: number;
   reason?: string | null;
+  p2pPath?: string | null;
   activatedAt?: string | null;
 }
 
@@ -117,6 +127,7 @@ export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
     participantCount: snapshot.participantCount ?? participantIds.length,
     candidatePair: snapshot.candidatePair,
     healthy: snapshot.healthy,
+    p2pPath: snapshot.p2pPath,
   });
   const nodes: TopologyNode[] = participantIds.map((id, index) =>
     participantNode(id, index, snapshot.localPeerId, snapshot.peerHealth),
@@ -125,7 +136,9 @@ export function buildTopologyGraph(snapshot: TopologySnapshot = {}) {
   const switching = snapshot.mode === "switching";
   const showP2p =
     classification.mode === "p2p-direct" ||
+    classification.mode === "p2p-relay" ||
     classification.mode === "p2p-mesh" ||
+    classification.mode === "p2p-mesh-relay" ||
     (switching &&
       (snapshot.currentMode === "p2p" || snapshot.target === "p2p"));
   const showSfu =

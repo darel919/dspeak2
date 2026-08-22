@@ -379,6 +379,18 @@ export async function mediaFlowSnapshot(
   };
 }
 
+export type SelectedP2pPath = "direct" | "relay";
+
+export type P2pIcePolicy = "direct-only" | "direct-or-relay";
+
+export function p2pIcePolicyAllowsRelay(policy: P2pIcePolicy): boolean {
+  return policy === "direct-or-relay";
+}
+
+export function normalizeP2pIcePolicy<T>(policy: T): P2pIcePolicy {
+  return policy === "direct-or-relay" ? "direct-or-relay" : "direct-only";
+}
+
 export function isViableP2pPair(
   pair: Record<string, unknown> | null | undefined,
 ) {
@@ -388,10 +400,54 @@ export function isViableP2pPair(
     !!pair &&
     pair.state === "succeeded" &&
     !!local?.candidateType &&
-    !!remote?.candidateType &&
-    local.candidateType !== "relay" &&
-    remote.candidateType !== "relay"
+    !!remote?.candidateType
   );
+}
+
+export function classifyP2pPath(
+  pair: Record<string, unknown> | null | undefined,
+): SelectedP2pPath | null {
+  if (!pair) return null;
+  const local = isRecord(pair.local) ? pair.local : null;
+  const remote = isRecord(pair.remote) ? pair.remote : null;
+  if (!local?.candidateType || !remote?.candidateType) return null;
+  if (local.candidateType === "relay" || remote.candidateType === "relay")
+    return "relay";
+  return "direct";
+}
+
+export function isDirectP2pPair(
+  pair: Record<string, unknown> | null | undefined,
+) {
+  return classifyP2pPath(pair) === "direct";
+}
+
+export function isAllowedP2pPair(
+  pair: Record<string, unknown> | null | undefined,
+  policy: P2pIcePolicy,
+) {
+  if (!isViableP2pPair(pair)) return false;
+  if (p2pIcePolicyAllowsRelay(policy)) return true;
+  return isDirectP2pPair(pair);
+}
+
+export function qualificationUsesRelay(
+  candidateReports: Array<Record<string, unknown>> | null | undefined,
+): boolean {
+  const reports = Array.isArray(candidateReports) ? candidateReports : [];
+  for (const report of reports) {
+    const record = isRecord(report) ? report : null;
+    if (!record) continue;
+    if (record.path === "relay") return true;
+    const localType = isExternalString(record.localCandidateType)
+      ? record.localCandidateType
+      : null;
+    const remoteType = isExternalString(record.remoteCandidateType)
+      ? record.remoteCandidateType
+      : null;
+    if (localType === "relay" || remoteType === "relay") return true;
+  }
+  return false;
 }
 
 export function configureP2pSender(

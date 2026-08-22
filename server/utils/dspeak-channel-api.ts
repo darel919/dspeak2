@@ -345,10 +345,7 @@ export function createChannelApiHandler(dependencies: ChannelApiDependencies) {
           data: { channelId: channel.id, mediaPolicy: update.mediaPolicy },
         });
         try {
-<<<<<<< HEAD
-=======
           /* SAFETY: validateMediaPolicy above narrowed update.mediaPolicy to a plain object record. */
->>>>>>> 246fcfc6e431f3cabb126bfd5afc42e1feca0bff
           await pushMediaPolicy(
             String(channel.id),
             update.mediaPolicy as Record<string, unknown>,

@@ -126,14 +126,18 @@ export function applyLowSpecNativeVideoProfile(
   const maximum: LowSpecVideoMaximum = screen
     ? { width: 1280, height: 720, resolution: "720p" }
     : { width: 640, height: 360, resolution: "360p" };
+  const frameRateFloor =
+    settings.qualityPriority === "resolution"
+      ? VIDEO_RESOLUTION_PRIORITY_FRAME_RATE_MIN
+      : LOW_SPEC_VIDEO_FRAME_RATE_MIN;
   const width = Number(settings.width);
   const height = Number(settings.height);
   const requestedWidth = Number.isFinite(width) && width > 0 ? width : null;
   const requestedHeight = Number.isFinite(height) && height > 0 ? height : null;
   const requestedFrameRate = Number(settings.frameRate);
   const frameRate = Number.isFinite(requestedFrameRate)
-    ? Math.min(15, requestedFrameRate)
-    : 15;
+    ? Math.min(frameRateFloor, requestedFrameRate)
+    : frameRateFloor;
   const maxBitrate = Number(settings.maxBitrate);
   const bitrateCeiling = screen ? 1_800_000 : 900_000;
   const profiledSettings = {
@@ -141,7 +145,7 @@ export function applyLowSpecNativeVideoProfile(
     resolution: maximum.resolution,
     width: Math.min(requestedWidth || maximum.width, maximum.width),
     height: Math.min(requestedHeight || maximum.height, maximum.height),
-    frameRate: Math.max(LOW_SPEC_VIDEO_FRAME_RATE_MIN, frameRate),
+    frameRate: Math.max(frameRateFloor, frameRate),
     lowSpec: true,
     maxBitrate: bitrateCeiling,
   };
