@@ -317,7 +317,10 @@ test("Cloudflare sessions without active media are ready after bootstrap", () =>
 
 test("Cloudflare SFU readiness requires every expected RTP flow", async () => {
   const client = session();
-  client.peerConnection = { connectionState: "connected" };
+  client.peerConnection = {
+    connectionState: "connected",
+    iceConnectionState: "connected",
+  };
   let outboundBytes = 100;
   let inboundBytes = 200;
   let timestamp = 1000;

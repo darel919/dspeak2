@@ -22,6 +22,7 @@ import {
 import { NativeP2pTopologyMethods } from "./native-p2p/topology.ts";
 import { NativeP2pSourcesMethods } from "./native-p2p/sources.ts";
 import { NativeP2pLifecycleMethods } from "./native-p2p/lifecycle.ts";
+import { TrackSourceAssociation } from "./track-source-association.ts";
 import type {
   NativeP2pMeshOptions,
   NativeP2pMeshSurface,
@@ -103,6 +104,8 @@ export class NativeP2pMesh {
   declare setSourceTransmission: NativeP2pMeshSurface["setSourceTransmission"];
   declare setRemoteReceiving: NativeP2pMeshSurface["setRemoteReceiving"];
   declare isMediaReady: NativeP2pMeshSurface["isMediaReady"];
+  declare remoteSourcesExpected: NativeP2pMeshSurface["remoteSourcesExpected"];
+  declare trackSourceAssociation: NativeP2pMeshSurface["trackSourceAssociation"];
   declare stats: NativeP2pMeshSurface["stats"];
   declare diagnosticStats: NativeP2pMeshSurface["diagnosticStats"];
   declare getInboundTrackStats: NativeP2pMeshSurface["getInboundTrackStats"];
@@ -162,6 +165,7 @@ export class NativeP2pMesh {
     this.sourceOperations = new Map();
     this.pendingSignals = new Map();
     this.pendingSignalLimit = 256;
+    this.trackSourceAssociation = new TrackSourceAssociation();
     this.jitterBufferMinimumDelay = 0;
     this.jitterBufferTargetDelay = 20;
     this.p2pIcePolicy = icePolicy;

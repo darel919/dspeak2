@@ -922,6 +922,7 @@ export function useHybridMediaSession() {
     getP2pMesh: () => p2pMesh,
     handoff,
     iceConnectedBoth,
+    isDeafened: () => voiceStore.deafened,
     localSources,
     mediaConnectionState,
     mediaGeneration,

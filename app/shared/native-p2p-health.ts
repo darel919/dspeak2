@@ -45,8 +45,9 @@ export function bindHealthChannel(
             }),
           );
         } catch (error) {
-          mesh.fail(
+          mesh.failPeer?.(
             "health-channel-send-failed",
+            state.peerId,
             asError(error, "Native P2P health channel send failed"),
           );
         }
@@ -59,7 +60,7 @@ export function bindHealthChannel(
   channel.onopen = () => checkQualification(mesh);
   channel.onclose = () => {
     if (requiresP2pLiveness(mesh.mode, mesh.readyReported))
-      mesh.fail("health-channel-closed");
+      mesh.failPeer?.("health-channel-closed", state.peerId);
   };
 }
 
@@ -68,12 +69,13 @@ export function handleConnectionState(
   state: NativeP2pConnectionState,
 ) {
   const connectionState = state.pc.connectionState;
-  if (connectionState === "failed") mesh.fail("peer-connection-failed");
+  if (connectionState === "failed")
+    mesh.failPeer?.("peer-connection-failed", state.peerId);
   if (
     connectionState === "closed" &&
     requiresP2pLiveness(mesh.mode, mesh.readyReported)
   )
-    mesh.fail("peer-connection-closed");
+    mesh.failPeer?.("peer-connection-closed", state.peerId);
   mesh.emitSnapshot();
 }
 
@@ -90,8 +92,9 @@ export function handleIceState(
         try {
           state.pc.restartIce();
         } catch (error) {
-          mesh.fail(
+          mesh.failPeer?.(
             "ice-restart-failed",
+            state.peerId,
             asError(error, "Native P2P ICE restart failed"),
           );
           return;
@@ -101,11 +104,11 @@ export function handleIceState(
             state.pc.iceConnectionState === "disconnected" ||
             state.pc.iceConnectionState === "failed"
           )
-            mesh.fail("ice-restart-timeout");
+            mesh.failPeer?.("ice-restart-timeout", state.peerId);
         }, P2P_ICE_RESTART_TIMEOUT_MS);
         return;
       }
-      mesh.fail("ice-disconnected");
+      mesh.failPeer?.("ice-disconnected", state.peerId);
     }, P2P_DISCONNECT_GRACE_MS);
   } else {
     if (state.disconnectTimer) clearTimeout(state.disconnectTimer);
@@ -116,7 +119,8 @@ export function handleIceState(
     )
       state.restarted = false;
   }
-  if (state.pc.iceConnectionState === "failed") mesh.fail("ice-failed");
+  if (state.pc.iceConnectionState === "failed")
+    mesh.failPeer?.("ice-failed", state.peerId);
   mesh.emitSnapshot();
 }
 
@@ -154,8 +158,9 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
               JSON.stringify({ type: "health", sequence, sentAt: checkedAt }),
             );
           } catch (error) {
-            mesh.fail(
+            mesh.failPeer?.(
               "health-channel-send-failed",
+              state.peerId,
               asError(error, "Native P2P health channel send failed"),
             );
           }
@@ -164,7 +169,7 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
           requireLiveness &&
           isP2pLivenessExpired(state.lastHealthAt, checkedAt, healthTimeout)
         )
-          mesh.fail("health-timeout");
+          mesh.failPeer?.("health-timeout", state.peerId);
         try {
           const report = await state.pc.getStats();
           state.selectedPair = await selectedPairSnapshot(state.pc, report);
@@ -248,7 +253,8 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
                     healthTimeout,
                   ),
                 )));
-          if (mediaFlowTimedOut) mesh.fail("media-flow-timeout");
+          if (mediaFlowTimedOut)
+            mesh.failPeer?.("media-flow-timeout", state.peerId);
           if (outboundProgressing) state.lastOutboundProgressAt = checkedAt;
           if (inboundProgressing) state.lastInboundProgressAt = checkedAt;
           state.mediaReady =
@@ -259,7 +265,7 @@ export function startHealthChecks(mesh: NativeP2pHealthMesh) {
             state.selectedPair &&
             !isAllowedP2pPair(state.selectedPair, mesh.p2pIcePolicy)
           )
-            mesh.fail("relay-candidate-not-allowed");
+            mesh.failPeer?.("relay-candidate-not-allowed", state.peerId);
         } catch {
           state.selectedPair = null;
           state.mediaReady = false;

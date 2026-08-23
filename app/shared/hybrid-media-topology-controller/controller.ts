@@ -8,6 +8,7 @@ import {
 import { createTopologyProviderActions } from "./providers.ts";
 import { createTopologyResourceHelpers } from "./resources.ts";
 import { resolveMediaProviderIdentity } from "../media-provider-identity.ts";
+import { classifyMediaError } from "../media-cancellation.ts";
 import { remoteMediaFeedKey } from "../remote-media-handoff.ts";
 import { normalizeIceServers } from "../native-p2p-common.ts";
 import type {
@@ -99,6 +100,7 @@ export function createHybridMediaTopologyController({
   getP2pMesh,
   handoff,
   iceConnectedBoth,
+  isDeafened = () => false,
   localSources,
   mediaConnectionState,
   mediaGeneration,
@@ -266,6 +268,7 @@ export function createHybridMediaTopologyController({
         onRemoteTrackEnded,
         onStateChange,
         getVideoSettings,
+        getDeafened: isDeafened,
       });
       session.provider = provider;
       session.providerId = providerId;
@@ -573,6 +576,18 @@ export function createHybridMediaTopologyController({
           : null;
     if (selectedProvider) setSelectedSfuProvider(selectedProvider);
     handoff.pruneExpectedFeeds(topologyState.value.peers, getLocalPeerId());
+    const desiredRemoteSources = new Map<string, boolean>();
+    for (const peer of topologyState.value.peers) {
+      if (String(peer.peerId) === String(getLocalPeerId())) continue;
+      const sources = Array.isArray(peer.sources) ? peer.sources : [];
+      for (const source of sources.map(String)) {
+        if (source === "screen" || source === "screen-audio") continue;
+        desiredRemoteSources.set(source, true);
+      }
+    }
+    const sfuSession = getSfu();
+    if (sfuSession && "desiredRemoteSources" in sfuSession)
+      sfuSession.desiredRemoteSources = desiredRemoteSources;
     onTopologyStateUpdated?.(data, topologyState.value);
     refreshPublicMaps();
     refreshTopologyGraph();
@@ -730,7 +745,6 @@ export function createHybridMediaTopologyController({
       if (data.mode === "p2p") {
         const currentProvider = getActiveProvider();
         if (currentProvider === "p2p") {
-          // Already on P2P, just update topology and converge
           const mesh = ensureP2p();
           if (mesh) {
             await mesh.applyTopology({
@@ -740,7 +754,6 @@ export function createHybridMediaTopologyController({
             await publishLocalSources(mesh);
           }
         } else if (currentProvider === "sfu") {
-          // Switching from SFU to P2P - retire SFU, promote prepared P2P if available
           await closeSfuSafely();
           handoff.retire("sfu");
           const mesh = ensureP2p();
@@ -754,7 +767,6 @@ export function createHybridMediaTopologyController({
           await mesh.applyTopology({ ...data, localPeerId: getLocalPeerId() });
           await publishLocalSources(mesh);
         } else {
-          // No current provider, establish P2P
           const mesh = ensureP2p();
           if (!mesh) {
             send({
@@ -832,10 +844,12 @@ export function createHybridMediaTopologyController({
     topologyError: Error | string,
   ) {
     if (topologyEventKey(data) !== latestTopologyKey) return;
+    const classification = classifyMediaError(topologyError);
     if (
-      topologyError instanceof Error &&
-      (topologyError.name === "AbortError" ||
-        /superseded/i.test(topologyError.message))
+      classification.cancellation ||
+      (topologyError instanceof Error &&
+        (topologyError.name === "AbortError" ||
+          /superseded/i.test(topologyError.message)))
     ) {
       mediaDebug("topology.superseded", {
         mode: data.mode,

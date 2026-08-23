@@ -3,6 +3,7 @@ import {
   collectPeerConnectionStats,
 } from "../rtc-media-stats.ts";
 import { selectedPairSnapshot } from "../native-p2p-common.ts";
+import { mediaDebug } from "../media-debug.ts";
 import {
   checkQualification,
   startHealthChecks,
@@ -131,6 +132,12 @@ export class NativeP2pLifecycleMethods {
     );
   }
 
+  remoteSourcesExpected(this: NativeP2pMeshSurface) {
+    for (const state of this.connections.values())
+      if (state.expectedRemoteSources > 0) return true;
+    return this.remoteSources.size > 0;
+  }
+
   emitSnapshot(this: NativeP2pMeshSurface) {
     this.getSnapshot()
       .then((snapshot) => this.onSnapshot(snapshot))
@@ -175,6 +182,29 @@ export class NativeP2pLifecycleMethods {
     if (this.failureReportedKey === key) return;
     this.failureReportedKey = key;
     this.onFailure(reason, error);
+  }
+
+  failPeer(
+    this: NativeP2pMeshSurface,
+    reason: string,
+    peerId: string,
+    error?: OwnedErrorValue,
+  ) {
+    if (this.mode !== "probing" && this.mode !== "p2p") return;
+    const state = this.connections.get(peerId);
+    if (!state) return;
+    mediaDebug("p2p.peer-failed", { peerId, reason });
+    const sourcesWereExpected =
+      this.remoteSourcesExpected() || state.expectedRemoteSources > 0;
+    this.closeConnection(peerId);
+    if (this.connections.size > 0 || !sourcesWereExpected) {
+      this.readyReported = false;
+      this.failureReportedKey = null;
+      this.checkQualification();
+      this.emitSnapshot();
+      return;
+    }
+    this.fail(reason, error);
   }
 
   closeConnection(this: NativeP2pMeshSurface, peerId: string) {

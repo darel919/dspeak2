@@ -388,12 +388,16 @@ export class NativeP2pTopologyMethods {
   ) {
     const track = event.track;
     const sourceKey = `${state.peerId}:${track.id}`;
+    const associated =
+      this.trackSourceAssociation?.lookupByTrack(state.peerId, track.id) ??
+      null;
     const exactSource = this.remoteSources.get(sourceKey);
     const expectedKind = track.kind;
     const unmatchedSources = [...this.remoteSources]
       .filter(
         ([key, source]) =>
           key.startsWith(`${state.peerId}:`) &&
+          !key.includes(`:${track.id}`) &&
           ![...state.remoteTracks.values()].some(
             (entry) => entry.source === source,
           ) &&
@@ -404,6 +408,7 @@ export class NativeP2pTopologyMethods {
       .map(([, source]) => source);
     const source: string =
       exactSource ||
+      associated?.source ||
       (unmatchedSources.length === 1
         ? String(unmatchedSources[0])
         : `${expectedKind}:${String(track.id)}`);
@@ -420,9 +425,16 @@ export class NativeP2pTopologyMethods {
       userId: state.userId,
       provider: "p2p",
       source,
-      ownerSource: this.remoteSourceOwners.get(sourceKey) ?? null,
-      connectionEpoch: this.getControlConnectionEpoch?.() || 1,
-      sourceGeneration: this.remoteSourceGenerations.get(sourceKey) || 1,
+      ownerSource:
+        associated?.ownerSource ??
+        this.remoteSourceOwners.get(sourceKey) ??
+        null,
+      connectionEpoch:
+        associated?.connectionEpoch || this.getControlConnectionEpoch?.() || 1,
+      sourceGeneration:
+        associated?.generation ||
+        this.remoteSourceGenerations.get(sourceKey) ||
+        1,
       nativeTrackHandle: track.id,
       receiver: event.receiver,
       receiverIncarnationId: `p2p:${state.peerId}:${track.id}`,
@@ -433,6 +445,18 @@ export class NativeP2pTopologyMethods {
     state.retiredRemoteTracks.delete(source);
     state.remoteTracks.set(source, entry);
     this.onRemoteTrack(entry);
+    if (!exactSource && !associated && this.trackSourceAssociation) {
+      this.trackSourceAssociation.park(
+        state.peerId,
+        track.id,
+        track.kind,
+        () => {
+          if (state.remoteTracks.get(source)?.track !== track) return;
+          state.remoteTracks.delete(source);
+          this.handleTrack(state, event);
+        },
+      );
+    }
     track.addEventListener(
       "ended",
       () => {

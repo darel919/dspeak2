@@ -65,6 +65,9 @@ export class CloudflareLifecycleMethods {
   }
 
   expectedInboundFlowCount(this: CloudflareSessionLike) {
+    const desired = this.desiredRemoteSources;
+    if (desired instanceof Map && desired.size > 0)
+      return [...desired.values()].filter((wanted) => wanted !== false).length;
     return [...this.consumers.values()].filter(
       (entry) => entry.receiving !== false,
     ).length;
@@ -83,6 +86,10 @@ export class CloudflareLifecycleMethods {
       return {
         ...this.connectionState(),
         ready: false,
+        providerReady: Boolean(this.sessionId),
+        transportConnected: false,
+        rtpFlowing: false,
+        presentationReady: false,
         outboundExpected,
         outboundFlowing: 0,
         inboundExpected,
@@ -157,12 +164,20 @@ export class CloudflareLifecycleMethods {
     const outboundFlowing = outboundResults.filter(Boolean).length;
     const inboundFlowing = inboundResults.filter(Boolean).length;
     const state = this.connectionState();
+    const transportConnected =
+      state.ready === true &&
+      String(this.peerConnection?.iceConnectionState || "new") === "connected";
+    const rtpFlowing =
+      outboundFlowing >= outboundExpected && inboundFlowing >= inboundExpected;
+    const deafened = this.getDeafened?.() === true;
     return {
       ...state,
-      ready:
-        state.ready &&
-        outboundFlowing >= outboundExpected &&
-        inboundFlowing >= inboundExpected,
+      ready: transportConnected && rtpFlowing,
+      providerReady: Boolean(this.sessionId),
+      transportConnected,
+      rtpFlowing,
+      presentationReady:
+        state.ready === true && transportConnected && rtpFlowing && !deafened,
       outboundExpected,
       outboundFlowing,
       inboundExpected,
@@ -202,8 +217,11 @@ export class CloudflareLifecycleMethods {
             trackName: entry.trackName,
             source: entry.source,
             ownerSource: entry.ownerSource || null,
-            generation: this.sessionGeneration,
-            connectionEpoch: this.connectionEpoch,
+            generation: entry.generation,
+            connectionEpoch:
+              entry.canonicalConnectionEpoch ??
+              this.getControlConnectionEpoch?.() ??
+              0,
             closed: true,
           },
         });

@@ -11,10 +11,19 @@ import {
   type ExternalObject,
   type MediaCommandResult,
 } from "./types/boundary.ts";
+import {
+  sourceIncarnationNewer,
+  sourceIncarnationStale,
+} from "./media-cancellation.ts";
 import type {
   NativeP2pConnectionState,
+  NativeP2pMeshSurface,
   NativeP2pSignalingMesh,
 } from "./types/native-p2p.ts";
+
+type SignalingMeshWithAssociation = NativeP2pSignalingMesh & {
+  trackSourceAssociation?: NativeP2pMeshSurface["trackSourceAssociation"];
+};
 
 function recordValue<T>(value: T): ExternalObject | null {
   return isExternalRecord(value) ? value : null;
@@ -262,17 +271,30 @@ export async function applyPeerSignal(
     const previousConnectionEpoch =
       mesh.remoteSourceConnectionEpochs.get(sourceKey) || 0;
 
-    const isStale =
-      connectionEpoch < previousConnectionEpoch ||
-      (connectionEpoch === previousConnectionEpoch &&
-        generation > 0 &&
-        generation < previousGeneration);
+    const isStale = sourceIncarnationStale(
+      { participantId: state.peerId, source, generation, connectionEpoch },
+      previousGeneration,
+      previousConnectionEpoch,
+    );
     if (isStale) return;
 
     mesh.remoteSources.set(sourceKey, source);
     mesh.remoteSourceOwners.set(sourceKey, ownerSource);
     mesh.remoteSourceGenerations.set(sourceKey, generation);
     mesh.remoteSourceConnectionEpochs.set(sourceKey, connectionEpoch);
+    if (trackId) {
+      /* SAFETY: the real mesh always carries the association registry. */
+      (mesh as SignalingMeshWithAssociation).trackSourceAssociation?.associate(
+        state.peerId,
+        trackId,
+        {
+          source,
+          generation,
+          connectionEpoch,
+          ownerSource,
+        },
+      );
+    }
     let current = [...state.remoteTracks.values()].find(
       (entry) => String(entry.track?.id) === trackId,
     );
@@ -321,12 +343,21 @@ export async function applyPeerSignal(
       const currentGeneration = mesh.remoteSourceGenerations.get(key) || 0;
       const currentConnectionEpoch =
         mesh.remoteSourceConnectionEpochs.get(key) || 0;
-      const isStale =
-        removedConnectionEpoch < currentConnectionEpoch ||
-        (removedConnectionEpoch === currentConnectionEpoch &&
-          removedGeneration > 0 &&
-          currentGeneration > removedGeneration);
-      if (isStale) continue;
+      const removalIsAuthoritative = sourceIncarnationNewer(
+        {
+          participantId: state.peerId,
+          source,
+          generation: removedGeneration,
+          connectionEpoch: removedConnectionEpoch,
+        },
+        {
+          participantId: state.peerId,
+          source,
+          generation: currentGeneration,
+          connectionEpoch: currentConnectionEpoch,
+        },
+      );
+      if (!removalIsAuthoritative) continue;
       mesh.remoteSourceOwners.delete(key);
       mesh.remoteSources.delete(key);
       mesh.remoteSourceGenerations.delete(key);
@@ -358,12 +389,21 @@ export async function applyPeerSignal(
     const currentConnectionEpoch =
       mesh.remoteSourceConnectionEpochs.get(sourceKey) || 0;
     const currentGeneration = mesh.remoteSourceGenerations.get(sourceKey) || 0;
-    const isStale =
-      restoredConnectionEpoch < currentConnectionEpoch ||
-      (restoredConnectionEpoch === currentConnectionEpoch &&
-        restoredGeneration > 0 &&
-        restoredGeneration < currentGeneration);
-    if (isStale) return;
+    const restoreIsAuthoritative = sourceIncarnationNewer(
+      {
+        participantId: state.peerId,
+        source,
+        generation: restoredGeneration,
+        connectionEpoch: restoredConnectionEpoch,
+      },
+      {
+        participantId: state.peerId,
+        source,
+        generation: currentGeneration,
+        connectionEpoch: currentConnectionEpoch,
+      },
+    );
+    if (!restoreIsAuthoritative) return;
     mesh.remoteSourceConnectionEpochs.set(sourceKey, restoredConnectionEpoch);
     mesh.remoteSourceGenerations.set(sourceKey, restoredGeneration);
     const entry =

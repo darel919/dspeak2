@@ -2,6 +2,8 @@ import { mediaDebug } from "./media-debug.ts";
 import type { HybridSessionTerminationContext } from "./types/hybrid-media-session.ts";
 import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
+const LEAVE_COMPLETION_GRACE_MS = 750;
+
 export function createHybridMediaSessionTermination({
   capture,
   clearAttenuation,
@@ -53,13 +55,7 @@ export function createHybridMediaSessionTermination({
     closeMediaSignalingForRecovery(signaling.getSocket());
   }
 
-  function disconnect() {
-    rtpStatsSamples.clear();
-    cancelConnect?.();
-    resolveTopologyWaiter(new Error("Media signaling connection stopped"));
-    setChannelId(null);
-    disposeVisibility();
-
+  async function disconnect(): Promise<void> {
     const wasConnected = connected.value;
 
     let leavePromise: Promise<unknown> | null = null;
@@ -77,6 +73,11 @@ export function createHybridMediaSessionTermination({
       }
     }
 
+    rtpStatsSamples.clear();
+    cancelConnect?.();
+    resolveTopologyWaiter(new Error("Media signaling connection stopped"));
+    setChannelId(null);
+    disposeVisibility();
     setIntentionalClose(true);
 
     stopLocalVoiceDetection();
@@ -112,19 +113,47 @@ export function createHybridMediaSessionTermination({
     participantSfuRoundTripTimes.value = {};
     refreshPublicMaps();
     refreshTopologyGraph();
-    mediaDebug("session.disconnected");
 
-    if (wasConnected && leavePromise) {
-      const timeout = new Promise((resolve) => setTimeout(resolve, 750));
-      Promise.race([leavePromise, timeout]).then(() => {
-        signaling.stop();
-      });
-    } else {
-      signaling.stop();
+    const signalingStop = once(signaling.stop);
+    try {
+      if (leavePromise) {
+        const timeout = new Promise<"timeout">((resolve) =>
+          setTimeout(() => resolve("timeout"), LEAVE_COMPLETION_GRACE_MS),
+        );
+        const outcome = await Promise.race([
+          leavePromise.then(
+            () => "completed" as const,
+            (leaveError) => {
+              const detail =
+                leaveError instanceof Error
+                  ? { message: leaveError.message }
+                  : { message: String(leaveError) };
+              mediaDebug("session.leave-failed", detail);
+              return "rejected" as const;
+            },
+          ),
+          timeout,
+        ]);
+        mediaDebug("session.leave-settled", { outcome });
+      }
+    } finally {
+      signalingStop();
     }
+    refreshPublicMaps();
+    refreshTopologyGraph();
+    mediaDebug("session.disconnected");
   }
 
   return { disconnect, failSession };
+}
+
+function once(stop: () => void): () => void {
+  let called = false;
+  return () => {
+    if (called) return;
+    called = true;
+    stop();
+  };
 }
 
 function closeMediaSignalingForRecovery(socket: WebSocket | null) {

@@ -219,3 +219,58 @@ test("provider error responses are offered to the request handler before escalat
     globalThis.WebSocket = previousWebSocket;
   }
 });
+
+test("provider heartbeat silence closes the socket and reports failure once", async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = FakeWebSocket;
+  const failures = [];
+  const previousSetInterval = globalThis.setInterval;
+  const timers = [];
+  globalThis.setInterval = (fn, ms) => {
+    timers.push({ fn, ms });
+    return timers.length;
+  };
+  globalThis.clearInterval = () => {};
+  try {
+    const provider = new MediasoupProviderSocket({
+      onMessage: () => {},
+      onFailure: (error) => failures.push(error),
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 10,
+    });
+    const opening = provider.connect({
+      signalingUrl: "wss://provider.example",
+      ticket: "ticket",
+    });
+    const socket = provider.socket;
+    socket.readyState = FakeWebSocket.OPEN;
+    socket.emit("message", { data: JSON.stringify({ type: "hi919" }) });
+    await opening;
+
+    assert.equal(timers.length, 1);
+    assert.equal(timers[0].ms, 5);
+
+    socket.sent = null;
+    timers[0].fn();
+    assert.deepEqual(JSON.parse(socket.sent), { type: "heartbeat", data: {} });
+
+    socket.emit("message", {
+      data: JSON.stringify({ type: "heartbeat-ack", sequence: 1 }),
+    });
+    assert.equal(socket.closeRequest, undefined);
+    assert.equal(failures.length, 0);
+
+    await new Promise((resolve) => setTimeout(resolve, 12));
+    timers[0].fn();
+    assert.deepEqual(socket.closeRequest, {
+      code: 4000,
+      reason: "Provider heartbeat timed out",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].message, /heartbeat timed out/);
+  } finally {
+    globalThis.setInterval = previousSetInterval;
+    globalThis.WebSocket = previousWebSocket;
+  }
+});

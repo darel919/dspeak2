@@ -157,3 +157,57 @@ test("local mutation sequence never advances from server snapshots", () => {
   const after = registry.getLocalMutationSequence();
   assert.ok(after >= before);
 });
+
+test("reverse-chronological close messages cannot delete the newer publication", () => {
+  const registry = createCloudflarePublicationRegistry();
+  const newer = {
+    trackName: "track-a",
+    peerId: "peer-1",
+    source: "camera",
+    connectionEpoch: 4,
+    generation: 2,
+  };
+  registry.update(newer);
+
+  const staleFirst = registry.reconcileExact([
+    {
+      trackName: "track-a",
+      peerId: "peer-1",
+      source: "camera",
+      connectionEpoch: 3,
+      generation: 9,
+      closed: true,
+    },
+  ]);
+
+  assert.deepEqual(registry.values(), [newer]);
+  assert.equal(staleFirst.removed.length, 0);
+
+  const legitimate = registry.reconcileExact([
+    {
+      trackName: "track-a",
+      peerId: "peer-1",
+      source: "camera",
+      connectionEpoch: 5,
+      generation: 0,
+      closed: true,
+    },
+  ]);
+
+  assert.deepEqual(registry.values(), []);
+  assert.equal(legitimate.removed.length, 1);
+
+  const lateDuplicate = registry.reconcileExact([
+    {
+      trackName: "track-a",
+      peerId: "peer-1",
+      source: "camera",
+      connectionEpoch: 4,
+      generation: 7,
+      closed: true,
+    },
+  ]);
+
+  assert.equal(lateDuplicate.canonicalSnapshot.length, 0);
+  assert.equal(lateDuplicate.removed.length, 0);
+});

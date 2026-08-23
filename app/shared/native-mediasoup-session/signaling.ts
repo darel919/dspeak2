@@ -127,22 +127,19 @@ export class NativeMediasoupSignalingMethods {
   ) {
     const nextProvider = String(provider || "mediasoup");
     this.selectedProvider = nextProvider;
-    const currentActivation = this.providerActivationPromise;
-    if (currentActivation) {
-      let activationError: Error | string | null = null;
-      try {
-        await currentActivation;
-      } catch (error) {
-        activationError = error instanceof Error ? error : String(error);
-      }
+    const previousActivation = this.providerActivationPromise;
+    if (previousActivation) {
+      const supersededError = Object.assign(
+        new Error("Native SFU provider activation was superseded"),
+        { code: "NATIVE_PROVIDER_ACTIVATION_SUPERSEDED" },
+      );
+      this.providerActivationPromise = Promise.reject(supersededError);
+      await previousActivation.catch(() => {});
       if (
-        activationError &&
         this.selectedProvider === nextProvider &&
-        !this.closed
+        this.activeSfuProvider === nextProvider
       )
-        throw activationError;
-      if (this.activeSfuProvider === nextProvider)
-        return this.cloudflareSession;
+        return this.cloudflareSession ?? null;
     }
     let activation: Promise<MediaCommandResult>;
     activation = (async () => {

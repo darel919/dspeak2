@@ -96,6 +96,11 @@ export async function handleProviderTicket(
   const provider = String(data.provider || "mediasoup");
   session.selectedProvider = provider;
   session.selectedProviderId = providerId;
+  const routeAttemptId = isExternalString(route.attemptId)
+    ? route.attemptId
+    : isExternalString(data.attemptId)
+      ? data.attemptId
+      : null;
   let providerFailureNotified = false;
   const notifyProviderFailure = (error: Error | string | null | undefined) => {
     if (providerFailureNotified) return;
@@ -107,6 +112,7 @@ export async function handleProviderTicket(
       reason: asError(error, "Provider connection failed").message,
     };
     if (providerId) failure.providerId = providerId;
+    if (routeAttemptId) failure.attemptId = routeAttemptId;
     session.signaling?.send?.({
       type: "provider-failure",
       data: failure,
@@ -165,6 +171,7 @@ export async function handleProviderTicket(
             sourceRevision: resolvedSourceRevision,
           };
           if (providerId) ready.providerId = providerId;
+          if (routeAttemptId) ready.attemptId = routeAttemptId;
           return ready;
         })(),
       }) === false
@@ -189,7 +196,7 @@ export function createSignaling(session: NativeMediasoupSfuSession) {
       sourceRevision: Number(session.topologyState?.sourceRevision) || 0,
       publicationRevision: "0",
       lastAppliedRoomRevision: "0",
-      localSourceDigest: {},
+      localSourceDigest: Object.fromEntries(session.sourceStates),
     }),
     buildUrl: () => session.buildUrl(session.channelId),
     buildClientHelloData: () => ({

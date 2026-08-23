@@ -15,6 +15,7 @@ import {
   type ExternalValue,
 } from "./types/boundary.ts";
 import { asError } from "./native-mediasoup-utils.ts";
+import { classifyMediaError } from "./media-cancellation.ts";
 import type { OwnedErrorValue } from "./types/shared-utilities.ts";
 
 export function mediaSignalingUrl<T>(
@@ -415,6 +416,14 @@ export function dispatchMediaSignalingMessage<T>(
   const handler = getHandler(message.type);
   if (!handler) return;
   Promise.resolve(handler(message.data || {})).catch((error) => {
+    const classification = classifyMediaError(error);
+    if (classification.cancellation) {
+      mediaDebug("control.handler-cancelled", {
+        type: message.type,
+        code: classification.code,
+      });
+      return;
+    }
     const detail =
       error instanceof Error
         ? error.message

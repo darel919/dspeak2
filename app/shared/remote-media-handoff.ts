@@ -13,6 +13,14 @@ interface RemoteMediaEntry {
   [key: string]: unknown;
 }
 
+function entryIncarnationRank(entry: RemoteMediaEntry): number {
+  const epoch = Number(entry.connectionEpoch);
+  const generation = Number(entry.sourceGeneration ?? entry.generation);
+  const rankEpoch = Number.isSafeInteger(epoch) ? epoch : 0;
+  const rankGeneration = Number.isSafeInteger(generation) ? generation : 0;
+  return rankEpoch * 1_000_000 + rankGeneration;
+}
+
 interface RemoteMediaRegistry {
   bind(entry: RemoteMediaEntry, options?: { staged?: boolean }): void;
   remove(key: string, entry?: RemoteMediaEntry): void;
@@ -117,6 +125,17 @@ export class RemoteMediaHandoff {
       key: remoteMediaFeedKey(entry),
       incarnationId: entry.incarnationId,
     };
+    const current = this.provider(normalized.provider).get(normalized.key);
+    if (
+      current &&
+      current.track &&
+      normalized.track &&
+      current.track !== normalized.track
+    ) {
+      const staleIncoming =
+        entryIncarnationRank(normalized) < entryIncarnationRank(current);
+      if (staleIncoming) return;
+    }
     const tracks = this.provider(normalized.provider);
     const replaced: Array<[string, RemoteMediaEntry]> = [];
     for (const [key, current] of tracks) {

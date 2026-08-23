@@ -81,7 +81,7 @@ uint64_t lib_dspeak_media_next_action_id()
     return counter.fetch_add(1);
 }
 
-static std::mutex               g_action_mutex;
+static std::mutex               g_action_queue_mutex;
 static std::queue<CxxAction>    g_actions;
 
 
@@ -95,7 +95,7 @@ void lib_dspeak_media_push_action(lib_dspeak_media_action_kind_t kind,
     act.action_id    = aid;
     act.params_json  = params ? lib_dspeak_media_json_to_cstr(*params) : nullptr;
     act.state        = st     ? lib_dspeak_media_json_to_cstr(*st)     : nullptr;
-    std::lock_guard<std::mutex> lock(g_action_mutex);
+    std::lock_guard<std::mutex> lock(g_action_queue_mutex);
     g_actions.push(std::move(act));
     lib_dspeak_media_signal_event();
 }
@@ -106,22 +106,34 @@ void lib_dspeak_media_push_action(lib_dspeak_media_action_kind_t kind,
 
 
 
-static std::mutex g_promise_mutex;
+static std::mutex g_transport_promise_mutex;
+struct PendingProduce {
+    void* transport = nullptr;
+    std::promise<std::string> promise;
+};
 static std::map<void*, std::promise<void>> g_connect_promises;
-static std::map<uint64_t, std::promise<std::string>> g_produce_promises;
+static std::map<uint64_t, PendingProduce> g_produce_promises;
 
 class CxxSendListener : public mediasoupclient::SendTransport::Listener {
 public:
-    explicit CxxSendListener(std::string direction)
-        : direction_(std::move(direction)) {}
+    explicit CxxSendListener(std::string direction, void* owner)
+        : direction_(std::move(direction)), owner_(owner) {}
+
+    void* owner() const { return owner_; }
+    void* bound_transport() const
+    {
+        return bound_transport_.load(std::memory_order_acquire);
+    }
 
     std::future<void> OnConnect(mediasoupclient::Transport* transport,
                                 const json& dtlsParameters) override
     {
         auto p = std::promise<void>();
         auto f = p.get_future();
+        bound_transport_.store(static_cast<void*>(transport),
+                               std::memory_order_release);
         {
-            std::lock_guard<std::mutex> lock(g_promise_mutex);
+            std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
             g_connect_promises[static_cast<void*>(transport)] = std::move(p);
         }
         json params = dtlsParameters;
@@ -160,8 +172,10 @@ public:
         auto f = p.get_future();
         uint64_t aid = lib_dspeak_media_next_action_id();
         {
-            std::lock_guard<std::mutex> lock(g_promise_mutex);
-            g_produce_promises[aid] = std::move(p);
+            std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
+            PendingProduce& pending = g_produce_promises[aid];
+            pending.transport = static_cast<void*>(transport);
+            pending.promise   = std::move(p);
         }
         json params;
         params["kind"]           = kind;
@@ -184,8 +198,10 @@ public:
         auto f = p.get_future();
         uint64_t aid = lib_dspeak_media_next_action_id();
         {
-            std::lock_guard<std::mutex> lock(g_promise_mutex);
-            g_produce_promises[aid] = std::move(p);
+            std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
+            PendingProduce& pending = g_produce_promises[aid];
+            pending.transport = static_cast<void*>(transport);
+            pending.promise   = std::move(p);
         }
         json params;
         params["sctpStreamParameters"] = sctpStreamParameters;
@@ -201,22 +217,32 @@ public:
 private:
     std::string direction_;
     bool connected_ = false;
+    void* owner_ = nullptr;
+    std::atomic<void*> bound_transport_{nullptr};
 };
 
 /* ── Listener: RecvTransport ───────────────────────── */
 
 class CxxRecvListener : public mediasoupclient::RecvTransport::Listener {
 public:
-    explicit CxxRecvListener(std::string direction)
-        : direction_(std::move(direction)) {}
+    explicit CxxRecvListener(std::string direction, void* owner)
+        : direction_(std::move(direction)), owner_(owner) {}
+
+    void* owner() const { return owner_; }
+    void* bound_transport() const
+    {
+        return bound_transport_.load(std::memory_order_acquire);
+    }
 
     std::future<void> OnConnect(mediasoupclient::Transport* transport,
                                 const json& dtlsParameters) override
     {
         auto p = std::promise<void>();
         auto f = p.get_future();
+        bound_transport_.store(static_cast<void*>(transport),
+                               std::memory_order_release);
         {
-            std::lock_guard<std::mutex> lock(g_promise_mutex);
+            std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
             g_connect_promises[static_cast<void*>(transport)] = std::move(p);
         }
         json params = dtlsParameters;
@@ -248,6 +274,8 @@ public:
 private:
     std::string direction_;
     bool connected_ = false;
+    void* owner_ = nullptr;
+    std::atomic<void*> bound_transport_{nullptr};
 };
 
 class CxxConsumerListener : public mediasoupclient::Consumer::Listener {
@@ -264,14 +292,62 @@ public:
 
 /* ── Global state ─────────────────────────────────── */
 
-std::vector<std::shared_ptr<CxxSendListener>> g_send_listeners;
-std::vector<std::shared_ptr<CxxRecvListener>> g_recv_listeners;
-std::mutex g_listener_mutex;
+static std::vector<std::shared_ptr<CxxSendListener>> g_send_listeners;
+static std::vector<std::shared_ptr<CxxRecvListener>> g_recv_listeners;
+static std::mutex g_listener_registry_mutex;
 
-static void clear_connect_promise(mediasoupclient::Transport* transport)
+static void reject_pending_for_transport(void* transport_ptr, const char* reason)
 {
-    std::lock_guard<std::mutex> lock(g_promise_mutex);
-    g_connect_promises.erase(static_cast<void*>(transport));
+    std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
+    auto connect_it = g_connect_promises.find(transport_ptr);
+    if (connect_it != g_connect_promises.end()) {
+        connect_it->second.set_exception(
+            std::make_exception_ptr(std::runtime_error(reason)));
+        g_connect_promises.erase(connect_it);
+    }
+    for (auto it = g_produce_promises.begin();
+         it != g_produce_promises.end();) {
+        if (it->second.transport == transport_ptr) {
+            it->second.promise.set_exception(
+                std::make_exception_ptr(std::runtime_error(reason)));
+            it = g_produce_promises.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+static void collect_bound_transports_for_device(
+    const void* device, std::vector<void*>& out)
+{
+    std::lock_guard<std::mutex> lock(g_listener_registry_mutex);
+    for (const auto& listener : g_send_listeners) {
+        if (!listener || listener->owner() != device) continue;
+        if (auto* transport = listener->bound_transport())
+            out.push_back(transport);
+    }
+    for (const auto& listener : g_recv_listeners) {
+        if (!listener || listener->owner() != device) continue;
+        if (auto* transport = listener->bound_transport())
+            out.push_back(transport);
+    }
+}
+
+static void purge_listeners_for_device(const void* device)
+{
+    std::lock_guard<std::mutex> lock(g_listener_registry_mutex);
+    g_send_listeners.erase(
+        std::remove_if(g_send_listeners.begin(), g_send_listeners.end(),
+                       [device](const auto& listener) {
+                           return !listener || listener->owner() == device;
+                       }),
+        g_send_listeners.end());
+    g_recv_listeners.erase(
+        std::remove_if(g_recv_listeners.begin(), g_recv_listeners.end(),
+                       [device](const auto& listener) {
+                           return !listener || listener->owner() == device;
+                       }),
+        g_recv_listeners.end());
 }
 
 /* ── Lifecycle ─────────────────────────────────────── */
@@ -344,6 +420,12 @@ extern "C" lib_dspeak_media_device_t* lib_dspeak_media_create_device(
 extern "C" void lib_dspeak_media_destroy_device(lib_dspeak_media_device_t* device)
 {
     if (!device) return;
+    std::vector<void*> bound_transports;
+    collect_bound_transports_for_device(device, bound_transports);
+    for (void* transport_ptr : bound_transports)
+        reject_pending_for_transport(transport_ptr,
+                                     "device destroyed");
+    purge_listeners_for_device(device);
     device->device.reset();
     device->factory = nullptr;
     delete device->network_thread;
@@ -377,9 +459,12 @@ extern "C" lib_dspeak_media_send_transport_t* lib_dspeak_media_create_send_trans
     if (error_out) *error_out = 0;
     try {
         auto st       = std::make_unique<lib_dspeak_media_send_transport>();
-        auto listener = std::make_shared<CxxSendListener>("send");
+        auto listener = std::make_shared<CxxSendListener>("send", device);
         st->listener  = listener.get();
-        g_send_listeners.push_back(std::move(listener));
+        {
+            std::lock_guard<std::mutex> lock(g_listener_registry_mutex);
+            g_send_listeners.push_back(std::move(listener));
+        }
 
         mediasoupclient::PeerConnection::Options options;
         options.factory = device->factory.get();
@@ -401,10 +486,11 @@ extern "C" void lib_dspeak_media_destroy_send_transport(lib_dspeak_media_send_tr
     if (!transport) return;
     auto* listener = transport->listener;
     listener->ResetHealth();
-    clear_connect_promise(transport->transport);
+    reject_pending_for_transport(transport->transport,
+                                 "send transport destroyed");
     transport->transport->Close();
     {
-        std::lock_guard<std::mutex> lock(g_listener_mutex);
+        std::lock_guard<std::mutex> lock(g_listener_registry_mutex);
         g_send_listeners.erase(
             std::remove_if(g_send_listeners.begin(), g_send_listeners.end(),
                            [listener](const auto& candidate) { return candidate.get() == listener; }),
@@ -428,9 +514,12 @@ extern "C" lib_dspeak_media_recv_transport_t* lib_dspeak_media_create_recv_trans
     if (error_out) *error_out = 0;
     try {
         auto rt       = std::make_unique<lib_dspeak_media_recv_transport>();
-        auto listener = std::make_shared<CxxRecvListener>("recv");
+        auto listener = std::make_shared<CxxRecvListener>("recv", device);
         rt->listener  = listener.get();
-        g_recv_listeners.push_back(std::move(listener));
+        {
+            std::lock_guard<std::mutex> lock(g_listener_registry_mutex);
+            g_recv_listeners.push_back(std::move(listener));
+        }
 
         mediasoupclient::PeerConnection::Options options;
         options.factory = device->factory.get();
@@ -452,10 +541,11 @@ extern "C" void lib_dspeak_media_destroy_recv_transport(lib_dspeak_media_recv_tr
     if (!transport) return;
     auto* listener = transport->listener;
     listener->ResetHealth();
-    clear_connect_promise(transport->transport);
+    reject_pending_for_transport(transport->transport,
+                                 "recv transport destroyed");
     transport->transport->Close();
     {
-        std::lock_guard<std::mutex> lock(g_listener_mutex);
+        std::lock_guard<std::mutex> lock(g_listener_registry_mutex);
         g_recv_listeners.erase(
             std::remove_if(g_recv_listeners.begin(), g_recv_listeners.end(),
                            [listener](const auto& candidate) { return candidate.get() == listener; }),
@@ -468,7 +558,7 @@ extern "C" void lib_dspeak_media_destroy_recv_transport(lib_dspeak_media_recv_tr
 
 extern "C" lib_dspeak_media_action_t lib_dspeak_media_drain_action(void)
 {
-    std::lock_guard<std::mutex> lock(g_action_mutex);
+    std::lock_guard<std::mutex> lock(g_action_queue_mutex);
     if (g_actions.empty()) {
         return { LIB_DSPEAK_MEDIA_ACTION_NONE, nullptr, 0, nullptr, nullptr };
     }
@@ -487,7 +577,7 @@ extern "C" lib_dspeak_media_action_t lib_dspeak_media_drain_action(void)
 
 extern "C" void lib_dspeak_media_complete_connect(void* transport_ptr)
 {
-    std::lock_guard<std::mutex> lock(g_promise_mutex);
+    std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
     auto it = g_connect_promises.find(transport_ptr);
     if (it != g_connect_promises.end()) {
         it->second.set_value();
@@ -497,7 +587,7 @@ extern "C" void lib_dspeak_media_complete_connect(void* transport_ptr)
 
 extern "C" void lib_dspeak_media_fail_connect(void* transport_ptr, const char* error_message)
 {
-    std::lock_guard<std::mutex> lock(g_promise_mutex);
+    std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
     auto it = g_connect_promises.find(transport_ptr);
     if (it != g_connect_promises.end()) {
         it->second.set_exception(
@@ -511,20 +601,20 @@ extern "C" void lib_dspeak_media_fail_connect(void* transport_ptr, const char* e
 
 extern "C" void lib_dspeak_media_complete_produce(uint64_t action_id, const char* producer_id)
 {
-    std::lock_guard<std::mutex> lock(g_promise_mutex);
+    std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
     auto it = g_produce_promises.find(action_id);
     if (it != g_produce_promises.end()) {
-        it->second.set_value(producer_id ? producer_id : "");
+        it->second.promise.set_value(producer_id ? producer_id : "");
         g_produce_promises.erase(it);
     }
 }
 
 extern "C" void lib_dspeak_media_fail_produce(uint64_t action_id, const char* error_message)
 {
-    std::lock_guard<std::mutex> lock(g_promise_mutex);
+    std::lock_guard<std::mutex> lock(g_transport_promise_mutex);
     auto it = g_produce_promises.find(action_id);
     if (it != g_produce_promises.end()) {
-        it->second.set_exception(
+        it->second.promise.set_exception(
             std::make_exception_ptr(std::runtime_error(
                 error_message ? error_message : "produce failed")));
         g_produce_promises.erase(it);

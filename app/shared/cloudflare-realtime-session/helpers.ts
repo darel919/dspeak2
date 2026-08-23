@@ -29,7 +29,10 @@ function deferred<T>(timeoutMs: number, label: string): DeferredPromise<T> {
   });
   const waiting: DeferredPromise<T> = Object.assign(
     promise.finally(() => clearTimeout(timer)),
-    { resolve: resolvePromise, reject: rejectPromise },
+    {
+      resolve: resolvePromise,
+      reject: rejectPromise,
+    },
   );
   return waiting;
 }

@@ -188,7 +188,7 @@ export interface HybridSessionOperationsContext {
   } | null;
   getSessionTermination: () => {
     failSession: (message: OwnedErrorValue) => MediaCommandResult;
-    disconnect: () => MediaCommandResult;
+    disconnect: () => Promise<void> | MediaCommandResult;
   } | null;
   getSessionLifecycle: () => {
     connect: (

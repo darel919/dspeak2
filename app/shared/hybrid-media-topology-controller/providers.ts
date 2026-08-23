@@ -12,6 +12,7 @@ type ProviderEventData = {
   epoch: number;
   sourceRevision: number;
   reason: string;
+  attemptId?: string;
 };
 
 function providerFailureReason<T>(value: T): string {
@@ -46,6 +47,7 @@ export function createTopologyProviderActions({
     provider: string;
     providerId: string | null;
     sourceRevision: number;
+    attemptId?: string;
   };
   type ProviderTicketReadyIdentity = ProviderTicketIdentity & {
     socket: TopologyProviderSocket;
@@ -61,7 +63,10 @@ export function createTopologyProviderActions({
   let providerTicketIdentity: ProviderTicketReadyIdentity | null = null;
 
   function providerTicketKey(identity: ProviderTicketIdentity) {
-    return `${identity.epoch}:${identity.provider}:${identity.providerId || ""}:${identity.sourceRevision}`;
+    const attempt = isExternalString(identity.attemptId)
+      ? identity.attemptId
+      : "";
+    return `${identity.epoch}:${identity.provider}:${identity.providerId || ""}:${identity.sourceRevision}:${attempt}`;
   }
 
   function settleTicketWaiters(key: string, ready: boolean) {
@@ -80,7 +85,8 @@ export function createTopologyProviderActions({
       providerTicketIdentity.epoch === identity.epoch &&
       providerTicketIdentity.provider === "mediasoup" &&
       providerTicketIdentity.providerId === identity.providerId &&
-      providerTicketIdentity.sourceRevision === identity.sourceRevision
+      providerTicketIdentity.sourceRevision === identity.sourceRevision &&
+      providerTicketIdentity.attemptId === identity.attemptId
     );
   }
 
@@ -157,6 +163,12 @@ export function createTopologyProviderActions({
     const resolvedSourceRevision = Number.isFinite(sourceRevision)
       ? sourceRevision
       : Number(topologyState.value.sourceRevision || 0);
+    const routeRecord = isExternalRecord(data?.route) ? data.route : null;
+    const attemptId = isExternalString(data.attemptId)
+      ? data.attemptId
+      : isExternalString(routeRecord?.attemptId)
+        ? routeRecord.attemptId
+        : undefined;
     if (
       !provider ||
       !Number.isSafeInteger(epoch) ||
@@ -169,6 +181,7 @@ export function createTopologyProviderActions({
       provider,
       providerId,
       sourceRevision: resolvedSourceRevision,
+      attemptId,
     };
     const identityKey = providerTicketKey(identity);
     let socket: TopologyProviderSocket | null = null;
@@ -198,6 +211,7 @@ export function createTopologyProviderActions({
         reason: providerFailureReason(providerError),
       };
       if (providerId) failure.providerId = providerId;
+      if (attemptId) failure.attemptId = attemptId;
       send({
         type: "provider-failure",
         data: failure,
@@ -218,6 +232,7 @@ export function createTopologyProviderActions({
               reason: "provider-ready",
             };
             if (providerId) ready.providerId = providerId;
+            if (attemptId) ready.attemptId = attemptId;
             return ready;
           })(),
         }) === false

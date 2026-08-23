@@ -232,7 +232,11 @@ export function installHandlers(session: NativeMediasoupSfuSession) {
     session._resolveConsumerControl(data, false);
   });
   messageHandlers.set("cloudflare-response", (data) =>
-    session.cloudflareSession?.handleMessage("cloudflare-response", data),
+    session.cloudflareSession?.handleMessage(
+      "cloudflare-response",
+      data,
+      session.cloudflareSession.sessionGeneration,
+    ),
   );
   messageHandlers.set("cloudflare-publication-available", (data) => {
     const trackName = String(data?.trackName || "");
@@ -338,6 +342,41 @@ export function installHandlers(session: NativeMediasoupSfuSession) {
   });
   messageHandlers.set("heartbeat-nack", (data) => {
     session._acknowledgeHeartbeat(data);
+  });
+  messageHandlers.set("state-nack", (data) => {
+    session._acknowledgeHeartbeat(data);
+    const topology = recordValue(data.topology);
+    if (!topology || !session.localPeerId) return;
+    const digest = recordValue(topology.sourceStates);
+    const participantStates = digest
+      ? recordValue(digest[session.localPeerId])
+      : null;
+    const participants = Array.isArray(topology.participants)
+      ? topology.participants.filter((entry): entry is ExternalObject =>
+          isExternalRecord(entry),
+        )
+      : [];
+    const localParticipant = participants.find(
+      (entry) => String(entry.peerId || "") === session.localPeerId,
+    );
+    const fromList = recordValue(localParticipant?.sourceStates);
+    const resolved = participantStates || fromList;
+    if (!resolved) return;
+    let changed = false;
+    for (const [source, value] of Object.entries(resolved)) {
+      const state = recordValue(value);
+      if (!state) continue;
+      const generation = Number(state.generation);
+      const desiredState = String(state.desiredState || "inactive");
+      if (
+        !Number.isSafeInteger(generation) ||
+        generation < (session.sourceStates.get(source)?.generation || 0)
+      )
+        continue;
+      session.sourceStates.set(source, { generation, desiredState });
+      changed = true;
+    }
+    if (changed) session._emitState();
   });
   messageHandlers.set("currentlyInChannel", (data) => {
     session.lastInRoom = Array.isArray(data?.inRoom)

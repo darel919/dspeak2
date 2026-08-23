@@ -239,6 +239,7 @@ export interface TopologyGeneration {
   retire: () => number;
 }
 export interface TopologyControllerOptions {
+  isDeafened?: () => boolean;
   CloudflareRealtimeSession: typeof CloudflareRealtimeSession;
   MediasoupClientSession: typeof MediasoupClientSession;
   MediasoupProviderSocket: TopologyProviderActionsContext["MediasoupProviderSocket"];

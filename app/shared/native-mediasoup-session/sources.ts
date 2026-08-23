@@ -1360,6 +1360,7 @@ export class NativeMediasoupSourcesMethods {
       throw new Error("A native source identifier is required");
     const previousSource = this.sources.get(entry.source);
     const existing = this.producers.get(entry.source);
+    const previousState = this.sourceStates.get(entry.source);
     const kind =
       entry.kind ||
       (entry.source === "camera" || entry.source === "screen"
@@ -1472,6 +1473,13 @@ export class NativeMediasoupSourcesMethods {
       }
       existing.entry = normalized;
       this.sources.set(entry.source, normalized);
+      this.sourceStates.set(entry.source, {
+        generation: Math.max(
+          previousState?.generation || 0,
+          Math.floor(Number(normalized.generation) || 1),
+        ),
+        desiredState: "active",
+      });
       if (normalized.kind === "video")
         this.localVideoFeeds.set(normalized.source, {
           source: normalized.source,
@@ -1485,6 +1493,13 @@ export class NativeMediasoupSourcesMethods {
       return existing;
     }
     this.sources.set(entry.source, normalized);
+    this.sourceStates.set(entry.source, {
+      generation: Math.max(
+        previousState?.generation || 0,
+        Math.floor(Number(normalized.generation) || 1),
+      ),
+      desiredState: "active",
+    });
     if (
       normalized.kind === "video" &&
       !this.localVideoFeeds.has(normalized.source)
@@ -1914,6 +1929,11 @@ export class NativeMediasoupSourcesMethods {
     const entry = this.sources.get(source);
     this.sources.delete(source);
     this.localVideoFeeds.delete(source);
+    const previousState = this.sourceStates.get(source);
+    this.sourceStates.set(source, {
+      generation: Math.max(previousState?.generation || 0, 0) + 1,
+      desiredState: "inactive",
+    });
     const producer = this.producers.get(source);
     const variants = [...this.producerVariants.values()].filter(
       (candidate) => candidate.source === source,

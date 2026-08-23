@@ -23,6 +23,7 @@ export interface CloudflareSourceEntry extends Record<string, unknown> {
   mid: string;
   ownerSource?: string | null;
   generation: number;
+  canonicalConnectionEpoch?: number;
 }
 export interface CloudflareSourceInput extends Record<string, unknown> {
   source: string;
@@ -92,6 +93,7 @@ export interface CloudflarePeerConnectionLike {
 export interface DeferredPromise<T> extends Promise<T> {
   resolve: (value: T) => void;
   reject: (error: OwnedErrorValue) => void;
+  requestGeneration?: number;
 }
 export interface CloudflareSessionOptions {
   send: (message: Record<string, unknown>) => boolean;
@@ -107,6 +109,7 @@ export interface CloudflareSessionOptions {
   ) => MediaCommandResult;
   getVideoSettings: (source: string) => Record<string, unknown>;
   getControlConnectionEpoch?: () => number;
+  getDeafened?: () => boolean;
 }
 
 export interface CloudflareSessionLike extends CloudflareSessionOptions {
@@ -128,6 +131,7 @@ export interface CloudflareSessionLike extends CloudflareSessionOptions {
   rtpSamples: Map<string, { bytes: number; timestamp: number }>;
   subscriptionTasks: Map<string, Promise<MediaCommandResult>>;
   subscribedTrackNames: Set<string>;
+  desiredRemoteSources?: Map<string, boolean>;
   subscriptionsStarted: boolean;
   negotiationQueue: Promise<MediaCommandResult>;
   sourceOperations: Map<string, Promise<MediaCommandResult>>;

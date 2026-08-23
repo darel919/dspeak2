@@ -10,6 +10,8 @@ export interface MediasoupProviderSocketOptions {
     payload: Record<string, unknown>,
   ) => MediaCommandResult;
   onFailure: (error: OwnedErrorValue) => MediaCommandResult;
+  heartbeatIntervalMs?: number;
+  heartbeatTimeoutMs?: number;
 }
 
 export interface MediasoupProviderConnectOptions {

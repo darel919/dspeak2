@@ -93,6 +93,7 @@ export class NativeMediasoupSfuSession {
   declare sourceOperations: NativeMediasoupSfuSessionSurface["sourceOperations"];
   declare pendingCloudflarePublications: NativeMediasoupSfuSessionSurface["pendingCloudflarePublications"];
   declare sourceTransmission: NativeMediasoupSfuSessionSurface["sourceTransmission"];
+  declare sourceStates: NativeMediasoupSfuSessionSurface["sourceStates"];
   declare producerRemovals: NativeMediasoupSfuSessionSurface["producerRemovals"];
   declare consumers: NativeMediasoupSfuSessionSurface["consumers"];
   declare transportStates: NativeMediasoupSfuSessionSurface["transportStates"];
@@ -166,6 +167,7 @@ export class NativeMediasoupSfuSession {
   declare getVideoSettings: NativeMediasoupSfuSessionSurface["getVideoSettings"];
   declare getControlConnectionEpoch: NativeMediasoupSfuSessionSurface["getControlConnectionEpoch"];
   declare controlConnectionEpoch: number;
+  declare lastAppliedRoomRevision: string | undefined;
   declare mediaCapabilities: NativeMediasoupSfuSessionSurface["mediaCapabilities"];
   declare remoteParticipantCapabilities: NativeMediasoupSfuSessionSurface["remoteParticipantCapabilities"];
   declare logicalVideoStreams: NativeMediasoupSfuSessionSurface["logicalVideoStreams"];
@@ -214,6 +216,9 @@ export class NativeMediasoupSfuSession {
   declare rejectReadiness: (error: OwnedErrorValue) => MediaCommandResult;
   declare _handleSignalingClose: (event: CloseEvent) => MediaCommandResult;
   declare _acknowledgeHeartbeat: (
+    data: Record<string, unknown>,
+  ) => MediaCommandResult;
+  declare _adoptServerEpoch: (
     data: Record<string, unknown>,
   ) => MediaCommandResult;
   declare _handleServerError: (
@@ -400,6 +405,7 @@ export class NativeMediasoupSfuSession {
     this.sourceOperations = new Map();
     this.pendingCloudflarePublications = new Map();
     this.sourceTransmission = new Map();
+    this.sourceStates = new Map();
     this.producerRemovals = new Map();
     this.consumers = new Map();
     this.remoteParticipantCapabilities = new Map();
@@ -431,6 +437,7 @@ export class NativeMediasoupSfuSession {
     this.remoteVideoFeeds = new Map();
     this.remoteAudioFeeds = new Map();
     this.topologyState = null;
+    this.lastAppliedRoomRevision = undefined;
     this.localPeerId = "";
     this.lastInRoom = [];
     this.device = null;
@@ -551,6 +558,7 @@ export interface NativeMediasoupSfuSessionContract extends NativeMediasoupSfuSes
   rejectReadiness: (error: OwnedErrorValue) => MediaCommandResult;
   _handleSignalingClose: (event: CloseEvent) => MediaCommandResult;
   _acknowledgeHeartbeat: (data: Record<string, unknown>) => MediaCommandResult;
+  _adoptServerEpoch: (data: Record<string, unknown>) => MediaCommandResult;
   _handleServerError: (data: Record<string, unknown>) => MediaCommandResult;
   _resolveConnect: () => MediaCommandResult;
   _handleProviderTicket: (

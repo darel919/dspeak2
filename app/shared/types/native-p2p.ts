@@ -3,6 +3,7 @@ import type { OwnedErrorValue } from "./shared-utilities.ts";
 import type { MediaCommandResult } from "./boundary.ts";
 
 import type { PendingSignalEntry } from "../pending-signal-queue.ts";
+import type { TrackSourceAssociation } from "../track-source-association.ts";
 
 import type {
   ParticipantMediaCapabilities,
@@ -104,6 +105,11 @@ export interface NativeP2pHealthMesh {
   epoch: number;
   p2pIcePolicy: "direct-only" | "direct-or-relay";
   fail: (reason: string, error?: OwnedErrorValue) => MediaCommandResult;
+  failPeer?: (
+    reason: string,
+    peerId: string,
+    error?: OwnedErrorValue,
+  ) => MediaCommandResult;
   emitSnapshot: () => MediaCommandResult;
   sendControl: (data: Record<string, unknown>) => boolean;
 }
@@ -278,6 +284,8 @@ export interface NativeP2pMeshSurface
     receiving: boolean,
   ) => MediaCommandResult;
   isMediaReady: () => boolean;
+  remoteSourcesExpected: () => boolean;
+  trackSourceAssociation: TrackSourceAssociation | null;
   stats: () => Promise<MediaCommandResult>;
   diagnosticStats: () => Promise<MediaCommandResult>;
   getInboundTrackStats: (

@@ -169,7 +169,9 @@ export interface NativeCloudflareSessionLike {
   handleMessage: (
     type: string,
     data: Record<string, unknown>,
+    sessionGeneration?: number,
   ) => MediaCommandResult;
+  sessionGeneration?: number;
   connectionState?: () => Record<string, unknown>;
   stats?: () => MediaCommandResult;
   diagnosticStats?: () => MediaCommandResult;
@@ -193,6 +195,7 @@ export interface NativeMediasoupConstructorOptions extends Partial<NativeMediaso
 export interface NativeMediasoupSfuSessionSurface {
   connected: boolean;
   joinReady: boolean;
+  lastAppliedRoomRevision?: string;
   transportReady: boolean;
   iceConnectedBoth: boolean;
   isProducing: boolean;
@@ -287,6 +290,7 @@ export interface NativeMediasoupSfuSessionSurface {
   sourceOperations: Map<string, Promise<MediaCommandResult>>;
   pendingCloudflarePublications: Map<string, Record<string, unknown>>;
   sourceTransmission: Map<string, boolean>;
+  sourceStates: Map<string, { generation: number; desiredState: string }>;
   producerRemovals: Map<string, Promise<MediaCommandResult>>;
   consumers: Map<string, NativeConsumerEntry>;
   transportStates: Map<NativeDirection, NativeTransportState>;

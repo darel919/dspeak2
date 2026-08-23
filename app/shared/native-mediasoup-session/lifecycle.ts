@@ -1,13 +1,11 @@
 import { MEDIA_SIGNALING_CLIENT_PROTOCOL } from "../../../shared/media-signaling-protocol.ts";
+import { isExternalRecord, isExternalString } from "../types/boundary.ts";
 import { asError } from "../native-mediasoup-utils.ts";
 import type { NativeMediasoupSfuSession } from "../native-mediasoup-session.ts";
 import type { NativeMediasoupSfuSessionSurface } from "../types/native-mediasoup-session.ts";
 import type { SignalingMessage } from "../types/media-signaling.ts";
 import type { OwnedErrorValue } from "../types/shared-utilities.ts";
-import {
-  isExternalString,
-  type MediaCommandResult,
-} from "../types/boundary.ts";
+import { type MediaCommandResult } from "../types/boundary.ts";
 
 type ProviderFailureData = {
   provider: string;
@@ -139,6 +137,7 @@ export class NativeMediasoupLifecycleMethods {
     const sequence = Number(data?.sequence);
     if (!Number.isSafeInteger(sequence)) return false;
     this.signaling?.acknowledgeHeartbeat?.(sequence, Date.now());
+    this._adoptServerEpoch(data);
     if (data?.topology) {
       this.topologyState = {
         ...data.topology,
@@ -147,6 +146,28 @@ export class NativeMediasoupLifecycleMethods {
       this._emitState();
     }
     return true;
+  }
+
+  _adoptServerEpoch(
+    this: NativeMediasoupSfuSession,
+    data: Record<string, unknown>,
+  ) {
+    const connectionEpoch = Number(data?.connectionEpoch);
+    if (
+      Number.isSafeInteger(connectionEpoch) &&
+      connectionEpoch > 0 &&
+      connectionEpoch !== this.controlConnectionEpoch
+    ) {
+      this.controlConnectionEpoch = connectionEpoch;
+      this._emitState();
+    }
+    const topology = isExternalRecord(data?.topology) ? data.topology : null;
+    const roomRevision =
+      topology && "roomRevision" in topology
+        ? topology.roomRevision
+        : data?.roomRevision;
+    if (isExternalString(roomRevision))
+      this.lastAppliedRoomRevision = roomRevision;
   }
 
   _beginNativeTeardown(

@@ -239,6 +239,7 @@ export class CloudflareSourcesMethods {
         mid,
         ownerSource: entry.ownerSource || null,
         generation: entry.generation,
+        canonicalConnectionEpoch: this.getControlConnectionEpoch(),
       });
       await this.setSourceTransmission(
         entry.source,
@@ -933,6 +934,9 @@ export class CloudflareSourcesMethods {
   ) {
     const key = `${String(userId)}:${String(source)}`;
     if (this.remoteReceiving.has(key)) return this.remoteReceiving.get(key);
+    const desired = this.desiredRemoteSources;
+    if (desired instanceof Map && desired.size > 0)
+      return desired.get(String(source)) !== false;
     return !(source === "screen-audio" && ownerSource !== "system-audio");
   }
 

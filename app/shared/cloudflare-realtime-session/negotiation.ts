@@ -225,6 +225,7 @@ export class CloudflareNegotiationMethods {
       REQUEST_TIMEOUT_MS,
       `Cloudflare ${operation}`,
     );
+    waiting.requestGeneration = this.sessionGeneration;
     this.pending.set(requestId, waiting);
     let sent = false;
     try {
@@ -288,6 +289,7 @@ export class CloudflareNegotiationMethods {
     this: CloudflareSessionLike,
     type: string,
     data: Record<string, unknown>,
+    sessionGeneration?: number,
   ) {
     if (type === "cloudflare-response") {
       const requestId = isExternalString(data.requestId)
@@ -296,6 +298,16 @@ export class CloudflareNegotiationMethods {
       if (!requestId) return false;
       const waiting = this.pending.get(requestId);
       if (!waiting) return false;
+      if (
+        Number.isSafeInteger(sessionGeneration) &&
+        waiting.requestGeneration !== undefined &&
+        waiting.requestGeneration !== sessionGeneration
+      ) {
+        mediaDebug("cloudflare.response-stale-session", {
+          requestId: shortMediaId(requestId),
+        });
+        return true;
+      }
       if (isExternalString(data.error)) waiting.reject(new Error(data.error));
       else waiting.resolve(cloudflareRequestResult(data.result));
       mediaDebug("cloudflare.response", {

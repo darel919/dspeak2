@@ -23,7 +23,8 @@ export function createHybridMediaSessionOperations({
       getTopologyController()?.reportSfuFailure(reason),
     failSession: (message: OwnedErrorValue) =>
       getSessionTermination()?.failSession(message),
-    disconnect: () => getSessionTermination()?.disconnect(),
+    disconnect: () =>
+      getSessionTermination()?.disconnect() ?? Promise.resolve(),
     connect: (nextChannelId: string, options: { roomId?: string } = {}) =>
       getSessionLifecycle()?.connect(nextChannelId, options),
     handleSignalingClose: (event: CloseEvent, protocolRejected: boolean) =>
