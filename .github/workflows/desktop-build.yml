@@ -46,24 +46,10 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
-      - name: Checkout media control source
-        env:
-          DSPEAK_MEDIA_CONTROL_PATH: ${{ github.workspace }}/../dspeak-media-control
-        run: git clone --depth 1 --branch main --single-branch https://github.com/darel919/dspeak-media-control.git "$DSPEAK_MEDIA_CONTROL_PATH"
-
-      - name: Install root test tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ripgrep
-
       - name: Install bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1"
-
-      - name: Install media control dependencies
-        working-directory: ${{ github.workspace }}/../dspeak-media-control
-        run: npm ci --ignore-scripts
 
       - name: Install root dependencies
         run: bun install --frozen-lockfile
@@ -74,8 +60,6 @@ jobs:
         run: node scripts/desktop-session-edge-smoke.mjs
 
       - name: Run root tests
-        env:
-          DSPEAK_MEDIA_CONTROL_PATH: ${{ github.workspace }}/../dspeak-media-control
         run: bun run test
 
   desktop:

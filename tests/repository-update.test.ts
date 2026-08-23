@@ -241,26 +241,8 @@ test("desktop releases publish signed updates and fail when the updater contract
   assert.match(workflow, /release:check/);
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
-  assert.match(
-    workflow,
-    /DSPEAK_MEDIA_CONTROL_PATH: \$\{\{ github\.workspace \}\}\/\.\.\/dspeak-media-control/,
-  );
-  assert.match(
-    workflow,
-    /git clone --depth 1 --branch main --single-branch https:\/\/github\.com\/darel919\/dspeak-media-control\.git "\$DSPEAK_MEDIA_CONTROL_PATH"/,
-  );
-  assert.match(
-    workflow,
-    /working-directory: \$\{\{ github\.workspace \}\}\/\.\.\/dspeak-media-control[\s\S]*?run: npm ci --ignore-scripts/,
-  );
-  assert.match(
-    workflow,
-    /sudo apt-get install --no-install-recommends -y ripgrep/,
-  );
-  assert.match(
-    workflow,
-    /DSPEAK_PUBLIC_ORIGIN: \$\{\{ vars\.DSPEAK_PUBLIC_ORIGIN \|\| 'https:\/\/dspeak\.darelisme\.my\.id' \}\}/,
-  );
+  assert.doesNotMatch(workflow, /dspeak-media-control/);
+  assert.match(workflow, /bun run test/);
   assert.doesNotMatch(workflow, /DSPEAK_TEST_TOKEN|desktop-session-e2e/);
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
   assert.match(workflow, /nsis\/\*\.exe\.sig/);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -6,12 +7,21 @@ import { pathToFileURL } from "node:url";
 const mediaControlRoot = resolve(
   process.env.DSPEAK_MEDIA_CONTROL_PATH ?? "../dspeak-media-control",
 );
-const { MediaRoomDO, controlMessageByteLength, normalizeMediaSources } =
-  await import(
-    pathToFileURL(resolve(mediaControlRoot, "src/MediaRoomDO.ts")).href
-  );
 
-test("media-control bounds message and source metadata", () => {
+const mediaControlSource = resolve(mediaControlRoot, "src/MediaRoomDO.ts");
+const { MediaRoomDO, controlMessageByteLength, normalizeMediaSources } =
+  existsSync(mediaControlSource)
+    ? await import(pathToFileURL(mediaControlSource).href)
+    : {
+        MediaRoomDO: undefined,
+        controlMessageByteLength: undefined,
+        normalizeMediaSources: undefined,
+      };
+
+test("media-control bounds message and source metadata", (t) => {
+  if (!normalizeMediaSources) {
+    t.skip("dspeak-media-control source is not available locally");
+  }
   assert.equal(controlMessageByteLength("voice"), 5);
   assert.equal(controlMessageByteLength("😀"), 4);
   assert.deepEqual(normalizeMediaSources(["audio", "screen-audio"]), [
@@ -27,7 +37,10 @@ test("media-control bounds message and source metadata", () => {
   );
 });
 
-test("media-control honors a configured WebSocket Origin allowlist", () => {
+test("media-control honors a configured WebSocket Origin allowlist", (t) => {
+  if (!MediaRoomDO) {
+    t.skip("dspeak-media-control source is not available locally");
+  }
   const allowed = MediaRoomDO.prototype.isAllowedWebSocketOrigin.call(
     {
       env: {
@@ -49,7 +62,10 @@ test("media-control honors a configured WebSocket Origin allowlist", () => {
   assert.equal(rejected, false);
 });
 
-test("media-control excludes providers during their failure cooldown", () => {
+test("media-control excludes providers during their failure cooldown", (t) => {
+  if (!MediaRoomDO) {
+    t.skip("dspeak-media-control source is not available locally");
+  }
   const providers = MediaRoomDO.prototype.getAvailableProviderCapabilities.call(
     {
       providerHealth: new Map([
