@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import {
-  clampMediaPopupVolume,
+  clampVolume,
   createMediaPopupFeed,
   mediaPopupFeedSignature,
   mediaPopupIdForFeed,
-  normalizeMediaPopupFeed,
 } from "../app/shared/media-popouts.ts";
 
 describe("native media popout identity", () => {
@@ -34,37 +33,10 @@ describe("native media popout identity", () => {
     assert.notEqual(first.eventId, replacement.eventId);
   });
 
-  it("normalizes an offline popup without losing its participant identity", () => {
-    const normalized = normalizeMediaPopupFeed({
-      popupId: "media-popup:user:user-1/camera",
-      participantId: "user-1",
-      source: "camera",
-      logicalStreamId: "user:user-1/camera",
-      label: "Ava",
-      online: false,
-      eventId: null,
-      volume: 3,
-    });
-
-    assert.deepEqual(normalized, {
-      popupId: "media-popup:user:user-1/camera",
-      participantId: "user-1",
-      source: "camera",
-      logicalStreamId: "user:user-1/camera",
-      label: "Ava",
-      avatar: "",
-      native: false,
-      eventId: null,
-      online: false,
-      receiving: true,
-      volume: 2,
-    });
-  });
-
   it("bounds volume and changes the feed signature for signal transitions", () => {
-    assert.equal(clampMediaPopupVolume(-1), 0);
-    assert.equal(clampMediaPopupVolume(4), 2);
-    assert.equal(clampMediaPopupVolume("invalid"), 1);
+    assert.equal(clampVolume(-1), 0);
+    assert.equal(clampVolume(4), 2);
+    assert.equal(clampVolume("invalid"), 1);
     const online = createMediaPopupFeed({
       userId: "user-1",
       source: "screen",
@@ -73,7 +45,11 @@ describe("native media popout identity", () => {
       label: "Ava",
     });
     assert.ok(online);
-    const offline = { ...online, online: false, eventId: null };
+    const offline: typeof online = {
+      ...online,
+      online: false,
+      eventId: null,
+    };
     assert.notEqual(
       mediaPopupFeedSignature(online),
       mediaPopupFeedSignature(offline),
@@ -82,26 +58,55 @@ describe("native media popout identity", () => {
   });
 });
 
+describe("web media popout contracts", () => {
+  it("uses document Picture-in-Picture for browser clients", async () => {
+    const [pipModule, feed, voiceChannel] = await Promise.all([
+      readFile("app/shared/video-picture-in-picture.ts", "utf8"),
+      readFile("app/components/VideoFeed.vue", "utf8"),
+      readFile("app/components/VoiceChannel.vue", "utf8"),
+    ]);
+    assert.match(pipModule, /requestPictureInPicture/);
+    assert.match(feed, /canWebPopOut/);
+    assert.match(feed, /handleWebPopOut/);
+    assert.match(voiceChannel, /useWebMediaPopouts/);
+    assert.match(
+      voiceChannel,
+      /supportsWebPopOut && !tile\.feed\.local && !!tile\.feed\.stream/,
+    );
+  });
+
+  it("keeps desktop popouts on native windows and web popouts on PiP paths", async () => {
+    const [voiceChannel, popouts] = await Promise.all([
+      readFile("app/components/VoiceChannel.vue", "utf8"),
+      readFile("app/shared/media-popouts.ts", "utf8"),
+    ]);
+    assert.match(voiceChannel, /runtimeStore\.isTauri/);
+    assert.match(voiceChannel, /@pop-out="openMediaPopout/);
+    assert.match(popouts, /desktop_open_media_popup|MEDIA_POPUP_EVENTS/);
+  });
+});
+
 describe("native media popout contracts", () => {
-  it("uses managed child windows and the existing native receive event", async () => {
-    const [rust, module, capability, popup, smpte, feed, voiceChannel] =
+  it("renders popups in webview-less native windows fed by worker frame events", async () => {
+    const [rust, renderer, module, capability, feed, voiceChannel] =
       await Promise.all([
         readFile("desktop/src-tauri/src/desktop/media_popups.rs", "utf8"),
+        readFile("desktop/src-tauri/src/desktop/popup_renderer.rs", "utf8"),
         readFile("desktop/src-tauri/src/desktop/mod.rs", "utf8"),
         readFile("desktop/src-tauri/capabilities/media-popup.json", "utf8"),
-        readFile("app/components/MediaPopupWindow.vue", "utf8"),
-        readFile("app/components/MediaSmpteColorBars.vue", "utf8"),
         readFile("app/components/VideoFeed.vue", "utf8"),
         readFile("app/components/VoiceChannel.vue", "utf8"),
       ]);
-    assert.match(rust, /WebviewWindowBuilder/);
+    assert.match(rust, /WindowBuilder::new/);
     assert.match(rust, /desktop_open_media_popup/);
     assert.match(rust, /WindowEvent::Destroyed/);
-    assert.match(module, /media_popups::desktop_close_media_popup/);
+    assert.doesNotMatch(rust, /WebviewWindowBuilder|mediaPopupId=/);
+    assert.match(renderer, /softbuffer::Context/);
+    assert.match(renderer, /letterbox_region/);
+    assert.match(module, /media_popups::mark_all_offline/);
+    assert.match(rust, /desktop_set_media_popup_offline/);
     assert.match(capability, /media-popup-\*/);
-    assert.match(popup, /media:native-receive-event/);
-    assert.match(popup, /desktop_close_media_popup/);
-    assert.match(smpte, /No signal/);
+    assert.doesNotMatch(module, /mediaPopupId=|MediaPopupWindow/);
     assert.match(feed, /is popped out/);
     assert.match(voiceChannel, /syncPopoutFeeds/);
   });

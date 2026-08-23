@@ -66,9 +66,8 @@ pub(super) fn p2p_get_track_mid(state: &mut WorkerState, payload: Value) -> Work
     let track_key = CString::new(payload_string(&payload, "trackKey")?)
         .map_err(|error| json!(error.to_string()))?;
     let mut output = ptr::null_mut();
-    let result = unsafe {
-        ffi::lib_dspeak_media_p2p_get_track_mid(handle, track_key.as_ptr(), &mut output)
-    };
+    let result =
+        unsafe { ffi::lib_dspeak_media_p2p_get_track_mid(handle, track_key.as_ptr(), &mut output) };
     if result != 0 || output.is_null() {
         if !output.is_null() {
             unsafe { ffi::lib_dspeak_media_free_string(output) };

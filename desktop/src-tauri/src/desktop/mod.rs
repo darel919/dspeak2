@@ -1,6 +1,9 @@
+pub(crate) mod activity_log;
 mod media_popups;
+pub(crate) use media_popups::{route_frame, MediaPopupState};
 mod notifications;
 mod oauth;
+mod popup_renderer;
 mod state;
 mod tray;
 mod updates;
@@ -15,11 +18,30 @@ fn should_prevent_tray_exit(close_to_tray: bool, code: Option<i32>) -> bool {
     close_to_tray && code.is_none()
 }
 
+fn reconcile_autostart(app: &tauri::AppHandle) {
+    if !state::LAUNCH_AT_LOGIN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    match autolaunch.is_enabled() {
+        Ok(true) => {}
+        Ok(false) => {
+            if let Err(error) = autolaunch.enable() {
+                eprintln!("[dspeak] failed to enable launch-at-login default: {error}");
+            }
+        }
+        Err(error) => {
+            eprintln!("[dspeak] launch-at-login state check failed: {error}");
+        }
+    }
+}
+
 use crate::media;
 use state::{BackgroundNotificationState, OAuthState, HIDE_ON_CLOSE};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tauri::Listener;
 use tauri::Manager;
 use tokio::time::sleep;
@@ -33,7 +55,17 @@ pub(crate) fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--minimized"]),
         ))
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .with_denylist(&[window::STARTUP_WINDOW_LABEL])
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -46,18 +78,26 @@ pub(crate) fn run() {
             session: std::sync::Arc::new(Mutex::new(None)),
             enabled: std::sync::Arc::new(AtomicBool::new(false)),
             wake: std::sync::Arc::new(tokio::sync::Notify::new()),
+            pending_navigation: std::sync::Arc::new(Mutex::new(None)),
         })
         .manage(media_popups::MediaPopupState::default())
         .manage(media::NativeMediaStore::default())
         .setup(|app| {
-            maintain_log_directory(app.handle());
+            activity_log::log_activity(
+                app.handle(),
+                activity_log::LogCategory::AppLifecycle,
+                activity_log::ActivityLevel::Info,
+                "app-start",
+                serde_json::json!({ "version": app.package_info().version.to_string() }),
+            );
+            activity_log::trim_activity_log(app.handle());
             window::load_preferences(app.handle());
 
             let log_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     sleep(Duration::from_secs(24 * 60 * 60)).await;
-                    maintain_log_directory(&log_handle);
+                    activity_log::trim_activity_log(&log_handle);
                 }
             });
 
@@ -94,6 +134,7 @@ pub(crate) fn run() {
 
             let _ = tray::create_tray(app.handle())?;
             tray::setup_global_shortcuts(app.handle());
+            reconcile_autostart(app.handle());
 
             let media_app = app.handle().clone();
             app.listen(media::MEDIA_EVENT_STATE, move |event| {
@@ -104,13 +145,14 @@ pub(crate) fn run() {
                 if connected {
                     return;
                 }
-                media_popups::close_all(
+                media_popups::mark_all_offline(
                     &media_app,
                     media_app.state::<media_popups::MediaPopupState>().inner(),
                 );
                 if let Some(window) = media_app.get_webview_window("main") {
-                    let startup_pending =
-                        media_app.get_webview_window(window::STARTUP_WINDOW_LABEL).is_some();
+                    let startup_pending = media_app
+                        .get_webview_window(window::STARTUP_WINDOW_LABEL)
+                        .is_some();
                     let hidden = window.is_visible().map(|value| !value).unwrap_or(false);
                     if hidden && !startup_pending {
                         let _ = window.destroy();
@@ -148,10 +190,9 @@ pub(crate) fn run() {
             updates::check_for_updates,
             updates::install_update,
             notifications::show_notification,
-            window::save_window_state,
-            window::restore_window_state,
             window::set_hide_on_close,
             window::get_hide_on_close,
+            window::open_data_folder,
             window::desktop_open_devtools,
             window::desktop_close_devtools,
             oauth::get_oauth_callback_url,
@@ -161,11 +202,13 @@ pub(crate) fn run() {
             media_popups::desktop_get_media_popup,
             media_popups::desktop_focus_media_popup,
             media_popups::desktop_close_media_popup,
+            media_popups::desktop_set_media_popup_offline,
             media::media_worker_invoke,
             desktop_restart_app,
             notifications::register_background_notifications,
             notifications::clear_background_notifications,
             notifications::set_background_notifications_enabled,
+            notifications::take_pending_notification_navigation,
             media::media_initialize,
             media::media_join,
             media::media_leave,
@@ -271,27 +314,6 @@ pub(crate) fn run() {
         eprintln!("[dspeak:fatal-startup] {error}");
         show_native_fatal_dialog("dSpeak failed to start", &error.to_string());
         std::process::exit(1);
-    }
-}
-
-fn maintain_log_directory(app: &tauri::AppHandle) {
-    let Ok(directory) = app.path().app_log_dir() else {
-        return;
-    };
-    if std::fs::create_dir_all(&directory).is_err() {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(&directory) else {
-        return;
-    };
-    let now = SystemTime::now();
-    for entry in entries.flatten() {
-        let Ok(modified) = entry.metadata().and_then(|value| value.modified()) else {
-            continue;
-        };
-        if now.duration_since(modified).unwrap_or_default() > Duration::from_secs(24 * 60 * 60) {
-            let _ = std::fs::remove_file(entry.path());
-        }
     }
 }
 

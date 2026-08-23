@@ -67,6 +67,13 @@ pub(crate) async fn media_worker_invoke(
     .await
     .map_err(|error| json!(format!("native media worker task failed: {error}")))?;
     if let Err(error) = &result {
+        crate::desktop::activity_log::log_activity(
+            &app,
+            crate::desktop::activity_log::LogCategory::VoiceChannels,
+            crate::desktop::activity_log::ActivityLevel::Warning,
+            "media-command-failed",
+            error.clone(),
+        );
         if error.get("code").and_then(Value::as_str) == Some("MEDIA_WORKER_EXITED")
             && event_worker.claim_fatal_event()
         {

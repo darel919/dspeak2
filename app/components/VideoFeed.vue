@@ -158,6 +158,26 @@
         Pop out
       </button>
       <button
+        v-if="canWebPopOut && !webPoppedOut && !isFullscreen"
+        type="button"
+        class="metro-btn metro-btn--sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
+        title="Pop out participant"
+        @click.stop="handleWebPopOut"
+      >
+        <Icon name="lucide:picture-in-picture-2" class="size-4" />
+        Pop out
+      </button>
+      <button
+        v-if="canWebPopOut && webPoppedOut"
+        type="button"
+        class="metro-btn metro-btn--sm absolute right-3 top-3 border-white/30 bg-black/70 text-white hover:bg-black/90"
+        title="Pop participant back in"
+        @click.stop="handleWebPopIn"
+      >
+        <Icon name="lucide:log-in" class="size-4" />
+        Pop in
+      </button>
+      <button
         v-if="
           showReceivingControls &&
           source === 'screen' &&
@@ -167,7 +187,7 @@
         "
         type="button"
         class="metro-btn metro-btn--sm absolute top-3 bg-black/70 text-white hover:bg-black/90"
-        :class="canPopOut ? 'right-28' : 'right-3'"
+        :class="canPopOut || canWebPopOut ? 'right-28' : 'right-3'"
         @click.stop="$emit('stop-receiving')"
       >
         <Icon name="lucide:monitor-off" class="size-4" />
@@ -193,6 +213,12 @@ import {
   isCurrentVideoFrame,
   scheduleFencedVideoFrame,
 } from "~/shared/video-frame-fencing.ts";
+import {
+  enterWebPopOut,
+  exitWebPopOut,
+  webPopOutSupported,
+  showSmpteWhilePoppedOut,
+} from "~/shared/video-picture-in-picture.ts";
 
 const settingsStore = useSettingsStore();
 const props = defineProps({
@@ -204,6 +230,8 @@ const props = defineProps({
   nativeFrame: { type: Object, default: null },
   canPopOut: { type: Boolean, default: false },
   poppedOut: { type: Boolean, default: false },
+  canWebPopOut: { type: Boolean, default: false },
+  webPoppedOut: { type: Boolean, default: false },
   source: { type: String, required: true },
   label: { type: String, required: true },
   muted: { type: Boolean, default: false },
@@ -222,12 +250,15 @@ const emit = defineEmits([
   "pop-out",
   "focus-popup",
   "pop-in",
+  "web-pop-out",
+  "web-pop-in",
   "first-frame",
   "frame-presented",
 ]);
 
 const videoElement = ref(null);
 const nativeCanvasElement = ref(null);
+let smpteSession = null;
 const feedElement = ref(null);
 const ownCameraElement = ref(null);
 const isFullscreen = ref(false);
@@ -310,6 +341,16 @@ async function toggleFullscreen() {
 function handleDoubleClick() {
   if (props.poppedOut) emit("focus-popup");
   else toggleFullscreen();
+}
+
+async function handleWebPopOut() {
+  const entered = await enterWebPopOut(videoElement.value);
+  if (entered) emit("web-pop-out");
+}
+
+async function handleWebPopIn() {
+  await exitWebPopOut();
+  emit("web-pop-in");
 }
 
 function handleTouchEnd(event) {
@@ -641,12 +682,20 @@ onBeforeUnmount(() => {
     emit("preview-change", false);
 });
 watch(
-  () => props.stream,
+  () => [props.stream, props.receiving, props.webPoppedOut],
   () => {
     if (props.local && props.source === "screen") previewEnabled.value = false;
-    videoFirstFrameEmitted = false;
-    cancelVideoFrameEvidence();
-    attachStream();
+    smpteSession?.stop();
+    smpteSession = null;
+    if (!props.webPoppedOut) {
+      attachStream();
+      return;
+    }
+    if (!props.stream || props.receiving === false) {
+      smpteSession = showSmpteWhilePoppedOut(videoElement.value, props.label);
+    } else {
+      attachStream();
+    }
   },
 );
 watch(
@@ -715,6 +764,8 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  smpteSession?.stop();
+  smpteSession = null;
   document.removeEventListener("fullscreenchange", syncFullscreenState);
   document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
   document.removeEventListener("visibilitychange", handlePageVisible);

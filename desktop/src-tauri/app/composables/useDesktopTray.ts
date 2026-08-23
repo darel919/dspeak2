@@ -45,6 +45,28 @@ export function useDesktopTray() {
     useVoiceStore().toggleMic();
   });
 
+  void listen("tray:disconnect-voice", () => {
+    void useVoiceStore().leaveVoiceChannel();
+  });
+
+  watch(
+    () => {
+      const voiceStore = useVoiceStore();
+      const connected = voiceStore.connected;
+      const channelId = voiceStore.currentChannelId;
+      return {
+        connected,
+        label: connected
+          ? (useChannelsStore().getChannelById(channelId)?.name ?? "")
+          : "",
+      };
+    },
+    (snapshot) => {
+      invoke("set_tray_presence", { status: snapshot.label }).catch(() => {});
+    },
+    { immediate: true },
+  );
+
   void listen("notification:navigate", () => {
     void (async () => {
       try {

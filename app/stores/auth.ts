@@ -439,6 +439,26 @@ export const useAuthStore = defineStore("auths", () => {
     performDesktopSessionBridge,
   );
 
+  function registerBackgroundNotificationSession(
+    apiPath: string,
+    accessToken: string,
+  ) {
+    if (!runtimeStore.isTauri || !apiPath || !accessToken) return;
+    import("@tauri-apps/api/core")
+      .then(({ invoke }) =>
+        invoke("register_background_notifications", {
+          serverUrl: apiPath,
+          token: accessToken,
+        }),
+      )
+      .catch((cause) => {
+        console.warn(
+          "[Auth] Background notification registration failed:",
+          cause,
+        );
+      });
+  }
+
   async function performDesktopSessionBridge(accessToken: string) {
     validateDesktopApiConfig(config, runtimeStore);
     const { clientBuildCommit, clientProjectRef } = clientFingerprint(config);
@@ -633,6 +653,10 @@ export const useAuthStore = defineStore("auths", () => {
       }
       setUser(session);
       desktopAuthFailure.value = null;
+      registerBackgroundNotificationSession(
+        config.public.baseApiPath,
+        accessToken,
+      );
       console.info("[DesktopAuth] DESKTOP_API_SESSION_BRIDGE_SUCCEEDED", {
         requestId,
         serverBuildCommit: response.headers.get("X-dSpeak-Build-Commit") || "",

@@ -196,6 +196,13 @@ fn read_worker_output(
         if let Ok(mut current) = state.lock() {
             *current = disconnected.clone();
         }
+        crate::desktop::activity_log::log_activity(
+            &app,
+            crate::desktop::activity_log::LogCategory::VoiceChannels,
+            crate::desktop::activity_log::ActivityLevel::Error,
+            "call-worker-crash",
+            error.clone(),
+        );
         let _ = app.emit(MEDIA_EVENT_STATE, &disconnected);
         if connection.claim_fatal_event() {
             let _ = app.emit("media:error", error);
@@ -219,14 +226,51 @@ fn emit_worker_event(app: &AppHandle, value: &Value) {
         .and_then(Value::as_str)
         .unwrap_or_default();
     let payload = value.get("payload").cloned().unwrap_or(Value::Null);
+    if event == "native-receive-event" {
+        route_receive_event(app, &payload);
+    }
     let name = match event {
         "native-action" => super::MEDIA_EVENT_NATIVE_ACTION,
         "native-receive-event" => super::MEDIA_EVENT_NATIVE_RECEIVE,
         "state" => super::MEDIA_EVENT_STATE,
-        "error" => "media:error",
+        "error" => {
+            crate::desktop::activity_log::log_activity(
+                app,
+                crate::desktop::activity_log::LogCategory::VoiceChannels,
+                crate::desktop::activity_log::ActivityLevel::Error,
+                "media-error",
+                payload.clone(),
+            );
+            "media:error"
+        }
         _ => return,
     };
     let _ = app.emit(name, payload);
+}
+
+fn route_receive_event(app: &AppHandle, payload: &Value) {
+    let kind = payload.get("kind").and_then(Value::as_i64).unwrap_or(0);
+    if kind != 2 && kind != 5 {
+        return;
+    }
+    let Some(state) = app.try_state::<crate::desktop::MediaPopupState>() else {
+        return;
+    };
+    let frame_payload = serde_json::json!({
+        "data": payload.get("data").cloned().unwrap_or(Value::Null),
+        "width": payload
+            .get("payload")
+            .and_then(|value| value.get("width"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "height": payload
+            .get("payload")
+            .and_then(|value| value.get("height"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "id": payload.get("id").cloned().unwrap_or(Value::Null),
+    });
+    crate::desktop::route_frame(&state, &frame_payload);
 }
 
 fn resolve_worker_path(app: &AppHandle) -> Result<PathBuf, Value> {

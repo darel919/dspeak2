@@ -283,6 +283,10 @@
                 !tile.feed.local
               "
               :popped-out="isPoppedOut(tile.feed)"
+              :can-web-pop-out="
+                supportsWebPopOut && !tile.feed.local && !!tile.feed.stream
+              "
+              :web-popped-out="webPopOutActive"
               :source="tile.feed.source"
               :label="tile.feed.label"
               :muted="true"
@@ -298,6 +302,8 @@
               @pop-out="openMediaPopout(tile.feed)"
               @focus-popup="focusMediaPopout(tile.feed)"
               @pop-in="closeMediaPopout(tile.feed)"
+              @web-pop-out="onWebMediaPopOut"
+              @web-pop-in="onWebMediaPopIn"
               @first-frame="onRemoteFirstFrame"
               @frame-presented="onRemoteFramePresented"
             />
@@ -857,8 +863,14 @@ import { useIdentityStore } from "~/stores/identity";
 import { useChannelsStore } from "~/stores/channels";
 import { useRuntimeStore } from "~/stores/runtime";
 import { getDesktopCaptureApi } from "../shared/desktop-capture";
+import { webPopOutSupported } from "../shared/video-picture-in-picture.ts";
+import {
+  getMediaPopupTauriApi,
+  mediaPopupIdForFeed,
+} from "../shared/media-popouts.ts";
 import { useVoiceConnectionStatus } from "../composables/useVoiceConnectionStatus";
 import { useDesktopMediaPopouts } from "../composables/useDesktopMediaPopouts";
+import { useWebMediaPopouts } from "../composables/useWebMediaPopouts";
 import { useAdaptiveVideoGrid } from "../composables/useAdaptiveVideoGrid";
 import { useVideoRoomLayout } from "../composables/useVideoRoomLayout";
 import {
@@ -893,8 +905,16 @@ const authStore = useAuthStore();
 const identityStore = useIdentityStore();
 const channelsStore = useChannelsStore();
 const runtimeStore = useRuntimeStore();
-const { openPopout, closePopout, focusPopout, isPoppedOut, syncPopoutFeeds } =
-  useDesktopMediaPopouts();
+const {
+  openPopout,
+  closePopout,
+  focusPopout,
+  isPoppedOut,
+  syncPopoutFeeds,
+  markPopoutOffline,
+} = useDesktopMediaPopouts();
+const { active: webPopOutActive } = useWebMediaPopouts();
+const supportsWebPopOut = webPopOutSupported();
 const router = useRouter();
 const config = useRuntimeConfig();
 const {
@@ -1032,6 +1052,34 @@ const ownCameraFeed = computed(
 watch(mediaFeedRevision, () => syncPopoutFeeds(videoFeeds.value), {
   immediate: true,
 });
+watch(
+  () => [videoFeeds.value, mediaFeedRevision.value],
+  () => {
+    for (const tile of roomTiles.value) {
+      if (tile.type !== "feed" || !tile.feed.native) continue;
+      const feed = tile.feed;
+      const signalLost = feed.closed === true || feed.visible === false;
+      if (signalLost && isPoppedOut(feed)) {
+        void markPopoutOffline(feed);
+        void invokeSetPopupOffline(feed);
+      }
+    }
+  },
+);
+
+async function invokeSetPopupOffline(feed) {
+  if (!runtimeStore.isTauri) return;
+  try {
+    const api = await getMediaPopupTauriApi();
+    if (!api) return;
+    await api.invoke("desktop_set_media_popup_offline", {
+      popupId: mediaPopupIdForFeed(feed),
+      label: feed.label || "Participant",
+    });
+  } catch (error) {
+    console.warn("[VoiceChannel] popup offline notify failed", error);
+  }
+}
 
 const settingsStore = useSettingsStore();
 
@@ -1168,6 +1216,14 @@ function closeMediaPopout(feed) {
   closePopout(feed).catch((error) => {
     console.error("[VoiceChannel] Media popup close error:", error);
   });
+}
+
+function onWebMediaPopOut() {
+  mediaFeedRevision.value += 1;
+}
+
+function onWebMediaPopIn() {
+  mediaFeedRevision.value += 1;
 }
 
 function setSystemAudioReceiving(feed, receiving) {

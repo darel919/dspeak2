@@ -85,6 +85,7 @@ fn drain_native_events(app: &AppHandle) {
                 "data": data,
             });
             unsafe { ffi::lib_dspeak_media_free_receive_event(&mut receive) };
+            route_bridge_receive_event(app, &event);
             let _ = app.emit(MEDIA_EVENT_NATIVE_RECEIVE, event);
         }
 
@@ -92,6 +93,34 @@ fn drain_native_events(app: &AppHandle) {
             break;
         }
     }
+}
+
+fn route_bridge_receive_event(app: &AppHandle, event: &serde_json::Value) {
+    let kind = event
+        .get("kind")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0);
+    if kind != 2 && kind != 5 {
+        return;
+    }
+    let Some(state) = app.try_state::<crate::desktop::MediaPopupState>() else {
+        return;
+    };
+    let frame_payload = serde_json::json!({
+        "data": event.get("data").cloned().unwrap_or(serde_json::Value::Null),
+        "width": event
+            .get("payload")
+            .and_then(|value| value.get("width"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "height": event
+            .get("payload")
+            .and_then(|value| value.get("height"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        "id": event.get("id").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    crate::desktop::route_frame(&state, &frame_payload);
 }
 
 pub(crate) fn start(

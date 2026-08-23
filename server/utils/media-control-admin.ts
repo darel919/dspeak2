@@ -1,4 +1,5 @@
 import type { MediaControlRequestOptions } from "../types/media-control-admin.ts";
+import { normalizeMediaPolicy } from "../../shared/media-policy.ts";
 import {
   parseExternalNumber,
   parseExternalRecord,
@@ -71,13 +72,14 @@ export async function pushMediaPolicy(
   const record = parseExternalRecord(mediaPolicy);
   if (!record) return false;
   try {
+    const normalized = normalizeMediaPolicy(record);
     const result = parseExternalRecord(
       await request(channelId, "media-policy", {
         method: "POST",
         body: JSON.stringify({
-          audioLatencyProfile: record.audioLatencyProfile,
-          revision: record.revision,
-          updatedAt: record.updatedAt ?? null,
+          audioLatencyProfile: normalized.audioLatencyProfile,
+          revision: normalized.revision,
+          updatedAt: normalized.updatedAt ?? null,
         }),
       }),
     );

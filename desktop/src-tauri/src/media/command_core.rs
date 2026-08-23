@@ -99,6 +99,13 @@ pub async fn media_join(
         state.clone()
     };
     store.stay_awake.acquire();
+    crate::desktop::activity_log::log_activity(
+        &app,
+        crate::desktop::activity_log::LogCategory::VoiceChannels,
+        crate::desktop::activity_log::ActivityLevel::Info,
+        "call-join",
+        snapshot.session.clone().unwrap_or(Value::Null),
+    );
     emit_state(&app, &snapshot);
     Ok(())
 }
@@ -130,6 +137,13 @@ pub async fn media_leave(app: AppHandle, store: State<'_, NativeMediaStore>) -> 
         state.tracks.clear();
         state.clone()
     };
+    crate::desktop::activity_log::log_activity(
+        &app,
+        crate::desktop::activity_log::LogCategory::VoiceChannels,
+        crate::desktop::activity_log::ActivityLevel::Info,
+        "call-leave",
+        Value::Null,
+    );
     emit_state(&app, &snapshot);
     Ok(())
 }

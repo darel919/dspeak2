@@ -21,6 +21,20 @@ export interface ConfirmDialogRequest {
 let nextRequestId = 0;
 const resolvers = new Map<string, (confirmed: boolean) => void>();
 
+function hasTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+async function nativeConfirm(request: ConfirmDialogRequest): Promise<boolean> {
+  const { ask } = await import("@tauri-apps/plugin-dialog");
+  return ask(request.message, {
+    title: request.title,
+    kind: request.destructive ? "warning" : "info",
+    okLabel: request.confirmLabel || "Continue",
+    cancelLabel: request.cancelLabel || "Cancel",
+  });
+}
+
 export function useConfirmDialog() {
   const activeRequest = useState<ConfirmDialogRequest | null>(
     "app-confirm-dialog-active",
@@ -50,6 +64,13 @@ export function useConfirmDialog() {
       cancelLabel: normalized.cancelLabel || "Cancel",
       destructive: Boolean(normalized.destructive),
     };
+
+    if (hasTauriRuntime()) {
+      return nativeConfirm(request).catch((error) => {
+        console.warn("[ConfirmDialog] Native dialog failed:", error);
+        return false;
+      });
+    }
 
     return new Promise((resolve) => {
       resolvers.set(request.id, resolve);

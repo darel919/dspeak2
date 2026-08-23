@@ -973,10 +973,75 @@
               >
                 {{ closePreferenceError }}
               </p>
+            </div>
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Launch at login</h2>
+                  <p>
+                    Start dSpeak automatically when you log in to your computer.
+                  </p>
+                </div>
+              </div>
+              <label class="settings-row">
+                <span class="settings-row-label">
+                  <Icon name="lucide:rocket" />
+                  Launch dSpeak at login
+                  <small>
+                    When enabled, dSpeak starts minimized to the tray on system
+                    startup and keeps calls ready in the background.
+                  </small>
+                </span>
+                <select
+                  class="metro-select w-full max-w-xs"
+                  :value="autostartEnabled ? 'on' : 'off'"
+                  :disabled="autostartLoading"
+                  @change="setAutostart($event.target.value === 'on')"
+                >
+                  <option value="on">On (minimize to tray)</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
               <p
-                class="border-t border-base-300 px-5 py-3 text-xs text-base-content/60"
+                v-if="autostartError"
+                class="border-t border-base-300 px-5 py-3 text-sm text-error"
+                role="alert"
               >
-                Starting dSpeak on login always starts it minimized to the tray.
+                {{ autostartError }}
+              </p>
+            </div>
+            <div class="settings-panel">
+              <div class="settings-panel-heading">
+                <div>
+                  <h2>Data and logs</h2>
+                  <p>
+                    Settings and call activity logs live in a JSON file inside
+                    the app data folder. Logs are kept for one day.
+                  </p>
+                </div>
+              </div>
+              <div class="settings-row">
+                <span class="settings-row-label">
+                  <Icon name="lucide:folder-open" />
+                  App data folder
+                  <small>
+                    Contains desktop-preferences.json and activity-log.json.
+                  </small>
+                </span>
+                <button
+                  class="metro-btn"
+                  :disabled="dataFolderOpening"
+                  @click="openDataFolder"
+                >
+                  {{ dataFolderOpening ? "Opening..." : "Open folder" }}
+                </button>
+              </div>
+              <p
+                v-if="dataFolderError"
+                class="border-t border-base-300 px-5 py-3 text-sm text-error"
+                role="alert"
+              >
+                {{ dataFolderError }}
               </p>
             </div>
           </section>
@@ -1146,6 +1211,9 @@ const activeSectionMeta = computed(() => sectionDetails[activeSection.value]);
 const closeToTray = ref(true);
 const closePreferenceLoading = ref(false);
 const closePreferenceError = ref("");
+const autostartEnabled = ref(false);
+const autostartLoading = ref(false);
+const autostartError = ref("");
 
 watch(
   () => [route.query.section, runtimeStore.isTauri],
@@ -1216,6 +1284,50 @@ async function setCloseToTray(enabled) {
     closePreferenceError.value = "Unable to save the desktop close preference.";
   } finally {
     closePreferenceLoading.value = false;
+  }
+}
+
+async function loadAutostart() {
+  if (!runtimeStore.isTauri) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    autostartEnabled.value = Boolean(await invoke("get_autostart"));
+  } catch {
+    autostartError.value = "Unable to read the launch-at-login preference.";
+  }
+}
+
+async function setAutostart(enabled) {
+  if (!runtimeStore.isTauri || autostartLoading.value) return;
+  const previous = autostartEnabled.value;
+  autostartEnabled.value = enabled;
+  autostartLoading.value = true;
+  autostartError.value = "";
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_autostart", { enabled });
+  } catch {
+    autostartEnabled.value = previous;
+    autostartError.value = "Unable to save the launch-at-login preference.";
+  } finally {
+    autostartLoading.value = false;
+  }
+}
+
+const dataFolderOpening = ref(false);
+const dataFolderError = ref("");
+
+async function openDataFolder() {
+  if (!runtimeStore.isTauri || dataFolderOpening.value) return;
+  dataFolderOpening.value = true;
+  dataFolderError.value = "";
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_data_folder");
+  } catch {
+    dataFolderError.value = "Unable to open the app data folder.";
+  } finally {
+    dataFolderOpening.value = false;
   }
 }
 
@@ -1946,6 +2058,7 @@ onMounted(async () => {
 watch(activeSection, (section) => {
   if (section === "voice") startMicrophonePreview();
   else stopMicrophonePreview();
+  if (section === "desktop") loadAutostart();
 });
 
 watch(hdAudioEnabled, restartMicrophonePreview);
