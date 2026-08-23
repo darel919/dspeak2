@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { baseParse, NodeTypes } from "@vue/compiler-dom";
 import { parse } from "@vue/compiler-sfc";
 import test from "node:test";
+import { listSourceFiles } from "./helpers/source-files.ts";
 
 function attributes(node) {
   return new Map(
@@ -104,11 +104,7 @@ function inspectTemplate(file, template) {
 }
 
 test("Vue templates retain basic accessible names and semantics", async () => {
-  const files = execFileSync("rg", ["--files", "app", "-g", "*.vue"], {
-    encoding: "utf8",
-  })
-    .trim()
-    .split("\n");
+  const files = await listSourceFiles(["app"], [".vue"]);
   const findings = [];
 
   for (const file of files) {

@@ -1,22 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import test from "node:test";
-
-const execute = promisify(execFile);
+import { listSourceFiles } from "./helpers/source-files.ts";
 
 test("browser application source contains no executable HTML sinks", async () => {
-  const { stdout } = await execute("rg", [
-    "--files",
-    "app",
-    "shared",
-    "-g",
-    "*.ts",
-    "-g",
-    "*.vue",
-  ]);
-  const files = stdout.trim().split("\n").filter(Boolean);
+  const files = await listSourceFiles(["app", "shared"], [".ts", ".vue"]);
   const prohibited = [
     /\bv-html\b/,
     /\.innerHTML\b/,
