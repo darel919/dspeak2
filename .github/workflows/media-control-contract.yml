@@ -3,7 +3,7 @@ name: Media control contract
 on:
   push:
     branches:
-      - next
+      - master
   pull_request:
 
 jobs:

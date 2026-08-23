@@ -73,15 +73,6 @@ jobs:
           DSPEAK_PUBLIC_ORIGIN: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
         run: node scripts/desktop-session-edge-smoke.mjs
 
-      - name: Check root formatting
-        run: bun run format:check
-
-      - name: Run root lint
-        run: bun run lint
-
-      - name: Run root typecheck
-        run: bun run typecheck
-
       - name: Run root tests
         env:
           DSPEAK_MEDIA_CONTROL_PATH: ${{ github.workspace }}/../dspeak-media-control

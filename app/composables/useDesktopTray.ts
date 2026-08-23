@@ -1,3 +1,8 @@
+import {
+  isExternalRecord,
+  isExternalString,
+  type ExternalValue,
+} from "~/shared/types/boundary.ts";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useRuntimeStore } from "~/stores/runtime";
@@ -7,16 +12,14 @@ type NotificationNavigationTarget =
   | { kind: "directMessage"; conversationId: string };
 
 function isNotificationNavigationTarget(
-  value: unknown,
+  value: ExternalValue,
 ): value is NotificationNavigationTarget {
-  if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
-  if (record.kind === "room")
-    return typeof record.roomId === "string" && record.roomId.length > 0;
-  if (record.kind === "directMessage")
+  if (!isExternalRecord(value)) return false;
+  if (value.kind === "room")
+    return isExternalString(value.roomId) && value.roomId.length > 0;
+  if (value.kind === "directMessage")
     return (
-      typeof record.conversationId === "string" &&
-      record.conversationId.length > 0
+      isExternalString(value.conversationId) && value.conversationId.length > 0
     );
   return false;
 }
@@ -48,7 +51,7 @@ export function useDesktopTray() {
   void listen("notification:navigate", () => {
     void (async () => {
       try {
-        const target: unknown = await invoke(
+        const target: ExternalValue = await invoke(
           "take_pending_notification_navigation",
         );
         if (!isNotificationNavigationTarget(target)) return;

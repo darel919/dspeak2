@@ -1,0 +1,44 @@
+# Fast code checks that must pass on every commit.
+#
+# Runs format and lint on plain pushes and pull requests so style and
+# anti-slop violations are caught in under a minute, long before the
+# expensive desktop-build pipeline (which chains off native-media) gets
+# a chance to download dependencies and fail on the same issues.
+
+name: Code Checks
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1"
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check formatting
+        run: bun run format:check
+
+      - name: Run lint
+        run: bun run lint

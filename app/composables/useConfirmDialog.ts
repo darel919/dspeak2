@@ -1,4 +1,5 @@
 import { readonly } from "vue";
+import { hasTauriRuntimeMarker } from "../shared/desktop-capture.ts";
 import { isExternalString } from "../shared/types/boundary.ts";
 
 export interface ConfirmDialogOptions {
@@ -22,7 +23,7 @@ let nextRequestId = 0;
 const resolvers = new Map<string, (confirmed: boolean) => void>();
 
 function hasTauriRuntime() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return hasTauriRuntimeMarker();
 }
 
 async function nativeConfirm(request: ConfirmDialogRequest): Promise<boolean> {
