@@ -20,9 +20,7 @@
     "active": true,
     "createUpdaterArtifacts": false,
     "targets": "all",
-    "externalBin": [
-      "binaries/dspeak-media"
-    ],
+    "externalBin": ["binaries/dspeak-media"],
     "windows": {
       "wix": {
         "version": "3.0.2.1"
