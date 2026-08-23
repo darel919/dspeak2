@@ -1,13 +1,7 @@
-import {
-  isExternalBoolean,
-  isExternalRecord,
-  type ExternalObject,
-  type ExternalValue,
-} from "./types/boundary.ts";
+import type { ExternalObject, ExternalValue } from "./types/boundary.ts";
 
 export const MEDIA_POPUP_EVENTS = Object.freeze({
   feed: "desktop:media-popup-feed",
-  volume: "desktop:media-popup-volume",
   closed: "desktop:media-popup-closed",
 });
 
@@ -50,11 +44,13 @@ type MediaPopupTauriApi = {
   ) => Promise<() => void>;
 };
 
-export function clampMediaPopupVolume<T>(value: T) {
+function clampVolume<T>(value: T) {
   const normalized = Number(value);
   if (!Number.isFinite(normalized)) return 1;
   return Math.max(0, Math.min(2, normalized));
 }
+
+export { clampVolume };
 
 export function mediaPopupIdForFeed(feed: MediaFeedLike) {
   const participantId = String(feed.userId ?? "");
@@ -91,7 +87,7 @@ export function createMediaPopupFeed<T>(
     eventId: mediaPopupEventIdForFeed(feed),
     online: feed.closed !== true && feed.visible !== false,
     receiving: feed.receiving !== false,
-    volume: clampMediaPopupVolume(volume ?? 1),
+    volume: clampVolume(volume ?? 1),
   };
 }
 
@@ -109,33 +105,6 @@ export function mediaPopupFeedSignature(feed: MediaPopupFeed) {
     feed.receiving ? "receiving" : "paused",
     feed.volume.toFixed(3),
   ].join("|");
-}
-
-export function normalizeMediaPopupFeed<T>(value: T): MediaPopupFeed | null {
-  if (!isExternalRecord(value)) return null;
-  const record = value;
-  const popupId = String(record.popupId || "");
-  const participantId = String(record.participantId || "");
-  const source = String(record.source || "");
-  const logicalStreamId = String(record.logicalStreamId || "");
-  if (!popupId || !participantId || !source || !logicalStreamId) return null;
-  const eventId =
-    record.eventId == null || String(record.eventId).length === 0
-      ? null
-      : String(record.eventId);
-  return {
-    popupId,
-    participantId,
-    source,
-    logicalStreamId,
-    label: String(record.label || participantId),
-    avatar: String(record.avatar || ""),
-    native: isExternalBoolean(record.native) ? record.native : false,
-    eventId,
-    online: record.online === true,
-    receiving: record.receiving !== false,
-    volume: clampMediaPopupVolume(record.volume),
-  };
 }
 
 export async function getMediaPopupTauriApi(): Promise<MediaPopupTauriApi | null> {

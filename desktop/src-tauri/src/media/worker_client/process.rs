@@ -226,6 +226,9 @@ fn emit_worker_event(app: &AppHandle, value: &Value) {
         .and_then(Value::as_str)
         .unwrap_or_default();
     let payload = value.get("payload").cloned().unwrap_or(Value::Null);
+    if event == "native-receive-event" {
+        route_receive_event(app, &payload);
+    }
     let name = match event {
         "native-action" => super::MEDIA_EVENT_NATIVE_ACTION,
         "native-receive-event" => super::MEDIA_EVENT_NATIVE_RECEIVE,
@@ -243,6 +246,31 @@ fn emit_worker_event(app: &AppHandle, value: &Value) {
         _ => return,
     };
     let _ = app.emit(name, payload);
+}
+
+fn route_receive_event(app: &AppHandle, payload: &Value) {
+    let kind = payload.get("kind").and_then(Value::as_i64).unwrap_or(0);
+    if kind != 2 && kind != 5 {
+        return;
+    }
+    let Some(state) = app.try_state::<crate::desktop::MediaPopupState>() else {
+        return;
+    };
+    let frame_payload = serde_json::json!({
+        "data": payload.get("data").cloned().unwrap_or(Value::Null),
+        "width": payload
+            .get("payload")
+            .and_then(|value| value.get("width"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "height": payload
+            .get("payload")
+            .and_then(|value| value.get("height"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "id": payload.get("id").cloned().unwrap_or(Value::Null),
+    });
+    crate::desktop::route_frame(&state, &frame_payload);
 }
 
 fn resolve_worker_path(app: &AppHandle) -> Result<PathBuf, Value> {

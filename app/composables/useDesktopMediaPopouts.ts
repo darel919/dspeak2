@@ -3,12 +3,10 @@ import { useRuntimeStore } from "~/stores/runtime";
 import { useVoiceStore } from "~/stores/voice";
 import {
   MEDIA_POPUP_EVENTS,
-  clampMediaPopupVolume,
   createMediaPopupFeed,
   getMediaPopupTauriApi,
   mediaPopupFeedSignature,
   mediaPopupIdForFeed,
-  normalizeMediaPopupFeed,
   type MediaPopupFeed,
 } from "~/shared/media-popouts.ts";
 import {
@@ -35,7 +33,6 @@ function createDesktopMediaPopouts() {
   const unlisten: Array<() => void> = [];
   let apiPromise: Promise<MediaPopupTauriApi | null> | null = null;
   let listenerPromise: Promise<MediaPopupTauriApi | null> | null = null;
-  let volumeOperation = Promise.resolve();
 
   function replacePopouts(next: Map<string, MediaPopupFeed>) {
     popouts.value = next;
@@ -72,34 +69,6 @@ function createDesktopMediaPopouts() {
         await api.listen(MEDIA_POPUP_EVENTS.closed, ({ payload }) => {
           const record = isExternalRecord(payload) ? payload : {};
           removePopup(String(record.popupId || ""));
-        }),
-      );
-      unlisten.push(
-        await api.listen(MEDIA_POPUP_EVENTS.volume, ({ payload }) => {
-          const record = isExternalRecord(payload) ? payload : {};
-          if (record.origin === "main") return;
-          const popupId = String(record.popupId || "");
-          const popup = popouts.value.get(popupId);
-          if (!popup) return;
-          const participantId = String(
-            record.participantId || popup.participantId,
-          );
-          const volume = clampMediaPopupVolume(record.volume);
-          const updated = { ...popup, volume };
-          updatePopup(updated);
-          volumeOperation = volumeOperation
-            .catch(() => {})
-            .then(async () => {
-              await Promise.resolve(
-                voiceStore.setUserVolume(participantId, volume),
-              );
-              await api.emit(MEDIA_POPUP_EVENTS.volume, {
-                popupId,
-                participantId,
-                volume,
-                origin: "main",
-              });
-            });
         }),
       );
       return api;
@@ -172,13 +141,31 @@ function createDesktopMediaPopouts() {
     for (const popup of popouts.value.values()) {
       const current = currentFeeds.get(popup.popupId);
       const next = current
-        ? { ...current, volume: voiceStore.getUserVolume(popup.participantId) }
+        ? {
+            ...current,
+            volume: voiceStore.getUserVolume(popup.participantId),
+            online: current.online,
+          }
         : { ...popup, online: false, eventId: null };
       if (mediaPopupFeedSignature(next) === mediaPopupFeedSignature(popup))
         continue;
       updatePopup(next);
       void api.emit(MEDIA_POPUP_EVENTS.feed, next).catch(() => {});
     }
+  }
+
+  async function markPopoutOffline(value: MediaFeedRecord | string) {
+    const popupId = isExternalString(value)
+      ? value
+      : mediaPopupIdForFeed(value);
+    const popup = popouts.value.get(popupId);
+    if (!popup || !popup.online) return false;
+    const offline = { ...popup, online: false, eventId: null };
+    updatePopup(offline);
+    const api = await ensureListeners();
+    if (!api) return true;
+    void api.emit(MEDIA_POPUP_EVENTS.feed, offline).catch(() => {});
+    return true;
   }
 
   async function closeAll() {
@@ -213,7 +200,7 @@ function createDesktopMediaPopouts() {
     focusPopout,
     isPoppedOut,
     syncPopoutFeeds,
-    normalizePopupFeed: normalizeMediaPopupFeed,
+    markPopoutOffline,
   };
 }
 

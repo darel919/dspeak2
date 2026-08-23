@@ -1,7 +1,9 @@
 pub(crate) mod activity_log;
 mod media_popups;
+pub(crate) use media_popups::{route_frame, MediaPopupState};
 mod notifications;
 mod oauth;
+mod popup_renderer;
 mod state;
 mod tray;
 mod updates;
@@ -143,7 +145,7 @@ pub(crate) fn run() {
                 if connected {
                     return;
                 }
-                media_popups::close_all(
+                media_popups::mark_all_offline(
                     &media_app,
                     media_app.state::<media_popups::MediaPopupState>().inner(),
                 );
@@ -200,6 +202,7 @@ pub(crate) fn run() {
             media_popups::desktop_get_media_popup,
             media_popups::desktop_focus_media_popup,
             media_popups::desktop_close_media_popup,
+            media_popups::desktop_set_media_popup_offline,
             media::media_worker_invoke,
             desktop_restart_app,
             notifications::register_background_notifications,
