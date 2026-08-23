@@ -19,9 +19,7 @@ const { MediaRoomDO, controlMessageByteLength, normalizeMediaSources } =
       };
 
 test("media-control bounds message and source metadata", (t) => {
-  if (!normalizeMediaSources) {
-    t.skip("dspeak-media-control source is not available locally");
-  }
+  if (!normalizeMediaSources) t.skip("media-control source not available");
   assert.equal(controlMessageByteLength("voice"), 5);
   assert.equal(controlMessageByteLength("😀"), 4);
   assert.deepEqual(normalizeMediaSources(["audio", "screen-audio"]), [
@@ -38,9 +36,7 @@ test("media-control bounds message and source metadata", (t) => {
 });
 
 test("media-control honors a configured WebSocket Origin allowlist", (t) => {
-  if (!MediaRoomDO) {
-    t.skip("dspeak-media-control source is not available locally");
-  }
+  if (!MediaRoomDO) t.skip("media-control source not available");
   const allowed = MediaRoomDO.prototype.isAllowedWebSocketOrigin.call(
     {
       env: {
@@ -63,9 +59,7 @@ test("media-control honors a configured WebSocket Origin allowlist", (t) => {
 });
 
 test("media-control excludes providers during their failure cooldown", (t) => {
-  if (!MediaRoomDO) {
-    t.skip("dspeak-media-control source is not available locally");
-  }
+  if (!MediaRoomDO) t.skip("media-control source not available");
   const providers = MediaRoomDO.prototype.getAvailableProviderCapabilities.call(
     {
       providerHealth: new Map([

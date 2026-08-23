@@ -1,9 +1,10 @@
 # Fast code checks that must pass on every commit.
 #
-# Runs format and lint on plain pushes and pull requests so style and
-# anti-slop violations are caught in under a minute, long before the
-# expensive desktop-build pipeline (which chains off native-media) gets
-# a chance to download dependencies and fail on the same issues.
+# Runs format, lint, and tests on plain pushes and pull requests so style,
+# anti-slop, and test failures are caught cheaply on a free runner, long
+# before the expensive desktop-build pipeline (which chains off
+# native-media) gets a chance to download dependencies and fail on the
+# same issues.
 
 name: Code Checks
 
@@ -22,9 +23,9 @@ defaults:
 
 jobs:
   checks:
-    name: Format and lint
+    name: Format, lint, and tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -42,3 +43,6 @@ jobs:
 
       - name: Run lint
         run: bun run lint
+
+      - name: Run tests
+        run: bun run test

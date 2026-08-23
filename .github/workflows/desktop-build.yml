@@ -59,9 +59,6 @@ jobs:
           DSPEAK_PUBLIC_ORIGIN: ${{ vars.DSPEAK_PUBLIC_ORIGIN || 'https://dspeak.darelisme.my.id' }}
         run: node scripts/desktop-session-edge-smoke.mjs
 
-      - name: Run root tests
-        run: bun run test
-
   desktop:
     name: Build dSpeak Desktop (${{ matrix.platform }})
     environment: Production

@@ -242,7 +242,7 @@ test("desktop releases publish signed updates and fail when the updater contract
   assert.match(workflow, /DSPEAK_RELEASE_TAG/);
   assert.match(workflow, /DSPEAK_RELEASE_COMMIT/);
   assert.doesNotMatch(workflow, /dspeak-media-control/);
-  assert.match(workflow, /bun run test/);
+  assert.doesNotMatch(workflow, /bun run test/);
   assert.doesNotMatch(workflow, /DSPEAK_TEST_TOKEN|desktop-session-e2e/);
   assert.match(workflow, /\.app\.tar\.gz\.sig/);
   assert.match(workflow, /nsis\/\*\.exe\.sig/);
